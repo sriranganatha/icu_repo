@@ -1,0 +1,1102 @@
+﻿@page
+@model HmsAgents.Web.Pages.IndexModel
+@{
+    ViewData["Title"] = "Agent Pipeline Dashboard";
+}
+
+<div class="container-fluid mt-3">
+    <!-- Header -->
+    <div class="row mb-4">
+        <div class="col">
+            <h2><i class="bi bi-cpu"></i> HMS Multi-Agent Pipeline Dashboard</h2>
+            <p class="text-muted mb-0">Monitor agents building the Hospital Management System in real time.</p>
+        </div>
+        <div class="col-auto d-flex align-items-center gap-2">
+            <span id="connectionBadge" class="badge bg-secondary">Disconnected</span>
+            <button id="btnRunPipeline" class="btn btn-primary" onclick="runPipeline()">
+                <i class="bi bi-play-fill"></i> Run Full Pipeline
+            </button>
+        </div>
+    </div>
+
+    <!-- Configuration Panel -->
+    <div class="card mb-4">
+        <div class="card-header d-flex justify-content-between align-items-center" data-bs-toggle="collapse" data-bs-target="#configPanel" role="button">
+            <span><i class="bi bi-gear"></i> Pipeline Configuration <small class="text-muted ms-2">(click to expand)</small></span>
+            <span class="d-flex gap-2" onclick="event.stopPropagation()">
+                <button class="btn btn-sm btn-outline-success" onclick="saveConfig()" title="Save config to file"><i class="bi bi-save"></i> Save</button>
+                <button class="btn btn-sm btn-outline-info" onclick="loadConfig()" title="Load saved config"><i class="bi bi-folder2-open"></i> Load</button>
+            </span>
+        </div>
+        <div class="collapse show" id="configPanel">
+            <div class="card-body">
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <label class="form-label fw-semibold"><i class="bi bi-folder2-open me-1"></i>Requirements Path</label>
+                        <input type="text" id="inputReqsPath" class="form-control" placeholder="e.g. C:\sri\mywork\icu\docs" />
+                        <small class="text-muted">Folder containing requirement markdown files</small>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label fw-semibold"><i class="bi bi-folder-plus me-1"></i>Output Path</label>
+                        <input type="text" id="inputOutputPath" class="form-control" placeholder="e.g. C:\sri\mywork\icu\src" />
+                        <small class="text-muted">Target folder for generated solution code</small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label fw-semibold"><i class="bi bi-box me-1"></i>Docker Container Name</label>
+                        <input type="text" id="inputContainerName" class="form-control" value="hms-postgres" />
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label fw-semibold"><i class="bi bi-server me-1"></i>DB Hostname</label>
+                        <input type="text" id="inputDbHost" class="form-control" value="localhost" />
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label fw-semibold"><i class="bi bi-hdd-network me-1"></i>DB Port</label>
+                        <input type="number" id="inputDbPort" class="form-control" value="5432" />
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label fw-semibold"><i class="bi bi-person-badge me-1"></i>DB Username</label>
+                        <input type="text" id="inputDbUser" class="form-control" value="hms_admin" />
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label fw-semibold"><i class="bi bi-database me-1"></i>Database Name</label>
+                        <input type="text" id="inputDbName" class="form-control" value="hms_db" />
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label fw-semibold"><i class="bi bi-shield-lock me-1"></i>DB Password</label>
+                        <input type="password" id="inputDbPassword" class="form-control" value="hms_secure_pwd_2026!" />
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label fw-semibold">Solution Namespace</label>
+                        <input type="text" id="inputNamespace" class="form-control" value="Hms" />
+                    </div>
+                    <div class="col-md-6 d-flex align-items-end">
+                        <div class="form-check form-switch me-4">
+                            <input class="form-check-input" type="checkbox" id="chkSpinDocker" checked />
+                            <label class="form-check-label" for="chkSpinDocker">Spin up Docker DB</label>
+                        </div>
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" id="chkExecDdl" checked />
+                            <label class="form-check-label" for="chkExecDdl">Execute DDL</label>
+                        </div>
+                    </div>
+                </div>
+                <!-- Service Port Mapping -->
+                <hr class="my-3" />
+                <div class="d-flex align-items-center mb-2">
+                    <i class="bi bi-diagram-3 me-2 text-primary"></i>
+                    <span class="fw-semibold">Service Port Mapping</span>
+                    <small class="text-muted ms-2">Change ports if another service is already using a port</small>
+                </div>
+                <div class="row g-2">
+                    <div class="col-md-3 col-6">
+                        <div class="input-group input-group-sm">
+                            <span class="input-group-text" style="min-width:95px">Patient</span>
+                            <input type="number" id="portPatient" class="form-control" value="5101" />
+                        </div>
+                    </div>
+                    <div class="col-md-3 col-6">
+                        <div class="input-group input-group-sm">
+                            <span class="input-group-text" style="min-width:95px">Encounter</span>
+                            <input type="number" id="portEncounter" class="form-control" value="5102" />
+                        </div>
+                    </div>
+                    <div class="col-md-3 col-6">
+                        <div class="input-group input-group-sm">
+                            <span class="input-group-text" style="min-width:95px">Inpatient</span>
+                            <input type="number" id="portInpatient" class="form-control" value="5103" />
+                        </div>
+                    </div>
+                    <div class="col-md-3 col-6">
+                        <div class="input-group input-group-sm">
+                            <span class="input-group-text" style="min-width:95px">Emergency</span>
+                            <input type="number" id="portEmergency" class="form-control" value="5104" />
+                        </div>
+                    </div>
+                    <div class="col-md-3 col-6">
+                        <div class="input-group input-group-sm">
+                            <span class="input-group-text" style="min-width:95px">Diagnostics</span>
+                            <input type="number" id="portDiagnostics" class="form-control" value="5105" />
+                        </div>
+                    </div>
+                    <div class="col-md-3 col-6">
+                        <div class="input-group input-group-sm">
+                            <span class="input-group-text" style="min-width:95px">Revenue</span>
+                            <input type="number" id="portRevenue" class="form-control" value="5106" />
+                        </div>
+                    </div>
+                    <div class="col-md-3 col-6">
+                        <div class="input-group input-group-sm">
+                            <span class="input-group-text" style="min-width:95px">Audit</span>
+                            <input type="number" id="portAudit" class="form-control" value="5107" />
+                        </div>
+                    </div>
+                    <div class="col-md-3 col-6">
+                        <div class="input-group input-group-sm">
+                            <span class="input-group-text" style="min-width:95px">AI</span>
+                            <input type="number" id="portAi" class="form-control" value="5108" />
+                        </div>
+                    </div>
+                    <div class="col-md-3 col-6">
+                        <div class="input-group input-group-sm">
+                            <span class="input-group-text" style="min-width:95px">API Gateway</span>
+                            <input type="number" id="portGateway" class="form-control" value="5100" />
+                        </div>
+                    </div>
+                    <div class="col-md-3 col-6">
+                        <div class="input-group input-group-sm">
+                            <span class="input-group-text" style="min-width:95px">Kafka</span>
+                            <input type="number" id="portKafka" class="form-control" value="9092" />
+                        </div>
+                    </div>
+                </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Stats Row -->
+    <div class="row mb-4 g-3">
+        <div class="col-md-3">
+            <div class="card text-bg-primary">
+                <div class="card-body">
+                    <h6 class="card-title">Requirements</h6>
+                    <h2 id="statReqs" class="mb-0">0</h2>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-bg-success">
+                <div class="card-body">
+                    <h6 class="card-title">Artifacts Generated</h6>
+                    <h2 id="statArtifacts" class="mb-0">0</h2>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-bg-warning">
+                <div class="card-body">
+                    <h6 class="card-title">Review Findings</h6>
+                    <h2 id="statFindings" class="mb-0">0</h2>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-bg-info">
+                <div class="card-body">
+                    <h6 class="card-title">Pipeline Time</h6>
+                    <h2 id="statTime" class="mb-0">--</h2>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Agent Cards Grid -->
+    <div class="row mb-4 g-3">
+        <div class="col-md-4 col-lg-3" id="card-RequirementsReader">
+            @await Html.PartialAsync("_AgentCard", new HmsAgents.Web.Pages.AgentCardModel { Name = "Requirements Reader", Icon = "bi-file-earmark-text", AgentKey = "RequirementsReader", Description = "Scans icu/docs for structured requirements" })
+        </div>
+        <div class="col-md-4 col-lg-3" id="card-Database">
+            @await Html.PartialAsync("_AgentCard", new HmsAgents.Web.Pages.AgentCardModel { Name = "Database Agent", Icon = "bi-database", AgentKey = "Database", Description = "Generates EF Core entities, DbContext, repos" })
+        </div>
+        <div class="col-md-4 col-lg-3" id="card-ServiceLayer">
+            @await Html.PartialAsync("_AgentCard", new HmsAgents.Web.Pages.AgentCardModel { Name = "Service Layer Agent", Icon = "bi-layers", AgentKey = "ServiceLayer", Description = "Generates DTOs, service interfaces & impls" })
+        </div>
+        <div class="col-md-4 col-lg-3" id="card-Application">
+            @await Html.PartialAsync("_AgentCard", new HmsAgents.Web.Pages.AgentCardModel { Name = "Application Agent", Icon = "bi-window-stack", AgentKey = "Application", Description = "Generates Razor Pages, ViewModels, layouts" })
+        </div>
+        <div class="col-md-4 col-lg-3" id="card-Integration">
+            @await Html.PartialAsync("_AgentCard", new HmsAgents.Web.Pages.AgentCardModel { Name = "Integration Agent", Icon = "bi-plug", AgentKey = "Integration", Description = "Generates HL7/FHIR adapters, event publisher" })
+        </div>
+        <div class="col-md-4 col-lg-3" id="card-Testing">
+            @await Html.PartialAsync("_AgentCard", new HmsAgents.Web.Pages.AgentCardModel { Name = "Testing Agent", Icon = "bi-check2-circle", AgentKey = "Testing", Description = "Generates unit & integration test stubs" })
+        </div>
+        <div class="col-md-4 col-lg-3" id="card-Review">
+            @await Html.PartialAsync("_AgentCard", new HmsAgents.Web.Pages.AgentCardModel { Name = "Review Agent", Icon = "bi-shield-check", AgentKey = "Review", Description = "Reviews code against requirements & security" })
+        </div>
+        <div class="col-md-4 col-lg-3" id="card-Supervisor">
+            @await Html.PartialAsync("_AgentCard", new HmsAgents.Web.Pages.AgentCardModel { Name = "Supervisor Agent", Icon = "bi-eye", AgentKey = "Supervisor", Description = "Monitors agents, diagnoses failures, remediates" })
+        </div>
+        <div class="col-md-4 col-lg-3" id="card-Orchestrator">
+            @await Html.PartialAsync("_AgentCard", new HmsAgents.Web.Pages.AgentCardModel { Name = "Orchestrator", Icon = "bi-diagram-3", AgentKey = "Orchestrator", Description = "Coordinates pipeline stages sequentially" })
+        </div>
+    </div>
+
+    <!-- NOC Charts Row 1 — Timeline + Event Throughput -->
+    <div class="row mb-4 g-3">
+        <div class="col-lg-8">
+            <div class="card">
+                <div class="card-header"><i class="bi bi-bar-chart-steps"></i> Agent Execution Timeline</div>
+                <div class="card-body" style="height:260px;">
+                    <canvas id="chartTimeline"></canvas>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-4">
+            <div class="card">
+                <div class="card-header"><i class="bi bi-activity"></i> Event Throughput <span class="badge bg-success ms-2" id="epsLabel">0 evt/s</span></div>
+                <div class="card-body" style="height:260px;">
+                    <canvas id="chartThroughput"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- NOC Charts Row 2 — Artifacts by Service + Layer + Severity -->
+    <div class="row mb-4 g-3">
+        <div class="col-lg-4">
+            <div class="card">
+                <div class="card-header"><i class="bi bi-diagram-3"></i> Artifacts by Microservice</div>
+                <div class="card-body d-flex justify-content-center" style="height:280px;">
+                    <canvas id="chartByService"></canvas>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-4">
+            <div class="card">
+                <div class="card-header"><i class="bi bi-stack"></i> Artifacts by Layer</div>
+                <div class="card-body" style="height:280px;">
+                    <canvas id="chartByLayer"></canvas>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-4">
+            <div class="card">
+                <div class="card-header"><i class="bi bi-shield-exclamation"></i> Review Severity Breakdown</div>
+                <div class="card-body d-flex justify-content-center" style="height:280px;">
+                    <canvas id="chartSeverity"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- NOC Row 3 — Agent Health Heatmap + Microservice Dependency -->
+    <div class="row mb-4 g-3">
+        <div class="col-lg-6">
+            <div class="card">
+                <div class="card-header"><i class="bi bi-grid-3x3"></i> Agent Health Status</div>
+                <div class="card-body p-3">
+                    <div id="agentHeatmap" class="d-flex flex-wrap gap-2 justify-content-center" style="min-height:80px;"></div>
+                    <div class="mt-2 d-flex gap-3 justify-content-center" style="font-size:0.75rem;">
+                        <span><span class="badge bg-secondary">&nbsp;</span> Idle</span>
+                        <span><span class="badge bg-primary">&nbsp;</span> Running</span>
+                        <span><span class="badge bg-success">&nbsp;</span> Completed</span>
+                        <span><span class="badge bg-danger">&nbsp;</span> Failed</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-6">
+            <div class="card">
+                <div class="card-header"><i class="bi bi-bezier2"></i> Microservice Event Flow</div>
+                <div class="card-body p-3" style="min-height:120px;">
+                    <div id="serviceFlow" class="d-flex flex-wrap gap-2 justify-content-center align-items-center"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Unit Test Diagnostics Row -->
+    <div class="row mb-4 g-3">
+        <div class="col-lg-4">
+            <div class="card">
+                <div class="card-header"><i class="bi bi-clipboard2-check"></i> Test Outcome Summary
+                    <span class="badge bg-info ms-2" id="testTotalBadge">0 tests</span>
+                </div>
+                <div class="card-body d-flex justify-content-center" style="height:260px;">
+                    <canvas id="chartTestOutcome"></canvas>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-4">
+            <div class="card">
+                <div class="card-header"><i class="bi bi-bar-chart"></i> Tests by Agent</div>
+                <div class="card-body" style="height:260px;">
+                    <canvas id="chartTestsByAgent"></canvas>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-4">
+            <div class="card">
+                <div class="card-header"><i class="bi bi-tags"></i> Tests by Category</div>
+                <div class="card-body" style="height:260px;">
+                    <canvas id="chartTestsByCategory"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Test Diagnostics Detail Table -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <span><i class="bi bi-journal-medical"></i> Test Diagnostics &amp; Remediation</span>
+                    <div class="d-flex gap-2">
+                        <select id="testFilterOutcome" class="form-select form-select-sm" style="width:auto;" onchange="filterTestTable()">
+                            <option value="all">All Outcomes</option>
+                            <option value="0">Passed</option>
+                            <option value="1">Failed</option>
+                            <option value="2">Skipped</option>
+                            <option value="3">Remediated</option>
+                        </select>
+                        <select id="testFilterAgent" class="form-select form-select-sm" style="width:auto;" onchange="filterTestTable()">
+                            <option value="all">All Agents</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="card-body p-0">
+                    <div style="max-height:400px;overflow-y:auto;">
+                        <table class="table table-sm table-striped table-hover mb-0" id="testDiagTable">
+                            <thead class="table-dark sticky-top">
+                                <tr>
+                                    <th style="width:30px;"></th>
+                                    <th>Test Name</th>
+                                    <th>Agent</th>
+                                    <th>Category</th>
+                                    <th>Outcome</th>
+                                    <th>Diagnostic</th>
+                                    <th>Remediation</th>
+                                    <th style="width:50px;">Attempt</th>
+                                </tr>
+                            </thead>
+                            <tbody id="testDiagBody">
+                                <tr><td colspan="8" class="text-center text-muted py-4">Run pipeline to see test diagnostics...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Live Event Log + Findings -->
+    <div class="row mb-4">
+        <div class="col-lg-8">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between">
+                    <span><i class="bi bi-terminal"></i> Live Event Log</span>
+                    <button class="btn btn-sm btn-outline-secondary" onclick="clearLog()">Clear</button>
+                </div>
+                <div class="card-body p-0">
+                    <div id="eventLog" style="height:400px;overflow-y:auto;font-family:monospace;font-size:0.85rem;padding:0.75rem;background:#1e1e1e;color:#d4d4d4;">
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-4">
+            <div class="card">
+                <div class="card-header"><i class="bi bi-exclamation-triangle"></i> Review Findings</div>
+                <div class="card-body p-0">
+                    <div id="findingsPanel" style="height:400px;overflow-y:auto;padding:0.75rem;">
+                        <p class="text-muted text-center mt-5">Run pipeline to see review findings.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/8.0.0/signalr.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+    <script>
+        // ─── NOC Chart State ─────────────────────────────────────────────
+        const AGENTS = ["RequirementsReader","Database","ServiceLayer","Application","Integration","Testing","Review","Supervisor","Orchestrator"];
+        const AGENT_LABELS = ["Reqs Reader","Database","Service","Application","Integration","Testing","Review","Supervisor","Orchestrator"];
+        const SERVICES = ["Patient","Encounter","Inpatient","Emergency","Diagnostics","Revenue","Audit","AI"];
+        const LAYERS = ["Database","Repository","Service","Dto","ViewModel","RazorPage","Integration","Test","Migration","Configuration"];
+        const SVC_COLORS = ["#42a5f5","#66bb6a","#ffa726","#ef5350","#ab47bc","#26c6da","#8d6e63","#78909c"];
+        const LAYER_COLORS = ["#1565c0","#2e7d32","#ef6c00","#c62828","#6a1b9a","#00838f","#4e342e","#37474f","#ad1457","#546e7a"];
+
+        const nocState = {
+            agentTiming: {},       // agentKey → { start, end, elapsed }
+            artifactsByService: {},
+            artifactsByLayer: {},
+            severityCounts: [0,0,0,0,0,0], // Info, Warning, Error, Critical, Security, Compliance
+            throughputLog: [],     // { time, count }
+            eventCount: 0,
+            lastEpsTick: Date.now(),
+            agentStatuses: {}      // agentKey → status enum
+        };
+
+        // ─── Chart: Agent Timeline (horizontal bar) ─────────────────────
+        const ctxTimeline = document.getElementById('chartTimeline').getContext('2d');
+        const chartTimeline = new Chart(ctxTimeline, {
+            type: 'bar',
+            data: {
+                labels: AGENT_LABELS,
+                datasets: [{
+                    label: 'Duration (ms)',
+                    data: new Array(9).fill(0),
+                    backgroundColor: AGENTS.map((_, i) => ['#42a5f5','#66bb6a','#ffa726','#ef5350','#ab47bc','#26c6da','#8d6e63','#e91e63','#78909c'][i]),
+                    borderRadius: 4
+                }]
+            },
+            options: {
+                indexAxis: 'y',
+                responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { display: false },
+                    title: { display: false } },
+                scales: {
+                    x: { title: { display: true, text: 'ms', color: '#888' }, grid: { color: 'rgba(0,0,0,0.05)' } },
+                    y: { grid: { display: false } }
+                }
+            }
+        });
+
+        // ─── Chart: Event Throughput (real-time line) ────────────────────
+        const ctxThroughput = document.getElementById('chartThroughput').getContext('2d');
+        const chartThroughput = new Chart(ctxThroughput, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [{
+                    label: 'Events/sec',
+                    data: [],
+                    borderColor: '#4caf50',
+                    backgroundColor: 'rgba(76,175,80,0.1)',
+                    fill: true, tension: 0.4, pointRadius: 0,
+                    borderWidth: 2
+                }]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                animation: { duration: 300 },
+                plugins: { legend: { display: false } },
+                scales: {
+                    x: { display: true, grid: { display: false }, ticks: { maxTicksLimit: 8, font: { size: 10 } } },
+                    y: { beginAtZero: true, grid: { color: 'rgba(0,0,0,0.05)' }, title: { display: true, text: 'evt/s', color: '#888' } }
+                }
+            }
+        });
+
+        // ─── Chart: Artifacts by Microservice (doughnut) ─────────────────
+        const ctxByService = document.getElementById('chartByService').getContext('2d');
+        const chartByService = new Chart(ctxByService, {
+            type: 'doughnut',
+            data: {
+                labels: SERVICES,
+                datasets: [{ data: new Array(8).fill(0), backgroundColor: SVC_COLORS, borderWidth: 0 }]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                cutout: '55%',
+                plugins: {
+                    legend: { position: 'right', labels: { boxWidth: 12, font: { size: 11 } } }
+                }
+            }
+        });
+
+        // ─── Chart: Artifacts by Layer (bar) ─────────────────────────────
+        const ctxByLayer = document.getElementById('chartByLayer').getContext('2d');
+        const chartByLayer = new Chart(ctxByLayer, {
+            type: 'bar',
+            data: {
+                labels: LAYERS,
+                datasets: [{
+                    label: 'Count',
+                    data: new Array(10).fill(0),
+                    backgroundColor: LAYER_COLORS,
+                    borderRadius: 3
+                }]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                    x: { grid: { display: false }, ticks: { font: { size: 10 }, maxRotation: 45 } },
+                    y: { beginAtZero: true, grid: { color: 'rgba(0,0,0,0.05)' }, ticks: { stepSize: 1 } }
+                }
+            }
+        });
+
+        // ─── Chart: Review Severity (polar area) ────────────────────────
+        const ctxSeverity = document.getElementById('chartSeverity').getContext('2d');
+        const chartSeverity = new Chart(ctxSeverity, {
+            type: 'polarArea',
+            data: {
+                labels: ['Info','Warning','Error','Critical','Security','Compliance'],
+                datasets: [{
+                    data: [0,0,0,0,0,0],
+                    backgroundColor: ['rgba(33,150,243,0.6)','rgba(255,193,7,0.6)','rgba(244,67,54,0.6)','rgba(183,28,28,0.7)','rgba(156,39,176,0.6)','rgba(255,152,0,0.6)'],
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { position: 'right', labels: { boxWidth: 12, font: { size: 11 } } } },
+                scales: { r: { beginAtZero: true, ticks: { stepSize: 1 } } }
+            }
+        });
+
+        // ─── Agent Heatmap & Service Flow init ──────────────────────────
+        function initHeatmap() {
+            const hm = document.getElementById('agentHeatmap');
+            hm.innerHTML = AGENTS.map((a, i) => `
+                <div id="hm-${a}" class="text-center px-3 py-2 rounded-3" style="min-width:100px;background:#dee2e6;transition:all 0.3s;">
+                    <div style="font-size:1.4rem;"><i class="bi ${['bi-file-earmark-text','bi-database','bi-layers','bi-window-stack','bi-plug','bi-check2-circle','bi-shield-check','bi-eye','bi-diagram-3'][i]}"></i></div>
+                    <div style="font-size:0.7rem;font-weight:600;">${AGENT_LABELS[i]}</div>
+                    <div style="font-size:0.65rem;" id="hm-time-${a}">--</div>
+                </div>
+            `).join('');
+        }
+
+        function initServiceFlow() {
+            const sf = document.getElementById('serviceFlow');
+            const svcDefs = [
+                { name: 'Patient', port: 5101, icon: 'bi-person' },
+                { name: 'Encounter', port: 5102, icon: 'bi-calendar-event' },
+                { name: 'Inpatient', port: 5103, icon: 'bi-building' },
+                { name: 'Emergency', port: 5104, icon: 'bi-exclamation-diamond' },
+                { name: 'Diagnostics', port: 5105, icon: 'bi-clipboard2-pulse' },
+                { name: 'Revenue', port: 5106, icon: 'bi-cash-stack' },
+                { name: 'Audit', port: 5107, icon: 'bi-journal-text' },
+                { name: 'AI', port: 5108, icon: 'bi-robot' }
+            ];
+            sf.innerHTML =
+                '<div class="text-center px-2 py-2 rounded-3 border border-2 border-warning" style="min-width:80px;background:#fff8e1;">' +
+                '  <i class="bi bi-hdd-rack fs-5 text-warning"></i><div style="font-size:0.65rem;font-weight:700;">Kafka</div>' +
+                '  <div style="font-size:0.6rem;color:#888;">Event Bus</div></div>' +
+                '<i class="bi bi-arrow-left-right text-muted mx-1"></i>' +
+                svcDefs.map((s, i) => `
+                    <div id="sf-${s.name}" class="text-center px-2 py-2 rounded-3 border" style="min-width:68px;background:#f5f5f5;transition:all 0.3s;">
+                        <i class="bi ${s.icon}" style="font-size:1.1rem;color:${SVC_COLORS[i]}"></i>
+                        <div style="font-size:0.6rem;font-weight:600;">${s.name}</div>
+                        <div style="font-size:0.55rem;color:#999;">:${s.port}</div>
+                    </div>
+                `).join('<i class="bi bi-arrow-left-right text-muted" style="font-size:0.7rem;"></i>');
+        }
+
+        initHeatmap();
+        initServiceFlow();
+
+        // ─── NOC Update Functions ───────────────────────────────────────
+        function nocUpdateAgentTiming(agentKey, status, elapsedMs) {
+            const idx = AGENTS.indexOf(getAgentName(agentKey));
+            if (idx < 0) return;
+            const name = getAgentName(agentKey);
+
+            nocState.agentStatuses[name] = status;
+
+            if (status === 1) { // Running
+                nocState.agentTiming[name] = { start: Date.now(), end: null, elapsed: 0 };
+            }
+            if (status === 3 || status === 4) { // Completed or Failed
+                if (nocState.agentTiming[name]) {
+                    nocState.agentTiming[name].end = Date.now();
+                    nocState.agentTiming[name].elapsed = elapsedMs;
+                }
+                chartTimeline.data.datasets[0].data[idx] = elapsedMs;
+                chartTimeline.update('none');
+            }
+
+            // Heatmap
+            const hmEl = document.getElementById(`hm-${name}`);
+            if (hmEl) {
+                const colors = { 0: '#dee2e6', 1: '#42a5f5', 2: '#90caf9', 3: '#66bb6a', 4: '#ef5350' };
+                const textColors = { 0: '#333', 1: '#fff', 2: '#333', 3: '#fff', 4: '#fff' };
+                hmEl.style.background = colors[status] || '#dee2e6';
+                hmEl.style.color = textColors[status] || '#333';
+                const timeEl = document.getElementById(`hm-time-${name}`);
+                if (timeEl && elapsedMs > 0) timeEl.textContent = elapsedMs.toFixed(0) + 'ms';
+            }
+        }
+
+        function nocTrackArtifact(agentKey, artifactCount) {
+            // Map agent → likely service contributions (heuristic from path)
+            const agentName = getAgentName(agentKey);
+            if (!nocState.artifactsByService[agentName])
+                nocState.artifactsByService[agentName] = artifactCount;
+            else
+                nocState.artifactsByService[agentName] = artifactCount;
+        }
+
+        function nocTrackEvent() {
+            nocState.eventCount++;
+        }
+
+        function nocUpdateServiceArtifacts(data) {
+            // data.artifacts array from PipelineComplete
+            if (!data.artifacts) return;
+            const svcCounts = {};
+            const layerCounts = {};
+            SERVICES.forEach(s => svcCounts[s] = 0);
+            LAYERS.forEach(l => layerCounts[l] = 0);
+
+            data.artifacts.forEach(a => {
+                // Map by path prefix to service
+                const path = a.relativePath || '';
+                SERVICES.forEach((svc, i) => {
+                    if (path.toLowerCase().includes(svc.toLowerCase())) svcCounts[svc]++;
+                });
+
+                // Map by layer enum
+                const layerName = LAYERS[a.layer] || '';
+                if (layerName) layerCounts[layerName] = (layerCounts[layerName] || 0) + 1;
+            });
+
+            chartByService.data.datasets[0].data = SERVICES.map(s => svcCounts[s]);
+            chartByService.update();
+
+            chartByLayer.data.datasets[0].data = LAYERS.map(l => layerCounts[l] || 0);
+            chartByLayer.update();
+
+            // Light up service flow nodes
+            SERVICES.forEach(svc => {
+                const el = document.getElementById(`sf-${svc}`);
+                if (el && svcCounts[svc] > 0) {
+                    el.style.background = '#e8f5e9';
+                    el.style.borderColor = '#4caf50';
+                }
+            });
+        }
+
+        function nocUpdateSeverity(findings) {
+            if (!findings || !findings.length) return;
+            const counts = [0,0,0,0,0,0];
+            findings.forEach(f => { if (f.severity >= 0 && f.severity <= 5) counts[f.severity]++; });
+            chartSeverity.data.datasets[0].data = counts;
+            chartSeverity.update();
+        }
+
+        // Throughput ticker — every 2s
+        setInterval(() => {
+            const now = Date.now();
+            const dt = (now - nocState.lastEpsTick) / 1000;
+            const eps = dt > 0 ? (nocState.eventCount / dt) : 0;
+            nocState.eventCount = 0;
+            nocState.lastEpsTick = now;
+
+            const label = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            const ds = chartThroughput.data;
+            ds.labels.push(label);
+            ds.datasets[0].data.push(Math.round(eps * 10) / 10);
+            if (ds.labels.length > 30) { ds.labels.shift(); ds.datasets[0].data.shift(); }
+            chartThroughput.update('none');
+
+            document.getElementById('epsLabel').textContent = eps.toFixed(1) + ' evt/s';
+        }, 2000);
+
+        // ─── Chart: Test Outcome (doughnut) ────────────────────────────
+        const ctxTestOutcome = document.getElementById('chartTestOutcome').getContext('2d');
+        const chartTestOutcome = new Chart(ctxTestOutcome, {
+            type: 'doughnut',
+            data: {
+                labels: ['Passed', 'Failed', 'Skipped', 'Remediated'],
+                datasets: [{
+                    data: [0, 0, 0, 0],
+                    backgroundColor: ['#4caf50', '#f44336', '#9e9e9e', '#ff9800'],
+                    borderWidth: 2
+                }]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                cutout: '50%',
+                plugins: {
+                    legend: { position: 'right', labels: { boxWidth: 12, font: { size: 11 } } }
+                }
+            }
+        });
+
+        // ─── Chart: Tests by Agent (stacked bar) ────────────────────────
+        const ctxTestsByAgent = document.getElementById('chartTestsByAgent').getContext('2d');
+        const chartTestsByAgent = new Chart(ctxTestsByAgent, {
+            type: 'bar',
+            data: {
+                labels: [],
+                datasets: [
+                    { label: 'Passed', data: [], backgroundColor: '#4caf50', borderRadius: 2 },
+                    { label: 'Failed', data: [], backgroundColor: '#f44336', borderRadius: 2 },
+                    { label: 'Remediated', data: [], backgroundColor: '#ff9800', borderRadius: 2 },
+                    { label: 'Skipped', data: [], backgroundColor: '#9e9e9e', borderRadius: 2 }
+                ]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { position: 'top', labels: { boxWidth: 10, font: { size: 10 } } } },
+                scales: {
+                    x: { stacked: true, grid: { display: false }, ticks: { font: { size: 10 } } },
+                    y: { stacked: true, beginAtZero: true, ticks: { stepSize: 1 } }
+                }
+            }
+        });
+
+        // ─── Chart: Tests by Category (horizontal bar) ──────────────────
+        const ctxTestsByCategory = document.getElementById('chartTestsByCategory').getContext('2d');
+        const chartTestsByCategory = new Chart(ctxTestsByCategory, {
+            type: 'bar',
+            data: {
+                labels: [],
+                datasets: [
+                    { label: 'Passed', data: [], backgroundColor: '#4caf50' },
+                    { label: 'Failed', data: [], backgroundColor: '#f44336' },
+                    { label: 'Remediated', data: [], backgroundColor: '#ff9800' }
+                ]
+            },
+            options: {
+                indexAxis: 'y',
+                responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { position: 'top', labels: { boxWidth: 10, font: { size: 10 } } } },
+                scales: {
+                    x: { stacked: true, beginAtZero: true, ticks: { stepSize: 1 } },
+                    y: { stacked: true, grid: { display: false }, ticks: { font: { size: 10 } } }
+                }
+            }
+        });
+
+        // ─── Test Diagnostics State & Functions ─────────────────────────
+        let allTestDiagnostics = [];
+
+        function nocUpdateTestDiagnostics(diagnostics) {
+            if (!diagnostics || !diagnostics.length) return;
+            allTestDiagnostics = diagnostics;
+
+            // Outcome summary
+            const outcomes = [0, 0, 0, 0]; // Passed, Failed, Skipped, Remediated
+            diagnostics.forEach(d => { if (d.outcome >= 0 && d.outcome <= 3) outcomes[d.outcome]++; });
+            chartTestOutcome.data.datasets[0].data = outcomes;
+            chartTestOutcome.update();
+            document.getElementById('testTotalBadge').textContent = `${diagnostics.length} tests`;
+
+            // Tests by agent
+            const agentMap = {};
+            diagnostics.forEach(d => {
+                if (!agentMap[d.agentUnderTest]) agentMap[d.agentUnderTest] = [0,0,0,0];
+                if (d.outcome >= 0 && d.outcome <= 3) agentMap[d.agentUnderTest][d.outcome]++;
+            });
+            const agentNames = Object.keys(agentMap);
+            chartTestsByAgent.data.labels = agentNames;
+            chartTestsByAgent.data.datasets[0].data = agentNames.map(a => agentMap[a][0]);
+            chartTestsByAgent.data.datasets[1].data = agentNames.map(a => agentMap[a][1]);
+            chartTestsByAgent.data.datasets[2].data = agentNames.map(a => agentMap[a][3]);
+            chartTestsByAgent.data.datasets[3].data = agentNames.map(a => agentMap[a][2]);
+            chartTestsByAgent.update();
+
+            // Tests by category
+            const catMap = {};
+            diagnostics.forEach(d => {
+                if (!catMap[d.category]) catMap[d.category] = [0,0,0];
+                if (d.outcome === 0) catMap[d.category][0]++;
+                else if (d.outcome === 1) catMap[d.category][1]++;
+                else if (d.outcome === 3) catMap[d.category][2]++;
+            });
+            const cats = Object.keys(catMap);
+            chartTestsByCategory.data.labels = cats;
+            chartTestsByCategory.data.datasets[0].data = cats.map(c => catMap[c][0]);
+            chartTestsByCategory.data.datasets[1].data = cats.map(c => catMap[c][1]);
+            chartTestsByCategory.data.datasets[2].data = cats.map(c => catMap[c][2]);
+            chartTestsByCategory.update();
+
+            // Populate filter dropdown
+            const agentFilter = document.getElementById('testFilterAgent');
+            agentFilter.innerHTML = '<option value="all">All Agents</option>' +
+                agentNames.map(a => `<option value="${a}">${a}</option>`).join('');
+
+            // Render table
+            renderTestTable(diagnostics);
+        }
+
+        function renderTestTable(diagnostics) {
+            const tbody = document.getElementById('testDiagBody');
+            const outcomeIcons = ['<i class="bi bi-check-circle-fill text-success"></i>',
+                                  '<i class="bi bi-x-circle-fill text-danger"></i>',
+                                  '<i class="bi bi-dash-circle text-secondary"></i>',
+                                  '<i class="bi bi-arrow-repeat text-warning"></i>'];
+            const outcomeLabels = ['Passed','Failed','Skipped','Remediated'];
+            const outcomeBadges = ['bg-success','bg-danger','bg-secondary','bg-warning text-dark'];
+
+            tbody.innerHTML = diagnostics.map(d => {
+                const oc = d.outcome >= 0 && d.outcome <= 3 ? d.outcome : 2;
+                return `<tr class="${oc === 1 ? 'table-danger' : oc === 3 ? 'table-warning' : ''}">
+                    <td>${outcomeIcons[oc]}</td>
+                    <td style="font-size:0.8rem;font-family:monospace;">${escapeHtml(d.testName)}</td>
+                    <td><span class="badge bg-primary" style="font-size:0.7rem;">${escapeHtml(d.agentUnderTest)}</span></td>
+                    <td><span class="badge bg-info text-dark" style="font-size:0.65rem;">${escapeHtml(d.category)}</span></td>
+                    <td><span class="badge ${outcomeBadges[oc]}" style="font-size:0.7rem;">${outcomeLabels[oc]}</span></td>
+                    <td style="font-size:0.78rem;">${escapeHtml(d.diagnostic)}</td>
+                    <td style="font-size:0.78rem;${oc === 1 ? 'color:#d32f2f;font-weight:600;' : oc === 3 ? 'color:#e65100;font-weight:600;' : ''}">${escapeHtml(d.remediation)}</td>
+                    <td class="text-center">${d.attemptNumber > 1 ? `<span class="badge bg-warning text-dark">${d.attemptNumber}</span>` : '1'}</td>
+                </tr>`;
+            }).join('');
+        }
+
+        function filterTestTable() {
+            const outcomeFilter = document.getElementById('testFilterOutcome').value;
+            const agentFilter = document.getElementById('testFilterAgent').value;
+            let filtered = allTestDiagnostics;
+            if (outcomeFilter !== 'all') filtered = filtered.filter(d => d.outcome === parseInt(outcomeFilter));
+            if (agentFilter !== 'all') filtered = filtered.filter(d => d.agentUnderTest === agentFilter);
+            renderTestTable(filtered);
+        }
+
+        function escapeHtml(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+
+        // ─── SignalR ────────────────────────────────────────────────────
+        const connection = new signalR.HubConnectionBuilder()
+            .withUrl("/hubs/pipeline")
+            .withAutomaticReconnect()
+            .build();
+
+        connection.on("Connected", msg => {
+            document.getElementById("connectionBadge").className = "badge bg-success";
+            document.getElementById("connectionBadge").textContent = "Connected";
+            appendLog("system", msg);
+        });
+
+        connection.on("PipelineEvent", evt => {
+            updateAgentCard(evt.agent, evt.status, evt.message, evt.artifactCount, evt.findingCount, evt.elapsedMs);
+            appendLog(getStatusClass(evt.status), `[${getAgentName(evt.agent)}] ${evt.message} (${evt.elapsedMs.toFixed(0)}ms)${evt.retryAttempt > 0 ? ' [retry #' + evt.retryAttempt + ']' : ''}`);
+
+            // NOC updates
+            nocTrackEvent();
+            nocUpdateAgentTiming(evt.agent, evt.status, evt.elapsedMs);
+            nocTrackArtifact(evt.agent, evt.artifactCount);
+
+            // Inline test diagnostics from Supervisor events
+            if (evt.testDiagnostics && evt.testDiagnostics.length > 0) {
+                nocUpdateTestDiagnostics(evt.testDiagnostics);
+                appendLog('system', `[Supervisor] ${evt.testDiagnostics.length} test diagnostics received`);
+            }
+        });
+
+        connection.on("PipelineComplete", data => {
+            document.getElementById("statReqs").textContent = data.requirementCount;
+            document.getElementById("statArtifacts").textContent = data.artifactCount;
+            document.getElementById("statFindings").textContent = data.findingCount;
+            document.getElementById("statTime").textContent = data.durationMs.toFixed(0) + "ms";
+            appendLog("success", `Pipeline complete: ${data.artifactCount} artifacts, ${data.findingCount} findings, ${data.testDiagnosticCount || 0} tests`);
+            document.getElementById("btnRunPipeline").disabled = false;
+            if (data.findings && data.findings.length > 0) {
+                renderFindings(data.findings);
+                nocUpdateSeverity(data.findings);
+            }
+            if (data.artifacts) nocUpdateServiceArtifacts(data);
+            if (data.testDiagnostics && data.testDiagnostics.length > 0) {
+                nocUpdateTestDiagnostics(data.testDiagnostics);
+            }
+
+            // Final: update layer chart from cumulative agent artifact counts
+            updateLayerChartFromAgents();
+        });
+
+        connection.onreconnecting(() => {
+            document.getElementById("connectionBadge").className = "badge bg-warning";
+            document.getElementById("connectionBadge").textContent = "Reconnecting...";
+        });
+        connection.onreconnected(() => {
+            document.getElementById("connectionBadge").className = "badge bg-success";
+            document.getElementById("connectionBadge").textContent = "Connected";
+        });
+        connection.start().catch(err => appendLog("error", "Connection failed: " + err));
+
+        // ─── Config Save / Load ─────────────────────────────────────────
+        const CONFIG_FIELDS = [
+            'inputReqsPath', 'inputOutputPath', 'inputNamespace',
+            'inputContainerName', 'inputDbHost', 'inputDbPort', 'inputDbUser',
+            'inputDbName', 'inputDbPassword',
+            'portPatient', 'portEncounter', 'portInpatient', 'portEmergency',
+            'portDiagnostics', 'portRevenue', 'portAudit', 'portAi',
+            'portGateway', 'portKafka'
+        ];
+        const CONFIG_CHECKS = ['chkSpinDocker', 'chkExecDdl'];
+
+        async function saveConfig() {
+            const cfg = {};
+            CONFIG_FIELDS.forEach(id => { cfg[id] = document.getElementById(id)?.value ?? ''; });
+            CONFIG_CHECKS.forEach(id => { cfg[id] = document.getElementById(id)?.checked ?? false; });
+            try {
+                const res = await fetch('/api/pipeline/config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(cfg)
+                });
+                if (res.ok) appendLog('system', 'Configuration saved.');
+                else appendLog('error', 'Failed to save config: ' + res.statusText);
+            } catch (e) { appendLog('error', 'Save config error: ' + e.message); }
+        }
+
+        async function loadConfig() {
+            try {
+                const res = await fetch('/api/pipeline/config');
+                if (!res.ok) { appendLog('error', 'No saved config found.'); return; }
+                const cfg = await res.json();
+                if (!cfg || Object.keys(cfg).length === 0) { appendLog('system', 'No saved configuration found.'); return; }
+                CONFIG_FIELDS.forEach(id => {
+                    const el = document.getElementById(id);
+                    if (el && cfg[id] !== undefined) el.value = cfg[id];
+                });
+                CONFIG_CHECKS.forEach(id => {
+                    const el = document.getElementById(id);
+                    if (el && cfg[id] !== undefined) el.checked = cfg[id];
+                });
+                appendLog('system', 'Configuration loaded from saved file.');
+            } catch (e) { appendLog('error', 'Load config error: ' + e.message); }
+        }
+
+        // Auto-load config on page start
+        loadConfig();
+
+        // ─── Pipeline + Card logic ──────────────────────────────────────
+        async function runPipeline() {
+            document.getElementById("btnRunPipeline").disabled = true;
+            resetCards();
+            nocResetCharts();
+            clearLog();
+
+            const reqsPath = document.getElementById('inputReqsPath').value.trim();
+            const outputPath = document.getElementById('inputOutputPath').value.trim();
+            if (!reqsPath || !outputPath) {
+                appendLog('error', 'Requirements Path and Output Path are required.');
+                document.getElementById('btnRunPipeline').disabled = false;
+                return;
+            }
+
+            const body = {
+                requirementsPath: reqsPath,
+                outputPath: outputPath,
+                solutionNamespace: document.getElementById('inputNamespace').value || 'Hms',
+                dockerContainerName: document.getElementById('inputContainerName').value || 'hms-postgres',
+                dbHost: document.getElementById('inputDbHost').value || 'localhost',
+                dbPort: parseInt(document.getElementById('inputDbPort').value) || 5432,
+                dbUser: document.getElementById('inputDbUser').value || 'hms_admin',
+                dbName: document.getElementById('inputDbName').value || 'hms_db',
+                dbPassword: document.getElementById('inputDbPassword').value || 'hms_secure_pwd_2026!',
+                spinUpDocker: document.getElementById('chkSpinDocker').checked,
+                executeDdl: document.getElementById('chkExecDdl').checked,
+                servicePorts: {
+                    patient: parseInt(document.getElementById('portPatient').value) || 5101,
+                    encounter: parseInt(document.getElementById('portEncounter').value) || 5102,
+                    inpatient: parseInt(document.getElementById('portInpatient').value) || 5103,
+                    emergency: parseInt(document.getElementById('portEmergency').value) || 5104,
+                    diagnostics: parseInt(document.getElementById('portDiagnostics').value) || 5105,
+                    revenue: parseInt(document.getElementById('portRevenue').value) || 5106,
+                    audit: parseInt(document.getElementById('portAudit').value) || 5107,
+                    ai: parseInt(document.getElementById('portAi').value) || 5108,
+                    gateway: parseInt(document.getElementById('portGateway').value) || 5100,
+                    kafka: parseInt(document.getElementById('portKafka').value) || 9092
+                }
+            };
+
+            appendLog('system', `Starting pipeline — reqs: ${body.requirementsPath}, output: ${body.outputPath}`);
+            if (body.spinUpDocker) appendLog('system', `Docker: ${body.dockerContainerName} \u2014 ${body.dbUser}@@${body.dbHost}:${body.dbPort}/${body.dbName}`);
+
+            try {
+                const res = await fetch('/api/pipeline/run', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+                if (!res.ok) appendLog('error', 'Pipeline trigger failed: ' + res.statusText);
+            } catch (e) {
+                appendLog('error', 'Request failed: ' + e.message);
+                document.getElementById('btnRunPipeline').disabled = false;
+            }
+        }
+
+        function updateAgentCard(agentKey, status, message, artifacts, findings, elapsed) {
+            const agentName = getAgentName(agentKey);
+            const card = document.querySelector(`#card-${agentName}`);
+            if (!card) return;
+            const statusBadge = card.querySelector(".agent-status");
+            const artifactSpan = card.querySelector(".agent-artifacts");
+            const messageSpan = card.querySelector(".agent-message");
+            const progressBar = card.querySelector(".progress-bar");
+            if (statusBadge) { statusBadge.className = `badge agent-status ${getStatusBadgeClass(status)}`; statusBadge.textContent = getStatusText(status); }
+            if (artifactSpan) artifactSpan.textContent = artifacts;
+            if (messageSpan) messageSpan.textContent = message;
+            if (progressBar) { progressBar.style.width = status >= 3 ? "100%" : status >= 1 ? "50%" : "0%"; progressBar.className = `progress-bar ${getProgressClass(status)}`; }
+        }
+
+        function resetCards() {
+            document.querySelectorAll(".agent-status").forEach(el => { el.className = "badge agent-status bg-secondary"; el.textContent = "Idle"; });
+            document.querySelectorAll(".agent-artifacts").forEach(el => el.textContent = "0");
+            document.querySelectorAll(".agent-message").forEach(el => el.textContent = "Waiting...");
+            document.querySelectorAll(".progress-bar").forEach(el => el.style.width = "0%");
+            ["statReqs","statArtifacts","statFindings"].forEach(id => document.getElementById(id).textContent = "0");
+            document.getElementById("statTime").textContent = "--";
+            document.getElementById("findingsPanel").innerHTML = '<p class="text-muted text-center mt-5">Running...</p>';
+        }
+
+        function nocResetCharts() {
+            chartTimeline.data.datasets[0].data = new Array(9).fill(0);
+            chartTimeline.update('none');
+            chartByService.data.datasets[0].data = new Array(8).fill(0);
+            chartByService.update('none');
+            chartByLayer.data.datasets[0].data = new Array(10).fill(0);
+            chartByLayer.update('none');
+            chartSeverity.data.datasets[0].data = [0,0,0,0,0,0];
+            chartSeverity.update('none');
+
+            // Reset test charts
+            chartTestOutcome.data.datasets[0].data = [0,0,0,0];
+            chartTestOutcome.update('none');
+            chartTestsByAgent.data.labels = [];
+            chartTestsByAgent.data.datasets.forEach(ds => ds.data = []);
+            chartTestsByAgent.update('none');
+            chartTestsByCategory.data.labels = [];
+            chartTestsByCategory.data.datasets.forEach(ds => ds.data = []);
+            chartTestsByCategory.update('none');
+            allTestDiagnostics = [];
+            document.getElementById('testDiagBody').innerHTML = '<tr><td colspan="8" class="text-center text-muted py-4">Running...</td></tr>';
+            document.getElementById('testTotalBadge').textContent = '0 tests';
+
+            nocState.agentTiming = {};
+            nocState.artifactsByService = {};
+            nocState.artifactsByLayer = {};
+            nocState.severityCounts = [0,0,0,0,0,0];
+            nocState.agentStatuses = {};
+            initHeatmap();
+            // Reset service flow nodes
+            SERVICES.forEach(svc => {
+                const el = document.getElementById(`sf-${svc}`);
+                if (el) { el.style.background = '#f5f5f5'; el.style.borderColor = '#dee2e6'; }
+            });
+        }
+
+        function updateLayerChartFromAgents() {
+            // Use agent-to-layer mapping heuristic
+            const agentLayerMap = {
+                'Database': [0,1,8],       // Database, Repository, Migration
+                'ServiceLayer': [2,3,6],   // Service, Dto, Integration
+                'Application': [5,9],      // RazorPage, Configuration
+                'Integration': [6],        // Integration
+                'Testing': [7],            // Test
+                'Review': []
+            };
+            const layerData = new Array(10).fill(0);
+            Object.entries(nocState.artifactsByService).forEach(([agent, count]) => {
+                const layers = agentLayerMap[agent] || [];
+                if (layers.length > 0) {
+                    const per = Math.ceil(count / layers.length);
+                    layers.forEach(li => layerData[li] += per);
+                }
+            });
+            chartByLayer.data.datasets[0].data = layerData;
+            chartByLayer.update();
+        }
+
+        // ─── Utilities ──────────────────────────────────────────────────
+        function appendLog(cls, msg) {
+            const log = document.getElementById("eventLog");
+            const ts = new Date().toLocaleTimeString();
+            const colors = { system: "#569cd6", success: "#4ec9b0", error: "#f44747", warning: "#dcdcaa" };
+            log.innerHTML += `<div style="color:${colors[cls] || '#d4d4d4'}">[${ts}] ${msg}</div>`;
+            log.scrollTop = log.scrollHeight;
+        }
+        function clearLog() { document.getElementById("eventLog").innerHTML = ""; }
+
+        function renderFindings(findings) {
+            const panel = document.getElementById("findingsPanel");
+            panel.innerHTML = findings.map(f => {
+                const sev = f.severity >= 4 ? "danger" : f.severity >= 3 ? "warning" : "info";
+                return `<div class="alert alert-${sev} py-1 px-2 mb-1" style="font-size:0.8rem"><strong>${f.category}</strong>: ${f.message}${f.filePath ? `<br/><small class="text-muted">${f.filePath}</small>` : ""}</div>`;
+            }).join("");
+        }
+
+        function getAgentName(k) { const n=["Orchestrator","RequirementsReader","Database","ServiceLayer","Application","Integration","Review","Testing","Supervisor"]; return typeof k==="number"?n[k]||k:k; }
+        function getStatusText(s) { return ["Idle","Running","Waiting","Completed","Failed","Review Pending"][s]||s; }
+        function getStatusClass(s) { return ["system","warning","system","success","error","warning"][s]||"system"; }
+        function getStatusBadgeClass(s) { return ["bg-secondary","bg-primary","bg-info","bg-success","bg-danger","bg-warning"][s]||"bg-secondary"; }
+        function getProgressClass(s) { return ["","bg-primary progress-bar-striped progress-bar-animated","bg-info","bg-success","bg-danger","bg-warning"][s]||""; }
+    </script>
+}

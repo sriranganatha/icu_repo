@@ -1,0 +1,11 @@
+using Hms.Services.Dtos.Clinical;
+
+namespace Hms.Services.Clinical;
+
+public interface IEncounterService
+{
+    Task<EncounterDto?> GetByIdAsync(string id, CancellationToken ct = default);
+    Task<List<EncounterDto>> ListAsync(int skip, int take, CancellationToken ct = default);
+    Task<EncounterDto> CreateAsync(CreateEncounterRequest request, CancellationToken ct = default);
+    Task<EncounterDto> UpdateAsync(UpdateEncounterRequest request, CancellationToken ct = default);
+}

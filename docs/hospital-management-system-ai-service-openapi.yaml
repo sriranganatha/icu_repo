@@ -1,0 +1,533 @@
+openapi: 3.1.0
+info:
+  title: Hospital Management System AI Service API
+  version: 1.0.0
+  description: >-
+    Governed AI service contracts for diagnostic support, treatment recommendation,
+    care-plan drafting, and automation proposals. All endpoints are advisory or
+    approval-gated and must operate within tenant, region, and clinical safety boundaries.
+servers:
+  - url: https://api.example-hms.com
+tags:
+  - name: AI Copilot
+  - name: AI Governance
+security:
+  - bearerAuth: []
+paths:
+  /api/v1/ai/differential-support:
+    post:
+      tags: [AI Copilot]
+      summary: Generate clinician-facing differential diagnosis support
+      operationId: createDifferentialSupport
+      parameters:
+        - $ref: '#/components/parameters/XTenantId'
+        - $ref: '#/components/parameters/XRegionId'
+        - $ref: '#/components/parameters/XFacilityId'
+        - $ref: '#/components/parameters/XCorrelationId'
+        - $ref: '#/components/parameters/XClientChannel'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DifferentialSupportRequest'
+      responses:
+        '202':
+          description: Differential support generated for clinician review
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DifferentialSupportResponse'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '403':
+          $ref: '#/components/responses/AuthorizationError'
+  /api/v1/ai/treatment-recommendations:
+    post:
+      tags: [AI Copilot]
+      summary: Generate treatment and management recommendations
+      operationId: createTreatmentRecommendation
+      parameters:
+        - $ref: '#/components/parameters/XTenantId'
+        - $ref: '#/components/parameters/XRegionId'
+        - $ref: '#/components/parameters/XFacilityId'
+        - $ref: '#/components/parameters/XCorrelationId'
+        - $ref: '#/components/parameters/XClientChannel'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TreatmentRecommendationRequest'
+      responses:
+        '202':
+          description: Recommendation package created for review
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TreatmentRecommendationResponse'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '403':
+          $ref: '#/components/responses/AuthorizationError'
+  /api/v1/ai/care-plan-drafts:
+    post:
+      tags: [AI Copilot]
+      summary: Generate a draft care plan for clinician or multidisciplinary review
+      operationId: createCarePlanDraft
+      parameters:
+        - $ref: '#/components/parameters/XTenantId'
+        - $ref: '#/components/parameters/XRegionId'
+        - $ref: '#/components/parameters/XFacilityId'
+        - $ref: '#/components/parameters/XCorrelationId'
+        - $ref: '#/components/parameters/XClientChannel'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CarePlanDraftRequest'
+      responses:
+        '202':
+          description: Draft care plan created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CarePlanDraftResponse'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '403':
+          $ref: '#/components/responses/AuthorizationError'
+  /api/v1/ai/automation-proposals:
+    post:
+      tags: [AI Copilot]
+      summary: Create a guarded automation proposal for workflow execution
+      operationId: createAutomationProposal
+      parameters:
+        - $ref: '#/components/parameters/XTenantId'
+        - $ref: '#/components/parameters/XRegionId'
+        - $ref: '#/components/parameters/XFacilityId'
+        - $ref: '#/components/parameters/XCorrelationId'
+        - $ref: '#/components/parameters/XClientChannel'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AutomationProposalRequest'
+      responses:
+        '202':
+          description: Automation proposal created pending review or execution policy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AutomationProposalResponse'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '403':
+          $ref: '#/components/responses/AuthorizationError'
+  /api/v1/ai/treatment-recommendations/{recommendationId}/accept:
+    post:
+      tags: [AI Governance]
+      summary: Accept a treatment recommendation after clinician review
+      operationId: acceptTreatmentRecommendation
+      parameters:
+        - $ref: '#/components/parameters/RecommendationId'
+        - $ref: '#/components/parameters/XTenantId'
+        - $ref: '#/components/parameters/XCorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RecommendationDecisionRequest'
+      responses:
+        '200':
+          description: Recommendation accepted and audit captured
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DecisionResponse'
+        '403':
+          $ref: '#/components/responses/AuthorizationError'
+  /api/v1/ai/treatment-recommendations/{recommendationId}/reject:
+    post:
+      tags: [AI Governance]
+      summary: Reject a treatment recommendation after clinician review
+      operationId: rejectTreatmentRecommendation
+      parameters:
+        - $ref: '#/components/parameters/RecommendationId'
+        - $ref: '#/components/parameters/XTenantId'
+        - $ref: '#/components/parameters/XCorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RecommendationDecisionRequest'
+      responses:
+        '200':
+          description: Recommendation rejected and audit captured
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DecisionResponse'
+  /api/v1/ai/automation-proposals/{proposalId}/approve:
+    post:
+      tags: [AI Governance]
+      summary: Approve an automation proposal for execution
+      operationId: approveAutomationProposal
+      parameters:
+        - $ref: '#/components/parameters/ProposalId'
+        - $ref: '#/components/parameters/XTenantId'
+        - $ref: '#/components/parameters/XCorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AutomationApprovalRequest'
+      responses:
+        '200':
+          description: Automation approved and execution status returned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AutomationApprovalResponse'
+  /api/v1/ai/automation-proposals/{proposalId}/cancel:
+    post:
+      tags: [AI Governance]
+      summary: Cancel an automation proposal before execution
+      operationId: cancelAutomationProposal
+      parameters:
+        - $ref: '#/components/parameters/ProposalId'
+        - $ref: '#/components/parameters/XTenantId'
+        - $ref: '#/components/parameters/XCorrelationId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AutomationCancelRequest'
+      responses:
+        '200':
+          description: Proposal cancelled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DecisionResponse'
+  /api/v1/ai/audit-records:
+    get:
+      tags: [AI Governance]
+      summary: Search AI audit records
+      operationId: searchAiAuditRecords
+      parameters:
+        - $ref: '#/components/parameters/XTenantId'
+        - in: query
+          name: patientId
+          schema:
+            type: string
+        - in: query
+          name: workflowType
+          schema:
+            type: string
+        - in: query
+          name: modelVersion
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Matching records
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AiAuditRecord'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    XTenantId:
+      in: header
+      name: X-Tenant-Id
+      required: true
+      schema:
+        type: string
+    XRegionId:
+      in: header
+      name: X-Region-Id
+      required: false
+      schema:
+        type: string
+    XFacilityId:
+      in: header
+      name: X-Facility-Id
+      required: false
+      schema:
+        type: string
+    XCorrelationId:
+      in: header
+      name: X-Correlation-Id
+      required: true
+      schema:
+        type: string
+    XClientChannel:
+      in: header
+      name: X-Client-Channel
+      required: false
+      schema:
+        type: string
+    RecommendationId:
+      in: path
+      name: recommendationId
+      required: true
+      schema:
+        type: string
+    ProposalId:
+      in: path
+      name: proposalId
+      required: true
+      schema:
+        type: string
+  responses:
+    ValidationError:
+      description: Invalid request
+    AuthorizationError:
+      description: Authorization or policy failure
+  schemas:
+    DifferentialSupportRequest:
+      type: object
+      required: [patientId, encounterId, clinicalQuestion]
+      properties:
+        patientId:
+          type: string
+        encounterId:
+          type: string
+        clinicalQuestion:
+          type: string
+        symptomSummary:
+          type: string
+        evidenceRefs:
+          type: array
+          items:
+            type: string
+        specialtyContext:
+          type: string
+    DifferentialSupportResponse:
+      type: object
+      properties:
+        interactionId:
+          type: string
+        status:
+          type: string
+        differentialItems:
+          type: array
+          items:
+            $ref: '#/components/schemas/DifferentialItem'
+        evidenceSummary:
+          type: array
+          items:
+            type: string
+        auditTraceId:
+          type: string
+    DifferentialItem:
+      type: object
+      properties:
+        diagnosisLabel:
+          type: string
+        supportingEvidence:
+          type: array
+          items:
+            type: string
+        contradictoryEvidence:
+          type: array
+          items:
+            type: string
+        suggestedNextSteps:
+          type: array
+          items:
+            type: string
+        confidenceBand:
+          type: string
+    TreatmentRecommendationRequest:
+      type: object
+      required: [patientId, encounterId, clinicalContext]
+      properties:
+        patientId:
+          type: string
+        encounterId:
+          type: string
+        diagnoses:
+          type: array
+          items:
+            type: string
+        clinicalContext:
+          type: object
+          additionalProperties: true
+        evidenceRefs:
+          type: array
+          items:
+            type: string
+    TreatmentRecommendationResponse:
+      type: object
+      properties:
+        recommendationId:
+          type: string
+        status:
+          type: string
+        recommendationItems:
+          type: array
+          items:
+            $ref: '#/components/schemas/TreatmentRecommendationItem'
+        safetyChecks:
+          type: array
+          items:
+            type: string
+        auditTraceId:
+          type: string
+    TreatmentRecommendationItem:
+      type: object
+      properties:
+        category:
+          type: string
+        recommendation:
+          type: string
+        rationale:
+          type: array
+          items:
+            type: string
+        prerequisites:
+          type: array
+          items:
+            type: string
+        reviewRequired:
+          type: boolean
+    CarePlanDraftRequest:
+      type: object
+      required: [patientId, encounterId, careGoals]
+      properties:
+        patientId:
+          type: string
+        encounterId:
+          type: string
+        careGoals:
+          type: array
+          items:
+            type: string
+        evidenceRefs:
+          type: array
+          items:
+            type: string
+    CarePlanDraftResponse:
+      type: object
+      properties:
+        draftId:
+          type: string
+        status:
+          type: string
+        tasks:
+          type: array
+          items:
+            type: string
+        followUpPlan:
+          type: array
+          items:
+            type: string
+        auditTraceId:
+          type: string
+    AutomationProposalRequest:
+      type: object
+      required: [workflowType, triggerContext]
+      properties:
+        workflowType:
+          type: string
+        patientId:
+          type: string
+        encounterId:
+          type: string
+        triggerContext:
+          type: object
+          additionalProperties: true
+        requestedActions:
+          type: array
+          items:
+            type: string
+    AutomationProposalResponse:
+      type: object
+      properties:
+        proposalId:
+          type: string
+        status:
+          type: string
+        approvalPolicy:
+          type: string
+        proposedActions:
+          type: array
+          items:
+            type: string
+        auditTraceId:
+          type: string
+    RecommendationDecisionRequest:
+      type: object
+      properties:
+        reason:
+          type: string
+        modifiedPlanSummary:
+          type: string
+    AutomationApprovalRequest:
+      type: object
+      properties:
+        approverNote:
+          type: string
+        executeImmediately:
+          type: boolean
+    AutomationApprovalResponse:
+      type: object
+      properties:
+        proposalId:
+          type: string
+        status:
+          type: string
+        executionStatus:
+          type: string
+        auditTraceId:
+          type: string
+    AutomationCancelRequest:
+      type: object
+      properties:
+        reason:
+          type: string
+    DecisionResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        status:
+          type: string
+        auditTraceId:
+          type: string
+    AiAuditRecord:
+      type: object
+      properties:
+        interactionId:
+          type: string
+        patientId:
+          type: string
+        workflowType:
+          type: string
+        modelVersion:
+          type: string
+        promptVersion:
+          type: string
+        userAction:
+          type: string
+        createdAt:
+          type: string
+          format: date-time

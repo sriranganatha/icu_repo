@@ -1,0 +1,152 @@
+using System.Text.RegularExpressions;
+using HmsAgents.Core.Interfaces;
+using HmsAgents.Core.Models;
+using Microsoft.Extensions.Logging;
+
+namespace HmsAgents.Agents.Requirements;
+
+public sealed partial class RequirementParser : IRequirementsReader
+{
+    private readonly ILogger<RequirementParser> _logger;
+    private static readonly string[] s_docExtensions = [".md", ".yaml", ".yml"];
+    private int _idCounter;
+
+    public RequirementParser(ILogger<RequirementParser> logger) => _logger = logger;
+
+    public async Task<List<Requirement>> ReadAllAsync(string basePath, CancellationToken ct = default)
+    {
+        var requirements = new List<Requirement>();
+        if (!Directory.Exists(basePath))
+        {
+            _logger.LogWarning("Requirements path {Path} does not exist", basePath);
+            return requirements;
+        }
+
+        var files = Directory.EnumerateFiles(basePath, "*.*", SearchOption.AllDirectories)
+            .Where(f => s_docExtensions.Contains(Path.GetExtension(f).ToLowerInvariant()))
+            .OrderBy(f => f);
+
+        foreach (var file in files)
+        {
+            ct.ThrowIfCancellationRequested();
+            var parsed = await ReadFileAsync(file, ct);
+            requirements.AddRange(parsed);
+        }
+
+        _logger.LogInformation("Parsed {Count} requirements from {Path}", requirements.Count, basePath);
+        return requirements;
+    }
+
+    public async Task<List<Requirement>> ReadFileAsync(string filePath, CancellationToken ct = default)
+    {
+        var results = new List<Requirement>();
+        if (!File.Exists(filePath))
+            return results;
+
+        var lines = await File.ReadAllLinesAsync(filePath, ct);
+        var sourceFile = Path.GetFileName(filePath);
+        var module = InferModule(sourceFile);
+
+        string currentSection = string.Empty;
+        int currentLevel = 0;
+        string currentTitle = string.Empty;
+        var bodyLines = new List<string>();
+        var tags = new List<string>();
+
+        for (int i = 0; i < lines.Length; i++)
+        {
+            var line = lines[i];
+            var headingMatch = HeadingRegex().Match(line);
+
+            if (headingMatch.Success)
+            {
+                // Flush previous section
+                if (!string.IsNullOrWhiteSpace(currentTitle))
+                {
+                    results.Add(BuildRequirement(sourceFile, module, currentSection,
+                        currentLevel, currentTitle, bodyLines, tags));
+                }
+
+                currentLevel = headingMatch.Groups[1].Value.Length;
+                currentTitle = headingMatch.Groups[2].Value.Trim();
+                currentSection = currentLevel <= 2 ? currentTitle : currentSection;
+                bodyLines = [];
+                tags = ExtractTags(currentTitle, module);
+            }
+            else
+            {
+                bodyLines.Add(line);
+            }
+        }
+
+        // Flush last section
+        if (!string.IsNullOrWhiteSpace(currentTitle))
+        {
+            results.Add(BuildRequirement(sourceFile, module, currentSection,
+                currentLevel, currentTitle, bodyLines, tags));
+        }
+
+        return results;
+    }
+
+    private Requirement BuildRequirement(string source, string module, string section,
+        int level, string title, List<string> bodyLines, List<string> tags)
+    {
+        var body = string.Join('\n', bodyLines).Trim();
+        var criteria = bodyLines
+            .Where(l => l.TrimStart().StartsWith("- "))
+            .Select(l => l.TrimStart()[2..].Trim())
+            .Where(c => c.Length > 10)
+            .ToList();
+
+        return new Requirement
+        {
+            Id = $"REQ-{Interlocked.Increment(ref _idCounter):D4}",
+            SourceFile = source,
+            Section = section,
+            HeadingLevel = level,
+            Title = title,
+            Description = body,
+            Module = module,
+            Tags = tags,
+            AcceptanceCriteria = criteria
+        };
+    }
+
+    private static string InferModule(string fileName)
+    {
+        if (fileName.Contains("requirement", StringComparison.OrdinalIgnoreCase)) return "Requirements";
+        if (fileName.Contains("epic", StringComparison.OrdinalIgnoreCase)) return "Epics";
+        if (fileName.Contains("architecture", StringComparison.OrdinalIgnoreCase)) return "Architecture";
+        if (fileName.Contains("compliance", StringComparison.OrdinalIgnoreCase)) return "Compliance";
+        if (fileName.Contains("schema", StringComparison.OrdinalIgnoreCase)) return "Schema";
+        if (fileName.Contains("api", StringComparison.OrdinalIgnoreCase)) return "API";
+        if (fileName.Contains("ai-", StringComparison.OrdinalIgnoreCase)) return "AI";
+        if (fileName.Contains("database", StringComparison.OrdinalIgnoreCase)) return "Database";
+        if (fileName.Contains("multi-tenant", StringComparison.OrdinalIgnoreCase)) return "MultiTenant";
+        if (fileName.Contains("integration", StringComparison.OrdinalIgnoreCase)) return "Integration";
+        if (fileName.Contains("test", StringComparison.OrdinalIgnoreCase)) return "Testing";
+        return "General";
+    }
+
+    private static List<string> ExtractTags(string title, string module)
+    {
+        var tags = new List<string> { module };
+        var lower = title.ToLowerInvariant();
+        if (lower.Contains("patient")) tags.Add("Patient");
+        if (lower.Contains("encounter")) tags.Add("Encounter");
+        if (lower.Contains("admission") || lower.Contains("inpatient")) tags.Add("Inpatient");
+        if (lower.Contains("emergency")) tags.Add("Emergency");
+        if (lower.Contains("billing") || lower.Contains("revenue") || lower.Contains("claim")) tags.Add("Revenue");
+        if (lower.Contains("pharmacy") || lower.Contains("medication")) tags.Add("Pharmacy");
+        if (lower.Contains("diagnostic") || lower.Contains("lab") || lower.Contains("result")) tags.Add("Diagnostics");
+        if (lower.Contains("ai") || lower.Contains("copilot") || lower.Contains("automation")) tags.Add("AI");
+        if (lower.Contains("security") || lower.Contains("audit") || lower.Contains("hipaa")) tags.Add("Security");
+        if (lower.Contains("tenant") || lower.Contains("multi-tenant")) tags.Add("MultiTenant");
+        if (lower.Contains("integration") || lower.Contains("hl7") || lower.Contains("fhir")) tags.Add("Integration");
+        return tags.Distinct().ToList();
+    }
+
+    [GeneratedRegex(@"^(#{1,6})\s+(.+)$")]
+    private static partial Regex HeadingRegex();
+}
