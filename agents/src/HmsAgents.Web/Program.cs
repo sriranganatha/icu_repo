@@ -26,12 +26,12 @@ builder.Services.AddRazorPages();
 builder.Services.AddControllers();
 builder.Services.AddSignalR();
 
-// ── LLM provider (AI backbone) ──
-builder.Services.AddSingleton<OpenAiLlmProvider>();
+// ── LLM provider (AI backbone — Google Gemini) ──
+builder.Services.AddSingleton<GeminiLlmProvider>();
 builder.Services.AddSingleton<TemplateFallbackLlmProvider>();
 builder.Services.AddSingleton<ILlmProvider>(sp =>
     new SmartLlmRouter(
-        sp.GetRequiredService<OpenAiLlmProvider>(),
+        sp.GetRequiredService<GeminiLlmProvider>(),
         sp.GetRequiredService<TemplateFallbackLlmProvider>(),
         sp.GetRequiredService<ILogger<SmartLlmRouter>>()));
 
