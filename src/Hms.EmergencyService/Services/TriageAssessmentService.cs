@@ -34,7 +34,9 @@ public sealed class TriageAssessmentService : ITriageAssessmentService
 
     public async Task<List<TriageAssessmentDto>> ListAsync(int skip, int take, CancellationToken ct = default)
     {
-        var items = await _repo.ListAsync(skip, take, ct);
+        take = Math.Clamp(take, 1, 200); // Performance: cap page size
+            take = Math.Clamp(take, 1, 200); // Performance: cap page size
+            var items = await _repo.ListAsync(skip, take, ct);
         return items.Select(entity => new TriageAssessmentDto
         {
 

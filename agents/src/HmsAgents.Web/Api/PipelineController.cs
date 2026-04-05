@@ -58,7 +58,7 @@ public sealed class PipelineController : ControllerBase
         Directory.CreateDirectory(request.OutputPath);
 
         var dbHost = request.DbHost ?? "localhost";
-        var dbUser = request.DbUser ?? "hms";
+        var dbUser = request.DbUser ?? "icu_admin";
         var connStr = $"Host={dbHost};Port={request.DbPort};Database={request.DbName};Username={dbUser};Password={request.DbPassword}";
 
         var pipelineConfig = new PipelineConfig
@@ -67,11 +67,11 @@ public sealed class PipelineController : ControllerBase
             OutputPath = request.OutputPath,
             SolutionNamespace = request.SolutionNamespace ?? "Hms",
             DbConnectionString = connStr,
-            DockerContainerName = request.DockerContainerName ?? "icu-postgres",
+            DockerContainerName = request.DockerContainerName ?? "ICU-postgres",
             DbHost = dbHost,
-            DbPort = request.DbPort > 0 ? request.DbPort : 5432,
-            DbName = request.DbName ?? "hms",
-            DbPassword = request.DbPassword ?? "hms_dev_pw",
+            DbPort = request.DbPort > 0 ? request.DbPort : 5418,
+            DbName = request.DbName ?? "icu_db",
+            DbPassword = request.DbPassword ?? "ICU@1234",
             DbUser = dbUser,
             SpinUpDocker = request.SpinUpDocker,
             ExecuteDdl = request.ExecuteDdl,
@@ -84,6 +84,11 @@ public sealed class PipelineController : ControllerBase
         var stateStore = _stateStore;
         var db = _db;
         var configJson = JsonSerializer.Serialize(pipelineConfig);
+
+        // Persist initial orchestrator instructions to DB
+        if (!string.IsNullOrWhiteSpace(pipelineConfig.OrchestratorInstructions))
+            _db.SaveInstruction(null, pipelineConfig.OrchestratorInstructions, "PipelineStart");
+
         _ = Task.Run(async () =>
         {
             var sw = Stopwatch.StartNew();
@@ -102,13 +107,7 @@ public sealed class PipelineController : ControllerBase
                     context.ExpandedRequirements.ToList(),
                     sw.Elapsed.TotalMilliseconds);
 
-                // ── Persist to SQLite DB ──
-                try
-                {
-                    db.StartRun(context.RunId, pipelineConfig.OrchestratorInstructions, configJson);
-                }
-                catch { /* Run may already be started by events */ }
-
+                // ── Persist final state to SQLite DB ──
                 db.CompleteRun(context.RunId,
                     context.Requirements.Count, context.Artifacts.Count,
                     context.Findings.Count, context.TestDiagnostics.Count,
@@ -319,6 +318,10 @@ public sealed class PipelineController : ControllerBase
             return Ok(new { accepted = false, reason = "No active pipeline run." });
 
         ctx.OrchestratorInstructions.Add(request.Instruction);
+
+        // Persist mid-pipeline instruction to DB
+        _db.SaveInstruction(ctx.RunId, request.Instruction, "MidPipeline");
+
         _logger.LogInformation("Instruction received mid-pipeline: {Instruction}", request.Instruction);
         return Ok(new { accepted = true, queuedCount = ctx.OrchestratorInstructions.Count });
     }
@@ -329,6 +332,22 @@ public sealed class PipelineController : ControllerBase
         var ctx = _orchestrator.GetCurrentContext();
         if (ctx is null) return Ok(Array.Empty<string>());
         return Ok(ctx.OrchestratorInstructions);
+    }
+
+    [HttpGet("instructions/history")]
+    public IActionResult GetInstructionHistory([FromQuery] int limit = 50)
+    {
+        var rows = _db.GetInstructionHistory(limit);
+        return Ok(new { instructions = rows, count = rows.Count });
+    }
+
+    [HttpPost("instructions/save")]
+    public IActionResult SaveInstructionManually([FromBody] InstructionRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.Instruction))
+            return BadRequest(new { error = "Instruction text is required." });
+        _db.SaveInstruction(null, request.Instruction, "Saved");
+        return Ok(new { saved = true });
     }
 
     // ─── Requirement Submission (mid-pipeline) ──────────────────────

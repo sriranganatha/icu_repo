@@ -1,0 +1,1695 @@
+# Requirement Gap Analysis Report
+**Run**: 22cbbd98c764431f9843d9541a593070 | **Iteration**: 0 | **Time**: 2026-04-05 08:25:16Z
+
+## Artifact Inventory
+- **AiService**: Documentation(1), RazorPage(2), Configuration(4), Migration(1), Repository(1), Database(2), Infrastructure(1), Integration(3), Service(2), Dto(1)
+- **ApiGateway**: Configuration(4)
+- **AuditService**: Documentation(1), RazorPage(2), Configuration(4), Migration(1), Repository(1), Database(2), Infrastructure(1), Integration(2), Service(2), Dto(1)
+- **DiagnosticsService**: Documentation(1), RazorPage(2), Configuration(4), Migration(1), Repository(1), Database(2), Infrastructure(1), Integration(3), Service(2), Dto(1)
+- **EmergencyService**: Documentation(1), RazorPage(3), Configuration(4), Migration(1), Repository(2), Database(3), Infrastructure(1), Integration(3), Service(4), Dto(2)
+- **EncounterService**: Documentation(1), RazorPage(3), Configuration(4), Migration(1), Repository(2), Database(3), Infrastructure(1), Integration(3), Service(4), Dto(2)
+- **Infrastructure**: Configuration(1), Migration(1)
+- **InpatientService**: RazorPage(3), Configuration(4), Migration(1), Repository(2), Database(3), Integration(3), Service(4), Dto(2)
+- **PatientService**: Documentation(2), RazorPage(3), Configuration(4), Migration(1), Repository(2), Database(3), Infrastructure(2), Integration(2), Service(4), Dto(2)
+- **RevenueService**: Documentation(1), RazorPage(2), Configuration(4), Migration(1), Repository(1), Database(2), Infrastructure(1), Integration(3), Service(2), Dto(1)
+- **Shared**: Documentation(2), Observability(2), Infrastructure(5)
+- **SharedKernel**: Documentation(1), Observability(4), Compliance(10), Configuration(14), Infrastructure(1), Integration(9), Security(5)
+- **Tests**: Test(29)
+
+## Coverage Analysis
+- **REQ-0002** (1. Purpose): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0003** (2. Scope): `Partial` — 2 gaps
+  - Acceptance criterion not covered: "Workforce users."
+  - Open error-level review findings against implemented artifacts
+- **REQ-0007** (6. Periodic Access Review): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0008** (7. Privileged Access Rules): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0009** (8. Break-Glass Review): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0011** (Hospital Management System AI Automation Workflow Specification): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0012** (1. Purpose): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0013** (2. Automation Principles): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0014** (3. AI Action Classes): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0015** (Class A: Advisory Only): `Partial` — 2 gaps
+  - Acceptance criterion not covered: "staffing prioritization suggestion"
+  - Open error-level review findings against implemented artifacts
+- **REQ-0016** (Class B: Draft Generation): `Partial` — 2 gaps
+  - Acceptance criterion not covered: "referral letters"
+  - Open error-level review findings against implemented artifacts
+- **REQ-0017** (Class C: Approval-Gated Automation): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0018** (Class D: Prohibited Autonomous Execution): `Partial` — 2 gaps
+  - Acceptance criterion not covered: "diagnosis finalization"
+  - Open error-level review findings against implemented artifacts
+- **REQ-0019** (4. Clinical Copilot Workflow): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0020** (4.1 Diagnostic Support Flow): `Partial` — 2 gaps
+  - Missing unit tests for DiagnosticsService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0021** (4.2 Treatment Recommendation Flow): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0022** (4.3 Care-Plan Draft Flow): `Partial` — 2 gaps
+  - Missing unit tests for DiagnosticsService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0023** (5. Automation Proposal Workflow): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0024** (5.1 Automation States): `Partial` — 4 gaps
+  - Acceptance criterion not covered: "pending_approval"
+  - Acceptance criterion not covered: "partially_executed"
+  - Acceptance criterion not covered: "rolled_back"
+  - Open error-level review findings against implemented artifacts
+- **REQ-0025** (5.2 Approval Policy Inputs): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0026** (5.3 Automation Decision Rules): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0027** (6. Example Automation Use Cases): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0028** (6.1 Care Coordination Automation): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0029** (6.2 Diagnostic Escalation Automation): `Partial` — 2 gaps
+  - Missing unit tests for DiagnosticsService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0030** (6.3 Revenue-Cycle Automation): `Partial` — 2 gaps
+  - Missing unit tests for RevenueService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0031** (6.4 Hospital Operations Automation): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0032** (7. Reversibility Rules): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0033** (8. Multi-Tenant Automation Constraints): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0034** (9. Audit Requirements): `Partial` — 2 gaps
+  - Acceptance criterion not covered: "workflow_type"
+  - Open error-level review findings against implemented artifacts
+- **REQ-0035** (10. Monitoring Requirements): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0036** (11. Required API and Event Hooks): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0037** (12. Implementation Notes): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0038** (Hospital Management System AI Governance and Model Risk Management Specification): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0039** (1. Purpose): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0040** (2. Scope): `Partial` — 2 gaps
+  - Missing unit tests for InpatientService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0041** (3. Governance Principles): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0042** (4. AI Capability Risk Tiers): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0043** (Tier 1: Low-Risk Administrative Assistance): `Partial` — 2 gaps
+  - Acceptance criterion not covered: "Scheduling assistant suggestions."
+  - Open error-level review findings against implemented artifacts
+- **REQ-0044** (Tier 2: Clinical Documentation Assistance): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0045** (Tier 3: Clinical Decision Support and Risk Scoring): `Partial` — 3 gaps
+  - Missing unit tests for InpatientService
+  - Acceptance criterion not covered: "Biomarker interpretation assistance."
+  - Open error-level review findings against implemented artifacts
+- **REQ-0046** (Tier 4: Restricted or Prohibited Autonomous Actions): `Partial` — 2 gaps
+  - Acceptance criterion not covered: "Autonomous diagnosis finalization."
+  - Open error-level review findings against implemented artifacts
+- **REQ-0047** (5. Governance Bodies and Responsibilities): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0048** (AI Governance Board): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0049** (Model Owner): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0050** (Workflow Owner): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0051** (6. Model Lifecycle Controls): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0052** (6.1 Intake and Registration): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0053** (6.2 Validation Before Release): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0054** (6.3 Change Control): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0055** (7. Prompt and Retrieval Governance): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0056** (8. PHI and Data Protection Requirements): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0057** (9. Human-in-the-Loop Requirements): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0058** (10. User Experience Safety Requirements): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0059** (11. Monitoring and Ongoing Review): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0060** (11.1 Operational Monitoring): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0061** (11.2 Quality Monitoring): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0062** (11.3 Fairness and Drift Monitoring): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0063** (11.4 Safety Monitoring): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0064** (12. Fallback and Failure Handling): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0065** (13. Audit and Evidence Requirements): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0066** (14. Vendor and Third-Party AI Requirements): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0067** (15. AI Incident Management): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0068** (16. Minimum Required Platform Capabilities): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0069** (17. Approval Gates by Risk Tier): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0070** (18. Relationship to Platform Architecture): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0071** (19. Follow-On Documents): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0072** (Hospital Management System AI Safety Test Catalog): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0073** (1. Purpose): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0074** (2. Test Categories): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0075** (3. Diagnostic Support Test Cases): `Partial` — 2 gaps
+  - Missing unit tests for DiagnosticsService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0076** (DS-01 Conflicting Evidence Handling): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0077** (DS-02 Missing Data Transparency): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0078** (DS-03 Contraindicated Context Awareness): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0079** (DS-04 Human Review Enforcement): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0080** (4. Treatment Recommendation Test Cases): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0081** (TR-01 Allergy Safety): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0082** (TR-02 Renal Function Safety): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0083** (TR-03 Evidence Display Quality): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0084** (TR-04 Acceptance Audit Trail): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0085** (5. Care-Plan and Automation Proposal Test Cases): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0086** (AP-01 Approval Required for Clinical Automation): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0087** (AP-02 Prohibited Automation Block): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0088** (AP-03 Reversible Administrative Automation): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0089** (AP-04 Partial Execution Visibility): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0090** (6. PHI and Privacy Test Cases): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0091** (PHI-01 Sensitive Note Retrieval Block): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0092** (PHI-02 Tenant Boundary Enforcement): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0093** (PHI-03 Region Constraint Enforcement): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0094** (7. Multi-Tenancy and Isolation Test Cases): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0095** (TEN-01 Shared Runtime Isolation): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0096** (TEN-02 Dedicated Tenant Consistency): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0097** (TEN-03 Automation Queue Isolation): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0098** (8. Fairness and Monitoring Test Cases): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0099** (FAIR-01 Segmented Performance Review): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0100** (FAIR-02 Drift Alert Trigger): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0101** (9. Failure and Fallback Test Cases): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0102** (FB-01 AI Provider Timeout): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0103** (FB-02 Disabled Model Version): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0104** (FB-03 Rollback After Unsafe Output Detection): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0105** (10. Evidence Required from AI Safety Testing): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0107** (1. Purpose): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0108** (2. API Design Principles): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0110** (Required Context Dimensions): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0114** (Flavor C: Dedicated Deployment Per Tenant or Tenant Group): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0115** (Flavor D: Hybrid Regional Tenancy): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0117** (Required Headers): `Partial` — 2 gaps
+  - Missing unit tests for RevenueService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0122** (5.2 Dashboard and Workspace APIs): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0124** (5.4 Event Contracts): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0128** (6.3 Master Patient Identity API): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0130** (6.5 Encounter and Documentation API): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0131** (6.6 Orders and Results API): `Partial` — 2 gaps
+  - Missing unit tests for DiagnosticsService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0132** (6.7 Inpatient and ADT API): `Partial` — 2 gaps
+  - Missing unit tests for InpatientService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0133** (6.8 Emergency API): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0135** (6.10 ICU Telemetry API): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0137** (6.12 Diagnostics API): `Partial` — 2 gaps
+  - Missing unit tests for DiagnosticsService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0139** (6.14 Revenue Cycle API): `Partial` — 2 gaps
+  - Missing unit tests for RevenueService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0141** (6.16 Compliance and Governance API): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0142** (6.17 AI Governance API): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0143** (7. Canonical Resource Attributes): `Partial` — 2 gaps
+  - Acceptance criterion not covered: "auditTraceId"
+  - Open error-level review findings against implemented artifacts
+- **REQ-0144** (8. Command and State Transition Pattern): `Partial` — 4 gaps
+  - Missing unit tests for InpatientService
+  - Missing unit tests for RevenueService
+  - Acceptance criterion not covered: "Preserves workflow intent."
+  - Open error-level review findings against implemented artifacts
+- **REQ-0145** (9. Error Contract): `Partial` — 9 gaps
+  - Acceptance criterion not covered: "authorization_denied"
+  - Acceptance criterion not covered: "tenant_context_invalid"
+  - Acceptance criterion not covered: "facility_scope_invalid"
+  - Acceptance criterion not covered: "validation_failed"
+  - Acceptance criterion not covered: "policy_blocked"
+- **REQ-0146** (10. Event Contract Requirements): `Partial` — 5 gaps
+  - Missing unit tests for InpatientService
+  - Missing unit tests for RevenueService
+  - Acceptance criterion not covered: "eventVersion"
+  - Acceptance criterion not covered: "medication.administered"
+  - Open error-level review findings against implemented artifacts
+- **REQ-0147** (11. Security Requirements for APIs): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0150** (Dedicated Tenant Deployments): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0151** (Cross-Tenant Administration): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0153** (14. Minimum Deliverables Per API): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0155** (1. Purpose): `Partial` — 3 gaps
+  - Missing unit tests for InpatientService
+  - Acceptance criterion not covered: "Explainable and governable AI assistance."
+  - Open error-level review findings against implemented artifacts
+- **REQ-0156** (2. Architecture Goals): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0157** (3. Architectural Principles): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0159** (4.1 Experience Layer): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0160** (4.2 Experience Orchestration Layer): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0161** (4.3 Core Domain Services Layer): `Partial` — 3 gaps
+  - Missing unit tests for InpatientService
+  - Missing unit tests for DiagnosticsService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0162** (4.4 Intelligence and Automation Layer): `Partial` — 2 gaps
+  - Missing unit tests for InpatientService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0163** (4.5 Data and Integration Layer): `Partial` — 2 gaps
+  - Acceptance criterion not covered: "Analytics warehouse or lakehouse."
+  - Open error-level review findings against implemented artifacts
+- **REQ-0165** (5. Core Bounded Contexts and Service Domains): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0166** (5.1 Identity and Access Domain): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0167** (5.2 Master Patient Identity Domain): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0168** (5.3 Encounter and Charting Domain): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0169** (5.4 Inpatient Operations Domain): `Partial` — 2 gaps
+  - Missing unit tests for InpatientService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0170** (5.5 Emergency and Urgent Care Domain): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0171** (5.6 Nursing and Medication Administration Domain): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0172** (5.7 ICU and Device Telemetry Domain): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0173** (5.8 Surgery and Perioperative Domain): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0174** (5.9 Diagnostics Domain): `Partial` — 2 gaps
+  - Missing unit tests for DiagnosticsService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0175** (5.10 Pharmacy Domain): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0176** (5.11 Revenue Cycle and Payer Domain): `Partial` — 2 gaps
+  - Missing unit tests for RevenueService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0177** (5.12 Utilization and Case Management Domain): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0178** (5.13 Referral, Care Coordination, and Longitudinal Programs Domain): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0179** (5.14 Workforce and Credentialing Domain): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0180** (5.15 Supply Chain and Materials Domain): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0181** (5.16 Legal, Consent, and Health Information Management Domain): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0182** (5.17 Quality, Safety, and Infection Control Domain): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0183** (5.18 Patient Engagement and Telehealth Domain): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0184** (5.19 Data Governance and Terminology Domain): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0185** (5.20 Analytics and Reporting Domain): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0186** (5.21 AI Platform Domain): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0187** (6. Shared Platform Components): `Partial` — 2 gaps
+  - Missing unit tests for InpatientService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0189** (7.1 Transactional Data Stores): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0190** (7.2 Longitudinal Clinical Record): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0191** (7.3 Analytics and Research Data): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0192** (8. Event-Driven Architecture): `Partial` — 3 gaps
+  - Missing unit tests for InpatientService
+  - Missing unit tests for RevenueService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0194** (9.1 External Clinical Integration): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0197** (10. AI Architecture): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0198** (10.1 AI Interaction Pattern): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0199** (10.2 AI Capability Types): `Partial` — 3 gaps
+  - Missing unit tests for InpatientService
+  - Missing unit tests for RevenueService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0200** (10.3 AI Safety and Governance Controls): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0202** (11. Security Architecture): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0203** (12. Reliability and Observability Architecture): `Partial` — 2 gaps
+  - Missing unit tests for DiagnosticsService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0204** (13. Deployment Topology): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0206** (Admission and Bed Management): `Partial` — 2 gaps
+  - Missing unit tests for InpatientService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0207** (Emergency Triage to Disposition): `Partial` — 3 gaps
+  - Missing unit tests for InpatientService
+  - Missing unit tests for DiagnosticsService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0208** (Medication Lifecycle): `Partial` — 2 gaps
+  - Acceptance criterion not covered: "Prepared or dispensed in pharmacy."
+  - Open error-level review findings against implemented artifacts
+- **REQ-0209** (Biomarker-Driven Clinical Support): `Partial` — 2 gaps
+  - Missing unit tests for DiagnosticsService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0210** (Diagnosis and Treatment Copilot Workflow): `Partial` — 2 gaps
+  - Missing unit tests for DiagnosticsService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0211** (End-to-End Automation Workflow): `Partial` — 2 gaps
+  - Missing unit tests for RevenueService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0212** (Discharge and Transition of Care): `Partial` — 3 gaps
+  - Missing unit tests for InpatientService
+  - Missing unit tests for RevenueService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0214** (Wave 1): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0215** (Wave 2): `Partial` — 2 gaps
+  - Missing unit tests for DiagnosticsService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0216** (Wave 3): `Partial` — 4 gaps
+  - Missing unit tests for RevenueService
+  - Acceptance criterion not covered: "OT and perioperative workflows."
+  - Acceptance criterion not covered: "Pharmacy depth."
+  - Open error-level review findings against implemented artifacts
+- **REQ-0217** (Wave 4): `Partial` — 2 gaps
+  - Acceptance criterion not covered: "Workforce and credentialing."
+  - Open error-level review findings against implemented artifacts
+- **REQ-0218** (16. Architecture Decision Summary): `Partial` — 2 gaps
+  - Missing unit tests for InpatientService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0220** (1. Purpose): `Partial` — 2 gaps
+  - Missing unit tests for InpatientService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0221** (2. Workspace Contract Principles): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0223** (3.1 Emergency Board Workspace): `Partial` — 2 gaps
+  - Missing unit tests for DiagnosticsService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0224** (3.2 Inpatient Unit Workspace): `Partial` — 3 gaps
+  - Missing unit tests for InpatientService
+  - Acceptance criterion not covered: "medication due indicators"
+  - Open error-level review findings against implemented artifacts
+- **REQ-0225** (3.3 Physician Rounds Workspace): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0227** (3.5 Billing Operations Workspace): `Partial` — 2 gaps
+  - Missing unit tests for RevenueService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0228** (4. Patient Workspace Contracts): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0229** (4.1 Patient Portal Home): `Partial` — 2 gaps
+  - Acceptance criterion not covered: "outstanding payments"
+  - Open error-level review findings against implemented artifacts
+- **REQ-0230** (4.2 Patient Result Detail View): `Partial` — 2 gaps
+  - Missing unit tests for DiagnosticsService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0232** (6. Required Backing Read Models): `Partial` — 2 gaps
+  - Missing unit tests for InpatientService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0234** (Hospital Management System Compliance Control Matrix): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0235** (1. Purpose): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0236** (2. Control Objectives): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0237** (3. Control Domains): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0238** (4. Control Matrix): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0239** (5. Control Ownership Model): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0240** (6. Evidence Collection Expectations): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0241** (7. Known Follow-On Deliverables): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0243** (1. Purpose): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0244** (2. Policy Objectives): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0246** (Class A: Highly Restricted Clinical and Legal Data): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0247** (Class B: Standard Clinical and Care Operations Data): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0248** (Class C: Financial, Billing, and Contractual Data): `Partial` — 2 gaps
+  - Missing unit tests for RevenueService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0249** (Class D: Operational, Administrative, and Workforce Data): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0250** (Class E: Audit, Security, and Compliance Evidence Data): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0251** (Class F: AI Governance and Model Evidence Data): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0253** (4.1 Clinical Record Retention): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0254** (4.2 Financial and Claims Retention): `Partial` — 2 gaps
+  - Missing unit tests for RevenueService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0255** (4.3 Audit and Security Retention): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0256** (4.4 Legal and Disclosure Retention): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0257** (4.5 AI Evidence Retention): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0258** (5. Archival Rules): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0259** (6. Legal Hold Rules): `Partial` — 2 gaps
+  - Missing unit tests for RevenueService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0261** (8. Access and Disclosure Rules by Class): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0263** (10. Required Platform Capabilities): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0266** (1. Purpose): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0268** (Recommended Primary Database): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0269** (Why This Is the Best Fit): `Partial` — 2 gaps
+  - Missing unit tests for InpatientService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0270** (Strategic Recommendation): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0271** (3. Workload Characteristics of This System): `Partial` — 3 gaps
+  - Missing unit tests for InpatientService
+  - Missing unit tests for RevenueService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0272** (4. Evaluation Criteria): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0273** (4.1 Data Integrity): `Partial` — 3 gaps
+  - Missing unit tests for InpatientService
+  - Missing unit tests for RevenueService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0274** (4.2 Scale and Performance): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0275** (4.3 Security and Compliance): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0276** (4.4 AI Enablement): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0279** (5.1 PostgreSQL): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0280** (5.2 Microsoft SQL Server): `Partial` — 2 gaps
+  - Acceptance criterion not covered: "Familiar in some hospital IT environments."
+  - Open error-level review findings against implemented artifacts
+- **REQ-0281** (5.3 Oracle Database): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0282** (5.4 MongoDB or Document Databases): `Partial` — 2 gaps
+  - Missing unit tests for RevenueService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0283** (5.5 Cassandra or Wide-Column Databases): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0285** (5.7 Azure Cosmos DB): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0287** (Scale): `Partial` — 3 gaps
+  - Missing unit tests for InpatientService
+  - Missing unit tests for DiagnosticsService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0288** (Performance): `Partial` — 4 gaps
+  - Missing unit tests for InpatientService
+  - Missing unit tests for RevenueService
+  - Acceptance criterion not covered: "Cosmos DB can be faster for the wrong workload."
+  - Open error-level review findings against implemented artifacts
+- **REQ-0289** (Security and Compliance): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0290** (AI Use Cases): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0292** (6.1 Core Transactional System of Record): `Partial` — 4 gaps
+  - Missing unit tests for InpatientService
+  - Missing unit tests for DiagnosticsService
+  - Missing unit tests for RevenueService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0293** (6.2 Clinical Documents and Large Binary Artifacts): `GapIdentified` — 2 gaps
+  - Acceptance criterion not covered: "scanned documents"
+  - Acceptance criterion not covered: "exported reports"
+- **REQ-0294** (6.3 Search and AI Retrieval): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0295** (6.4 ICU Telemetry and Time-Series): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0296** (6.5 Analytics and ML Training): `Partial` — 2 gaps
+  - Acceptance criterion not covered: "cohort analysis"
+  - Open error-level review findings against implemented artifacts
+- **REQ-0298** (7.1 Scale): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0299** (7.2 Performance): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0300** (7.3 Security): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0301** (7.4 AI Use Cases): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0302** (8. Security Design Implications for the Database Layer): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0303** (9. AI-Specific Database Guidance): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0304** (9.1 What Should Stay in PostgreSQL): `Partial` — 2 gaps
+  - Acceptance criterion not covered: "automation proposal states and execution history"
+  - Open error-level review findings against implemented artifacts
+- **REQ-0305** (9.2 What Should Stay Outside PostgreSQL): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0306** (9.3 AI Safety Benefit): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0311** (11. Decision): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0312** (12. Consequences for the Existing Design): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0316** (3. Compliance and Governance Pack): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0318** (5. Engineering Design Pack): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0321** (Security and Compliance Readers): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0322** (Engineering and Delivery Readers): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0323** (7. Suggested Next Documents): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0324** (Hospital Management System Domain Model and Data Design): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0325** (1. Purpose): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0326** (2. Data Design Principles): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0331** (Pattern B: Schema-Per-Tenant): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0332** (Pattern C: Database-Per-Tenant or Data-Store-Per-Tenant): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0333** (Pattern D: Hybrid Domain-Specific Isolation): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0335** (Tenant): `GapIdentified` — 3 gaps
+  - Acceptance criterion not covered: "tenant_name"
+  - Acceptance criterion not covered: "tenancy_flavor"
+  - Acceptance criterion not covered: "default_region_id"
+- **REQ-0336** (Region): `GapIdentified` — 1 gaps
+  - Acceptance criterion not covered: "residency_policy_code"
+- **REQ-0337** (Facility): `GapIdentified` — 1 gaps
+  - Acceptance criterion not covered: "facility_type"
+- **REQ-0338** (Department): `GapIdentified` — 3 gaps
+  - Acceptance criterion not covered: "department_id"
+  - Acceptance criterion not covered: "specialty_code"
+  - Acceptance criterion not covered: "operational_type"
+- **REQ-0339** (UserIdentity): `Partial` — 3 gaps
+  - Acceptance criterion not covered: "workforce_or_patient_flag"
+  - Acceptance criterion not covered: "identity_provider_ref"
+  - Open error-level review findings against implemented artifacts
+- **REQ-0340** (RoleAssignment): `GapIdentified` — 3 gaps
+  - Acceptance criterion not covered: "assignment_id"
+  - Acceptance criterion not covered: "facility_scope"
+  - Acceptance criterion not covered: "department_scope"
+- **REQ-0342** (5.1 Master Patient Identity Domain): `Partial` — 6 gaps
+  - Acceptance criterion not covered: "GuardianRelationship"
+  - Acceptance criterion not covered: "ProxyAccessGrant"
+  - Acceptance criterion not covered: "IdentityMergeCase"
+  - Acceptance criterion not covered: "contact_methods"
+  - Acceptance criterion not covered: "death_indicator"
+- **REQ-0343** (5.2 Scheduling and Registration Domain): `Partial` — 10 gaps
+  - Acceptance criterion not covered: "Appointment"
+  - Acceptance criterion not covered: "ScheduleSlot"
+  - Acceptance criterion not covered: "QueueTicket"
+  - Acceptance criterion not covered: "CheckInSession"
+  - Acceptance criterion not covered: "appointment_id"
+- **REQ-0344** (5.3 Encounter and Charting Domain): `Partial` — 5 gaps
+  - Acceptance criterion not covered: "ProblemEntry"
+  - Acceptance criterion not covered: "AllergyEntry"
+  - Acceptance criterion not covered: "DiagnosisEntry"
+  - Acceptance criterion not covered: "ClinicalTask"
+  - Open error-level review findings against implemented artifacts
+- **REQ-0345** (5.4 Inpatient Domain): `Partial` — 8 gaps
+  - Missing unit tests for InpatientService
+  - Acceptance criterion not covered: "AdmissionEligibilityEvaluation"
+  - Acceptance criterion not covered: "DischargePlan"
+  - Acceptance criterion not covered: "admission_id"
+  - Acceptance criterion not covered: "evaluation_id"
+- **REQ-0346** (5.5 Emergency Domain): `Partial` — 5 gaps
+  - Acceptance criterion not covered: "EmergencyPathwayActivation"
+  - Acceptance criterion not covered: "ObservationStay"
+  - Acceptance criterion not covered: "triage_assessment_id"
+  - Acceptance criterion not covered: "re_triage_indicator"
+  - Open error-level review findings against implemented artifacts
+- **REQ-0347** (5.6 Nursing and eMAR Domain): `Partial` — 9 gaps
+  - Acceptance criterion not covered: "NursingTask"
+  - Acceptance criterion not covered: "MedicationAdministration"
+  - Acceptance criterion not covered: "HandoverRecord"
+  - Acceptance criterion not covered: "medication_administration_id"
+  - Acceptance criterion not covered: "scheduled_at"
+- **REQ-0348** (5.7 ICU and Telemetry Domain): `Partial` — 10 gaps
+  - Acceptance criterion not covered: "DeviceAssignment"
+  - Acceptance criterion not covered: "TelemetryObservation"
+  - Acceptance criterion not covered: "HighAcuityAlert"
+  - Acceptance criterion not covered: "telemetry_observation_id"
+  - Acceptance criterion not covered: "observation_type"
+- **REQ-0349** (5.8 Surgery Domain): `Partial` — 5 gaps
+  - Acceptance criterion not covered: "SurgeryCase"
+  - Acceptance criterion not covered: "PreOpChecklist"
+  - Acceptance criterion not covered: "IntraOpRecord"
+  - Acceptance criterion not covered: "ImplantUsage"
+  - Open error-level review findings against implemented artifacts
+- **REQ-0350** (5.9 Diagnostics Domain): `Partial` — 12 gaps
+  - Missing unit tests for DiagnosticsService
+  - Acceptance criterion not covered: "LabOrderPanel"
+  - Acceptance criterion not covered: "BiomarkerSeries"
+  - Acceptance criterion not covered: "RadiologyReport"
+  - Acceptance criterion not covered: "TransfusionEvent"
+- **REQ-0351** (5.10 Pharmacy Domain): `Partial` — 5 gaps
+  - Acceptance criterion not covered: "FormularyItem"
+  - Acceptance criterion not covered: "Dispensation"
+  - Acceptance criterion not covered: "CompoundPreparation"
+  - Acceptance criterion not covered: "ControlledSubstanceLedgerEntry"
+  - Open error-level review findings against implemented artifacts
+- **REQ-0352** (5.11 Revenue Cycle Domain): `Partial` — 7 gaps
+  - Missing unit tests for RevenueService
+  - Acceptance criterion not covered: "PaymentReceipt"
+  - Acceptance criterion not covered: "EligibilityCheck"
+  - Acceptance criterion not covered: "total_billed_amount"
+  - Acceptance criterion not covered: "total_allowed_amount"
+- **REQ-0353** (5.12 Utilization and Care Coordination Domain): `Partial` — 5 gaps
+  - Acceptance criterion not covered: "ContinuedStayReview"
+  - Acceptance criterion not covered: "DischargeBarrier"
+  - Acceptance criterion not covered: "TransitionPlan"
+  - Acceptance criterion not covered: "PostAcuteReferral"
+  - Open error-level review findings against implemented artifacts
+- **REQ-0354** (5.13 Compliance and HIM Domain): `Partial` — 4 gaps
+  - Acceptance criterion not covered: "ConsentRecord"
+  - Acceptance criterion not covered: "ChartAmendmentRequest"
+  - Acceptance criterion not covered: "DisclosureRecord"
+  - Open error-level review findings against implemented artifacts
+- **REQ-0355** (5.14 Quality and Safety Domain): `Partial` — 5 gaps
+  - Acceptance criterion not covered: "IncidentReport"
+  - Acceptance criterion not covered: "InfectionCase"
+  - Acceptance criterion not covered: "SafetySignal"
+  - Acceptance criterion not covered: "AccreditationEvidenceItem"
+  - Open error-level review findings against implemented artifacts
+- **REQ-0356** (5.15 Workforce Domain): `Partial` — 6 gaps
+  - Acceptance criterion not covered: "StaffingRoster"
+  - Acceptance criterion not covered: "CoverageAssignment"
+  - Acceptance criterion not covered: "CredentialRecord"
+  - Acceptance criterion not covered: "PrivilegeGrant"
+  - Acceptance criterion not covered: "CompetencyRecord"
+- **REQ-0357** (5.16 Supply Chain Domain): `Partial` — 6 gaps
+  - Acceptance criterion not covered: "InventoryItem"
+  - Acceptance criterion not covered: "InventoryLot"
+  - Acceptance criterion not covered: "PreferenceCard"
+  - Acceptance criterion not covered: "MaterialReservation"
+  - Acceptance criterion not covered: "RecallTrackingRecord"
+- **REQ-0358** (5.17 AI Governance Domain): `Partial` — 8 gaps
+  - Acceptance criterion not covered: "AIInteractionRecord"
+  - Acceptance criterion not covered: "ModelRegistration"
+  - Acceptance criterion not covered: "PromptTemplateVersion"
+  - Acceptance criterion not covered: "AIRiskReview"
+  - Acceptance criterion not covered: "workflow_type"
+- **REQ-0359** (6. Canonical Identifier Strategy): `Partial` — 2 gaps
+  - Missing unit tests for RevenueService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0360** (7. Recommended Persistence Patterns by Domain): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0361** (Relational-First Domains): `Partial` — 4 gaps
+  - Missing unit tests for InpatientService
+  - Missing unit tests for RevenueService
+  - Acceptance criterion not covered: "Supply chain"
+  - Open error-level review findings against implemented artifacts
+- **REQ-0362** (Time-Series or Stream-Optimized Domains): `Partial` — 2 gaps
+  - Acceptance criterion not covered: "RPM observations"
+  - Open error-level review findings against implemented artifacts
+- **REQ-0363** (Object Storage-Backed Domains): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0364** (Search Projections): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0365** (8. Data Isolation Rules): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0366** (9. Audit and History Requirements by Entity): `Partial` — 10 gaps
+  - Missing unit tests for InpatientService
+  - Missing unit tests for RevenueService
+  - Acceptance criterion not covered: "DiagnosisEntry"
+  - Acceptance criterion not covered: "AllergyEntry"
+  - Acceptance criterion not covered: "MedicationAdministration"
+- **REQ-0369** (Clinical Data Plane Databases): `Partial` — 3 gaps
+  - Missing unit tests for InpatientService
+  - Missing unit tests for DiagnosticsService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0370** (Governance and Evidence Databases): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0371** (Financial and Operations Databases): `Partial` — 2 gaps
+  - Missing unit tests for RevenueService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0378** (Module B: Master Patient Index and Demographics): `Partial` — 2 gaps
+  - Acceptance criterion not covered: "Duplicate detection."
+  - Open error-level review findings against implemented artifacts
+- **REQ-0379** (Module C: Scheduling and Front Desk Operations): `Partial` — 3 gaps
+  - Acceptance criterion not covered: "Appointment scheduling."
+  - Acceptance criterion not covered: "Waitlists and cancellations."
+  - Open error-level review findings against implemented artifacts
+- **REQ-0380** (Module D: Outpatient Clinical Workflows): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0381** (Module E: Emergency and Urgent Care Workflows): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0382** (Module F: Inpatient and ADT Workflows): `Partial` — 2 gaps
+  - Missing unit tests for InpatientService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0383** (Module G: Nursing and Medication Administration): `GapIdentified` — 2 gaps
+  - Acceptance criterion not covered: "Shift handover."
+  - Acceptance criterion not covered: "Escalation and bedside charting."
+- **REQ-0384** (Module H: ICU and Device Integration): `GapIdentified` — 1 gaps
+  - Acceptance criterion not covered: "Device connectivity."
+- **REQ-0385** (Module I: Operation Theater and Perioperative Care): `GapIdentified` — 2 gaps
+  - Acceptance criterion not covered: "OT scheduling."
+  - Acceptance criterion not covered: "Surgical checklist workflows."
+- **REQ-0386** (Module J: Lab, Radiology, and Diagnostics): `Partial` — 4 gaps
+  - Missing unit tests for DiagnosticsService
+  - Acceptance criterion not covered: "Sample and imaging workflows."
+  - Acceptance criterion not covered: "Biomarker trending and interpretive analytics."
+  - Open error-level review findings against implemented artifacts
+- **REQ-0387** (Module K: Pharmacy and Inventory): `GapIdentified` — 4 gaps
+  - Acceptance criterion not covered: "Dispensing."
+  - Acceptance criterion not covered: "Stock movement."
+  - Acceptance criterion not covered: "Controlled medications."
+  - Acceptance criterion not covered: "Antimicrobial stewardship and medication recall workflows."
+- **REQ-0388** (Module L: Billing, Insurance, and Revenue Cycle): `Partial` — 3 gaps
+  - Missing unit tests for RevenueService
+  - Acceptance criterion not covered: "Payments and collections."
+  - Open error-level review findings against implemented artifacts
+- **REQ-0390** (Module N: Patient Portal, Mobile App, and Engagement): `Partial` — 2 gaps
+  - Acceptance criterion not covered: "Appointments."
+  - Open error-level review findings against implemented artifacts
+- **REQ-0391** (Module O: Remote Patient Monitoring and Preventive Care): `Partial` — 3 gaps
+  - Acceptance criterion not covered: "Device onboarding."
+  - Acceptance criterion not covered: "Vaccination schedules."
+  - Open error-level review findings against implemented artifacts
+- **REQ-0392** (Module P: AI Platform and Copilot Services): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0395** (Module S: Workforce and Credentialing Operations): `GapIdentified` — 1 gaps
+  - Acceptance criterion not covered: "Credentialing and privileging."
+- **REQ-0396** (Module T: Quality, Safety, and Infection Control): `GapIdentified` — 1 gaps
+  - Acceptance criterion not covered: "Hospital-acquired infection surveillance."
+- **REQ-0397** (Module U: Supply Chain, Materials, and Traceability): `Partial` — 2 gaps
+  - Acceptance criterion not covered: "Consumables and implant inventory."
+  - Open error-level review findings against implemented artifacts
+- **REQ-0399** (Module W: Population Health and Specialty Programs): `Partial` — 2 gaps
+  - Acceptance criterion not covered: "Disease registries."
+  - Open error-level review findings against implemented artifacts
+- **REQ-0401** (Module Y: Security, Audit, and Compliance Platform): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0403** (Epic 1: Unified Patient Identity): `Partial` — 2 gaps
+  - Missing unit tests for InpatientService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0404** (Epic 2: Frictionless OPD Intake and Consultation): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0405** (Epic 3: Emergency and Urgent Care Command Center): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0406** (Epic 4: Safe Inpatient Admissions and Bed Operations): `Partial` — 2 gaps
+  - Missing unit tests for InpatientService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0407** (Epic 5: Nursing Workflow Digitization): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0408** (Epic 6: ICU Monitoring and High-Acuity Intelligence): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0409** (Epic 7: Perioperative Coordination): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0410** (Epic 8: Integrated Diagnostics and Results Management): `Partial` — 3 gaps
+  - Missing unit tests for InpatientService
+  - Missing unit tests for DiagnosticsService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0411** (Epic 9: Revenue Cycle Unification): `Partial` — 2 gaps
+  - Missing unit tests for RevenueService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0412** (Epic 10: Patient Digital Experience): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0413** (Epic 11: AI Copilot for Clinical Documentation): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0414** (Epic 12: Diagnostic and Treatment Planning Copilot): `Partial` — 2 gaps
+  - Missing unit tests for DiagnosticsService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0415** (Epic 13: Predictive Operations and Capacity Intelligence): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0416** (Epic 14: End-to-End Hospital Automation): `Partial` — 2 gaps
+  - Missing unit tests for DiagnosticsService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0417** (Epic 15: Security, Privacy, and Compliance by Design): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0418** (Epic 16: Utilization Management and Transitions of Care): `Partial` — 2 gaps
+  - Missing unit tests for InpatientService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0419** (Epic 17: Pharmacy Safety and Medication Supply Chain): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0420** (Epic 18: Workforce, Credentialing, and Coverage Operations): `Partial` — 2 gaps
+  - Missing unit tests for InpatientService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0421** (Epic 19: Quality, Safety, Infection Control, and Accreditation): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0422** (Epic 20: Supply Chain, Implant Traceability, and Procedure Materials): `Partial` — 2 gaps
+  - Missing unit tests for InpatientService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0423** (Epic 21: Legal Record Governance and Consent Operations): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0424** (Epic 22: Population Health and Specialty Care Programs): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0425** (Epic 23: Data Governance, Terminology, and Trustworthy Exchange): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0426** (4. AI Backlog Themes): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0428** (Operational Intelligence): `Partial` — 2 gaps
+  - Missing unit tests for RevenueService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0429** (Patient Engagement Intelligence): `Partial` — 2 gaps
+  - Acceptance criterion not covered: "Scheduling assistant."
+  - Open error-level review findings against implemented artifacts
+- **REQ-0431** (5. Suggested Delivery Teams): `Partial` — 4 gaps
+  - Missing unit tests for InpatientService
+  - Missing unit tests for DiagnosticsService
+  - Missing unit tests for RevenueService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0432** (6. Recommended Next Build Artifacts): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0434** (1. Purpose): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0435** (2. Event Design Principles): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0436** (3. Standard Event Envelope): `GapIdentified` — 2 gaps
+  - Acceptance criterion not covered: "event_version"
+  - Acceptance criterion not covered: "producer_service"
+- **REQ-0437** (4. Event Reliability Rules): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0438** (5. Domain Event Families): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0439** (5.1 Tenant and Facility Events): `GapIdentified` — 2 gaps
+  - Acceptance criterion not covered: "tenancy_flavor"
+  - Acceptance criterion not covered: "operational_status"
+- **REQ-0440** (5.2 Identity and Access Events): `GapIdentified` — 1 gaps
+  - Acceptance criterion not covered: "approval_status"
+- **REQ-0441** (5.3 Patient Identity Events): `Partial` — 2 gaps
+  - Acceptance criterion not covered: "legal_status_flags"
+  - Open error-level review findings against implemented artifacts
+- **REQ-0442** (5.4 Scheduling and Registration Events): `Partial` — 4 gaps
+  - Acceptance criterion not covered: "appointment.booked.v1"
+  - Acceptance criterion not covered: "appointment.rescheduled.v1"
+  - Acceptance criterion not covered: "appointment.cancelled.v1"
+  - Open error-level review findings against implemented artifacts
+- **REQ-0443** (5.5 Encounter and Charting Events): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0444** (5.6 Inpatient and ADT Events): `Partial` — 5 gaps
+  - Missing unit tests for InpatientService
+  - Acceptance criterion not covered: "admission_id"
+  - Acceptance criterion not covered: "eligibility_decision"
+  - Acceptance criterion not covered: "transfer_reason"
+  - Open error-level review findings against implemented artifacts
+- **REQ-0445** (5.7 Emergency Events): `Partial` — 5 gaps
+  - Acceptance criterion not covered: "triage_level"
+  - Acceptance criterion not covered: "pathway_code"
+  - Acceptance criterion not covered: "board_status"
+  - Acceptance criterion not covered: "disposition_code"
+  - Open error-level review findings against implemented artifacts
+- **REQ-0446** (5.8 Nursing and eMAR Events): `GapIdentified` — 2 gaps
+  - Acceptance criterion not covered: "medication.administered.v1"
+  - Acceptance criterion not covered: "medication.missed.v1"
+- **REQ-0447** (5.9 ICU and Telemetry Events): `Partial` — 3 gaps
+  - Acceptance criterion not covered: "alarm.raised.v1"
+  - Acceptance criterion not covered: "alarm.acknowledged.v1"
+  - Open error-level review findings against implemented artifacts
+- **REQ-0448** (5.10 Surgery Events): `GapIdentified` — 4 gaps
+  - Acceptance criterion not covered: "surgery.preop-cleared.v1"
+  - Acceptance criterion not covered: "surgery.started.v1"
+  - Acceptance criterion not covered: "pacu.admitted.v1"
+  - Acceptance criterion not covered: "pacu.discharged.v1"
+- **REQ-0449** (5.11 Diagnostics Events): `Partial` — 4 gaps
+  - Missing unit tests for DiagnosticsService
+  - Acceptance criterion not covered: "transfusion.administered.v1"
+  - Acceptance criterion not covered: "delta_value"
+  - Open error-level review findings against implemented artifacts
+- **REQ-0450** (5.12 Pharmacy Events): `GapIdentified` — 1 gaps
+  - Acceptance criterion not covered: "medication.recall-opened.v1"
+- **REQ-0451** (5.13 Revenue Cycle Events): `Partial` — 4 gaps
+  - Missing unit tests for RevenueService
+  - Acceptance criterion not covered: "remittance.posted.v1"
+  - Acceptance criterion not covered: "financial_amounts"
+  - Open error-level review findings against implemented artifacts
+- **REQ-0454** (5.16 Quality and Safety Events): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0455** (5.17 Workforce Events): `GapIdentified` — 1 gaps
+  - Acceptance criterion not covered: "credential.expiring.v1"
+- **REQ-0456** (5.18 Supply Chain Events): `Partial` — 3 gaps
+  - Acceptance criterion not covered: "material.reserved.v1"
+  - Acceptance criterion not covered: "implant.recalled.v1"
+  - Open error-level review findings against implemented artifacts
+- **REQ-0457** (5.19 AI Governance Events): `Partial` — 4 gaps
+  - Acceptance criterion not covered: "workflow_type"
+  - Acceptance criterion not covered: "user_action"
+  - Acceptance criterion not covered: "evidence_refs"
+  - Open error-level review findings against implemented artifacts
+- **REQ-0458** (6. Priority Consumers): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0460** (8. Event Versioning Policy): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0461** (9. Suggested First Implementation Set): `Partial` — 4 gaps
+  - Missing unit tests for InpatientService
+  - Missing unit tests for RevenueService
+  - Acceptance criterion not covered: "medication.administered.v1"
+  - Open error-level review findings against implemented artifacts
+- **REQ-0463** (1. Purpose): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0465** (Security Incident): `GapIdentified` — 1 gaps
+  - Acceptance criterion not covered: "Credential compromise."
+- **REQ-0466** (Privacy Incident): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0467** (Availability Incident): `Partial` — 2 gaps
+  - Missing unit tests for DiagnosticsService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0468** (Integrity Incident): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0469** (AI Incident): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0471** (Severity 1): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0472** (Severity 2): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0473** (Severity 3): `Partial` — 2 gaps
+  - Acceptance criterion not covered: "Localized workflow impact."
+  - Open error-level review findings against implemented artifacts
+- **REQ-0475** (4. Response Roles): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0476** (5. Detection Sources): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0477** (6. Initial Triage Procedure): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0478** (7. Containment Actions): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0480** (Application or Service Issues): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0482** (AI Issues): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0483** (8. Investigation Procedure): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0485** (10. Clinical Safety Escalation): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0486** (11. Communication Rules): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0487** (12. Recovery Procedure): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0488** (13. Post-Incident Review): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0489** (14. Evidence to Preserve): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0490** (15. Required Platform Features Supporting This Runbook): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0491** (Hospital Management System Integration Interface Catalog and Failure-Handling Runbook): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0492** (1. Purpose): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0493** (2. Integration Principles): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0496** (3.2 Device and Telemetry Interfaces): `GapIdentified` — 5 gaps
+  - Acceptance criterion not covered: "bedside monitors"
+  - Acceptance criterion not covered: "ventilators"
+  - Acceptance criterion not covered: "infusion pumps"
+  - Acceptance criterion not covered: "RPM device vendors"
+  - Acceptance criterion not covered: "barcode scanners and printers"
+- **REQ-0497** (3.3 Financial and Administrative Interfaces): `Partial` — 3 gaps
+  - Missing unit tests for RevenueService
+  - Acceptance criterion not covered: "remittance feeds"
+  - Open error-level review findings against implemented artifacts
+- **REQ-0498** (3.4 Engagement Interfaces): `Partial` — 3 gaps
+  - Acceptance criterion not covered: "telehealth vendors"
+  - Acceptance criterion not covered: "CRM or outreach systems"
+  - Open error-level review findings against implemented artifacts
+- **REQ-0499** (3.5 Governance Interfaces): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0500** (4. Interface Catalog Fields): `Partial` — 7 gaps
+  - Acceptance criterion not covered: "interface_id"
+  - Acceptance criterion not covered: "data_classification"
+  - Acceptance criterion not covered: "direction inbound, outbound, or bidirectional"
+  - Acceptance criterion not covered: "target_system"
+  - Acceptance criterion not covered: "idempotency expectations"
+- **REQ-0501** (5. Priority Interface Catalog): `Partial` — 2 gaps
+  - Missing unit tests for RevenueService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0502** (6. Failure Modes by Interface Class): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0503** (Messaging Failure): `Partial` — 2 gaps
+  - Acceptance criterion not covered: "upstream unavailable"
+  - Open error-level review findings against implemented artifacts
+- **REQ-0504** (API Failure): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0505** (Data Integrity Failure): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0506** (Privacy and Policy Failure): `Partial` — 2 gaps
+  - Acceptance criterion not covered: "residency violation"
+  - Open error-level review findings against implemented artifacts
+- **REQ-0507** (7. Standard Failure-Handling Pattern): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0509** (8.1 ADT and Clinical Messaging): `Partial` — 2 gaps
+  - Missing unit tests for InpatientService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0510** (8.2 Results Interfaces): `Partial` — 2 gaps
+  - Missing unit tests for DiagnosticsService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0511** (8.3 Claims and Financial Interfaces): `Partial` — 2 gaps
+  - Missing unit tests for RevenueService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0512** (8.4 Device Interfaces): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0513** (8.5 AI Provider Interfaces): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0514** (9. Multi-Tenant Integration Rules): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0515** (10. Operational Dashboards Required): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0521** (Control Plane): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0522** (Data Plane): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0523** (Experience Plane): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0525** (Flavor 1: Shared SaaS Tenant Partitioning): `GapIdentified` — 1 gaps
+  - Acceptance criterion not covered: "Lower cost and faster onboarding."
+- **REQ-0526** (Flavor 2: Shared Runtime with Dedicated Clinical Data Stores): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0531** (Compute Isolation): `GapIdentified` — 1 gaps
+  - Acceptance criterion not covered: "dedicated worker pools"
+- **REQ-0534** (Cryptographic Isolation): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0535** (7. Tenant Context Propagation): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0536** (8. Data Residency Model): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0537** (9. Tenant Customization Model): `Partial` — 2 gaps
+  - Acceptance criterion not covered: "AI enablement flags"
+  - Open error-level review findings against implemented artifacts
+- **REQ-0541** (Promotion): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0543** (11. Observability by Tenancy Flavor): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0546** (Dedicated Store Tenants): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0548** (13. AI and Tenancy): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0551** (Mid-Sized Hospitals): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0553** (15. Architecture Requirements Derived from Tenancy Strategy): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0555** (1. Purpose): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0558** (Control Plane Schemas): `GapIdentified` — 2 gaps
+  - Acceptance criterion not covered: "cp_identity"
+  - Acceptance criterion not covered: "cp_reference"
+- **REQ-0559** (Clinical Data Schemas): `Partial` — 5 gaps
+  - Missing unit tests for InpatientService
+  - Missing unit tests for DiagnosticsService
+  - Acceptance criterion not covered: "cl_schedule"
+  - Acceptance criterion not covered: "cl_pharmacy"
+  - Open error-level review findings against implemented artifacts
+- **REQ-0560** (Operations and Governance Schemas): `Partial` — 5 gaps
+  - Missing unit tests for RevenueService
+  - Acceptance criterion not covered: "op_workforce"
+  - Acceptance criterion not covered: "gov_consent"
+  - Acceptance criterion not covered: "gov_quality"
+  - Open error-level review findings against implemented artifacts
+- **REQ-0564** (cl_mpi.patient_profile): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0565** (cl_mpi.patient_identifier): `Partial` — 3 gaps
+  - Acceptance criterion not covered: "patient_id fk"
+  - Acceptance criterion not covered: "identifier_value_hash_or_token"
+  - Open error-level review findings against implemented artifacts
+- **REQ-0566** (5.2 Encounter Tables): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0567** (cl_encounter.encounter): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0568** (cl_encounter.clinical_note): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0569** (5.3 Inpatient Tables): `Partial` — 2 gaps
+  - Missing unit tests for InpatientService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0570** (cl_inpatient.admission): `Partial` — 2 gaps
+  - Missing unit tests for InpatientService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0571** (cl_inpatient.admission_eligibility_evaluation): `Partial` — 2 gaps
+  - Missing unit tests for InpatientService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0572** (5.4 Emergency Tables): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0573** (cl_emergency.emergency_arrival): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0574** (cl_emergency.triage_assessment): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0575** (5.5 Diagnostics Tables): `Partial` — 2 gaps
+  - Missing unit tests for DiagnosticsService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0576** (cl_diagnostics.result_record): `Partial` — 3 gaps
+  - Missing unit tests for DiagnosticsService
+  - Acceptance criterion not covered: "measured_value_text_or_numeric"
+  - Open error-level review findings against implemented artifacts
+- **REQ-0577** (cl_diagnostics.biomarker_series): `Partial` — 2 gaps
+  - Missing unit tests for DiagnosticsService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0578** (5.6 Revenue Tables): `Partial` — 2 gaps
+  - Missing unit tests for RevenueService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0579** (op_revenue.charge_item): `Partial` — 6 gaps
+  - Missing unit tests for RevenueService
+  - Acceptance criterion not covered: "charge_type"
+  - Acceptance criterion not covered: "unit_amount"
+  - Acceptance criterion not covered: "currency_code"
+  - Acceptance criterion not covered: "service_date"
+- **REQ-0580** (op_revenue.claim): `Partial` — 2 gaps
+  - Missing unit tests for RevenueService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0582** (gov_consent.consent_record): `Partial` — 5 gaps
+  - Acceptance criterion not covered: "consent_type"
+  - Acceptance criterion not covered: "effective_from"
+  - Acceptance criterion not covered: "captured_by"
+  - Acceptance criterion not covered: "captured_at"
+  - Open error-level review findings against implemented artifacts
+- **REQ-0583** (gov_audit.audit_event): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0584** (gov_ai.ai_interaction_record): `Partial` — 2 gaps
+  - Acceptance criterion not covered: "workflow_type"
+  - Open error-level review findings against implemented artifacts
+- **REQ-0586** (Shared Table Model): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0587** (Schema-Per-Tenant Model): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0588** (Dedicated Database Model): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0589** (7. Outbox and Inbox Tables): `GapIdentified` — 7 gaps
+  - Acceptance criterion not covered: "event_version"
+  - Acceptance criterion not covered: "aggregate_type"
+  - Acceptance criterion not covered: "aggregate_id"
+  - Acceptance criterion not covered: "publication_status"
+  - Acceptance criterion not covered: "consumer_name"
+- **REQ-0590** (8. Indexing and Partition Strategy): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0591** (9. Migration Strategy): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0594** (1. Purpose): `Partial` — 3 gaps
+  - Missing unit tests for InpatientService
+  - Missing unit tests for RevenueService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0595** (2. Contract Conventions): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0596** (3. Master Patient Identity Service): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0597** (3.1 Create Patient): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0598** (3.2 Merge Patients): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0599** (4. Encounter and Charting Service): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0600** (4.1 Create Encounter): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0601** (4.2 Append Clinical Note): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0602** (5. Inpatient and ADT Service): `Partial` — 2 gaps
+  - Missing unit tests for InpatientService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0603** (5.1 Evaluate Admission Eligibility): `Partial` — 2 gaps
+  - Missing unit tests for InpatientService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0604** (5.2 Create Admission): `Partial` — 2 gaps
+  - Missing unit tests for InpatientService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0605** (6. Emergency Service): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0606** (6.1 Register Emergency Arrival): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0607** (6.2 Record Triage Assessment): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0608** (7. Revenue Cycle Service): `Partial` — 2 gaps
+  - Missing unit tests for RevenueService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0609** (7.1 Post Charge): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0610** (7.2 Submit Claim): `Partial` — 2 gaps
+  - Missing unit tests for RevenueService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0611** (8. Contract-Level Audit Requirements): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0612** (9. Contract-Level Multi-Tenancy Requirements): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0613** (10. Next Contract Deliverables): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0615** (1. Document Purpose): `Partial` — 3 gaps
+  - Missing unit tests for InpatientService
+  - Missing unit tests for RevenueService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0616** (2. Product Vision): `Partial` — 2 gaps
+  - Missing unit tests for InpatientService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0617** (3. Product Goals): `Partial` — 3 gaps
+  - Missing unit tests for InpatientService
+  - Missing unit tests for RevenueService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0618** (4. Guiding Principles): `Partial` — 2 gaps
+  - Acceptance criterion not covered: "Modular for phased rollout."
+  - Open error-level review findings against implemented artifacts
+- **REQ-0620** (In Scope): `Partial` — 4 gaps
+  - Missing unit tests for InpatientService
+  - Missing unit tests for RevenueService
+  - Acceptance criterion not covered: "Outpatient workflows."
+  - Open error-level review findings against implemented artifacts
+- **REQ-0621** (Out of Scope for Initial Release): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0622** (6. Primary Users and Personas): `Partial` — 6 gaps
+  - Missing unit tests for RevenueService
+  - Acceptance criterion not covered: "Physicians and specialists."
+  - Acceptance criterion not covered: "Surgeons and anesthesiologists."
+  - Acceptance criterion not covered: "Dietitians and nutrition teams."
+  - Acceptance criterion not covered: "Pharmacists and pharmacy technicians."
+- **REQ-0624** (Role Categories): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0625** (Access Requirements): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0627** (8.1 Master Patient Index (MPI)): `Partial` — 2 gaps
+  - Missing unit tests for DiagnosticsService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0628** (8.2 Electronic Health Record (EHR) Core): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0629** (8.3 Scheduling and Resource Management): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0630** (8.4 Orders and Results Management): `Partial` — 2 gaps
+  - Missing unit tests for DiagnosticsService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0631** (8.5 Document and Consent Management): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0632** (9. Inpatient Management Requirements (IPD)): `Partial` — 2 gaps
+  - Missing unit tests for InpatientService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0633** (9.1 Admission, Discharge, Transfer (ADT)): `Partial` — 2 gaps
+  - Missing unit tests for InpatientService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0634** (9.1.1 Patient Admission Eligibility and Medical Necessity): `Partial` — 2 gaps
+  - Missing unit tests for InpatientService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0635** (9.2 Bed and Capacity Management): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0636** (9.3 Inpatient Clinical Documentation): `Partial` — 3 gaps
+  - Missing unit tests for InpatientService
+  - Acceptance criterion not covered: "Problem-oriented and narrative charting."
+  - Open error-level review findings against implemented artifacts
+- **REQ-0637** (9.4 Nursing Care Plans and Shift Operations): `Partial` — 2 gaps
+  - Acceptance criterion not covered: "Bedside charting on tablets and workstations on wheels."
+  - Open error-level review findings against implemented artifacts
+- **REQ-0638** (9.5 eMAR and Medication Safety): `Partial` — 2 gaps
+  - Missing unit tests for InpatientService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0639** (9.6 ICU and High-Acuity Monitoring): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0642** (9.9 Discharge Planning and Transitions of Care): `Partial` — 2 gaps
+  - Missing unit tests for InpatientService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0643** (10. Outpatient Management Requirements (OPD)): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0644** (10.1 Appointment and Self-Service Scheduling): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0645** (10.2 Digital Registration, Check-In, and Queue Management): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0646** (10.3 Rapid Clinical Documentation): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0647** (10.4 Telehealth): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0648** (10.5 Remote Patient Monitoring (RPM)): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0650** (10.7 Patient Portal and Mobile App): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0651** (11. Emergency and Urgent Care Requirements): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0652** (11.1 Emergency Registration and Intake): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0653** (11.2 Triage and Acuity Management): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0654** (11.3 Emergency Department Tracking Board): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0655** (11.4 Emergency Clinical Workflows): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0656** (11.5 Observation and Disposition Management): `Partial` — 2 gaps
+  - Missing unit tests for InpatientService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0657** (11.6 Emergency Pathway Support): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0658** (11.7 Emergency Orders, Diagnostics, and Results): `Partial` — 2 gaps
+  - Missing unit tests for DiagnosticsService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0659** (11.8 Emergency Operations and Analytics): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0661** (12.1 Billing and Revenue Cycle Management): `Partial` — 3 gaps
+  - Missing unit tests for InpatientService
+  - Missing unit tests for RevenueService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0662** (12.2 Insurance and Payer Management): `Partial` — 2 gaps
+  - Missing unit tests for RevenueService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0663** (12.3 Coding and Compliance Support): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0665** (12.5 Inventory and Pharmacy Operations): `Partial` — 2 gaps
+  - Missing unit tests for InpatientService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0667** (Laboratory Information Management): `Partial` — 2 gaps
+  - Missing unit tests for DiagnosticsService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0668** (Biomarker Analysis and Clinical Interpretation): `Partial` — 3 gaps
+  - Missing unit tests for InpatientService
+  - Acceptance criterion not covered: "Structured capture and trending of biomarkers such as troponin, BNP, CRP, procal…"
+  - Open error-level review findings against implemented artifacts
+- **REQ-0672** (14. AI-First Platform Requirements): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0673** (14.1 Clinical AI Copilot): `Partial` — 2 gaps
+  - Missing unit tests for InpatientService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0674** (14.1.1 Diagnostic and Treatment Planning Copilot): `Partial` — 2 gaps
+  - Missing unit tests for DiagnosticsService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0675** (14.1.2 Care Coordination and End-to-End Patient Care Automation): `Partial` — 2 gaps
+  - Missing unit tests for InpatientService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0676** (14.2 Operational AI): `Partial` — 3 gaps
+  - Missing unit tests for InpatientService
+  - Missing unit tests for RevenueService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0677** (14.2.1 End-to-End Hospital Automation): `Partial` — 4 gaps
+  - Missing unit tests for InpatientService
+  - Missing unit tests for DiagnosticsService
+  - Missing unit tests for RevenueService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0678** (14.3 Patient-Facing AI): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0679** (14.4 Clinical Decision Support): `Partial` — 2 gaps
+  - Missing unit tests for InpatientService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0680** (14.5 AI Governance Requirements): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0681** (15. Interoperability and Integration Requirements): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0682** (16. Communication and Collaboration Requirements): `Partial` — 2 gaps
+  - Missing unit tests for DiagnosticsService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0684** (Clinical Dashboards): `Partial` — 2 gaps
+  - Missing unit tests for InpatientService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0685** (Operational Dashboards): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0686** (Financial Dashboards): `Partial` — 2 gaps
+  - Missing unit tests for RevenueService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0689** (18. Security and Compliance Requirements): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0691** (18.2 Audit Trails): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0697** (Performance): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0698** (Availability): `Partial` — 2 gaps
+  - Missing unit tests for DiagnosticsService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0699** (Scalability): `Partial` — 2 gaps
+  - Missing unit tests for DiagnosticsService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0700** (Usability): `GapIdentified` — 1 gaps
+  - Acceptance criterion not covered: "Mobile-responsive and tablet-optimized interfaces."
+- **REQ-0702** (20. Data Model Requirements): `Partial` — 5 gaps
+  - Missing unit tests for InpatientService
+  - Missing unit tests for RevenueService
+  - Acceptance criterion not covered: "Medication."
+  - Acceptance criterion not covered: "Appointment."
+  - Open error-level review findings against implemented artifacts
+- **REQ-0704** (Inpatient Journey): `Partial` — 2 gaps
+  - Missing unit tests for InpatientService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0705** (Outpatient Journey): `Partial` — 2 gaps
+  - Missing unit tests for RevenueService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0706** (22. Specialty Extensibility Baseline): `Partial` — 9 gaps
+  - Acceptance criterion not covered: "Cardiology."
+  - Acceptance criterion not covered: "Obstetrics and gynecology."
+  - Acceptance criterion not covered: "Pediatrics."
+  - Acceptance criterion not covered: "Orthopedics."
+  - Acceptance criterion not covered: "Nephrology."
+- **REQ-0707** (23. Administrative Configuration Requirements): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0709** (24.1 Utilization Management and Case Management): `Partial` — 2 gaps
+  - Missing unit tests for InpatientService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0710** (24.2 Pharmacy and Medication Operations Depth): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0711** (24.3 Workforce, Staffing, and Credentialing): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0713** (24.5 Supply Chain, Materials, and Traceability): `Partial` — 2 gaps
+  - Missing unit tests for InpatientService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0714** (24.6 Legal, Consent, and Health Information Management): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0715** (24.7 Population Health and Longitudinal Care Programs): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0716** (24.8 Data Governance, Terminology, and Master Data): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0721** (25.2 Oncology and Infusion Services): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0722** (25.3 Behavioral Health and Protected Records): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0726** (Phase 1): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0727** (Phase 2): `Partial` — 2 gaps
+  - Missing unit tests for InpatientService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0728** (Phase 3): `GapIdentified` — 3 gaps
+  - Acceptance criterion not covered: "Telehealth."
+  - Acceptance criterion not covered: "Executive analytics."
+  - Acceptance criterion not covered: "Pharmacy depth including compounding and controlled substances."
+- **REQ-0729** (Phase 4): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0730** (27. Acceptance Criteria Summary): `Partial` — 2 gaps
+  - Missing unit tests for InpatientService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0731** (28. Recommended Next-Level Deliverables): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0732** (29. Summary): `Partial` — 2 gaps
+  - Missing unit tests for InpatientService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0734** (1. Purpose): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0735** (2. Access Model Principles): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0737** (Clinical Permissions): `Partial` — 2 gaps
+  - Acceptance criterion not covered: "Administer medications."
+  - Open error-level review findings against implemented artifacts
+- **REQ-0738** (Operational Permissions): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0739** (Financial Permissions): `Partial` — 2 gaps
+  - Missing unit tests for RevenueService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0740** (Compliance and Governance Permissions): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0741** (Technical and Platform Permissions): `Partial` — 2 gaps
+  - Missing unit tests for DiagnosticsService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0742** (4. Role Matrix): `Partial` — 4 gaps
+  - Missing unit tests for InpatientService
+  - Missing unit tests for DiagnosticsService
+  - Missing unit tests for RevenueService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0744** (Specially Protected Data): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0746** (6. Break-Glass Access Policy): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0747** (7. Separation of Duties): `Partial` — 2 gaps
+  - Missing unit tests for RevenueService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0748** (8. ABAC Overlay Dimensions): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0750** (10. Implementation Notes): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0754** (Clinical Domain Services): `Partial` — 2 gaps
+  - Missing unit tests for DiagnosticsService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0755** (Financial Domain Services): `Partial` — 2 gaps
+  - Missing unit tests for RevenueService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0756** (Governance Services): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0758** (3. Cross-Cutting Control Requirements by Service): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0759** (4. AI-Aware Service Requirements): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0760** (5. Minimum Engineering Deliverables per Service): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0761** (6. Review Gates): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0765** (3. Example DDL): `Partial` — 4 gaps
+  - Missing unit tests for InpatientService
+  - Missing unit tests for DiagnosticsService
+  - Missing unit tests for RevenueService
+  - Open error-level review findings against implemented artifacts
+- **REQ-0766** (4. Tenancy Enforcement Notes): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0767** (5. Follow-On Work): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0768** (Hospital Management System Test Strategy and Validation Plan): `GapIdentified` — 1 gaps
+  - NFR not addressed: NFR-TEST-01 — All services must have unit tests with real assertions
+- **REQ-0769** (1. Purpose): `Partial` — 2 gaps
+  - NFR not addressed: NFR-TEST-01 — All services must have unit tests with real assertions
+  - Open error-level review findings against implemented artifacts
+- **REQ-0770** (2. Test Strategy Goals): `Partial` — 4 gaps
+  - Missing unit tests for InpatientService
+  - Missing unit tests for DiagnosticsService
+  - NFR not addressed: NFR-TEST-01 — All services must have unit tests with real assertions
+  - Open error-level review findings against implemented artifacts
+- **REQ-0771** (3. Test Layers): `GapIdentified` — 1 gaps
+  - NFR not addressed: NFR-TEST-01 — All services must have unit tests with real assertions
+- **REQ-0772** (3.1 Unit Tests): `Partial` — 4 gaps
+  - Missing unit tests for InpatientService
+  - Acceptance criterion not covered: "biomarker calculations"
+  - NFR not addressed: NFR-TEST-01 — All services must have unit tests with real assertions
+  - Open error-level review findings against implemented artifacts
+- **REQ-0773** (3.2 Service-Level Contract Tests): `GapIdentified` — 1 gaps
+  - NFR not addressed: NFR-TEST-01 — All services must have unit tests with real assertions
+- **REQ-0774** (3.3 Integration Tests): `Partial` — 2 gaps
+  - NFR not addressed: NFR-TEST-01 — All services must have unit tests with real assertions
+  - Open error-level review findings against implemented artifacts
+- **REQ-0775** (3.4 End-to-End Workflow Tests): `Partial` — 3 gaps
+  - Missing unit tests for InpatientService
+  - NFR not addressed: NFR-TEST-01 — All services must have unit tests with real assertions
+  - Open error-level review findings against implemented artifacts
+- **REQ-0776** (3.5 Non-Functional Tests): `Partial` — 2 gaps
+  - NFR not addressed: NFR-TEST-01 — All services must have unit tests with real assertions
+  - Open error-level review findings against implemented artifacts
+- **REQ-0777** (3.6 Security and Compliance Tests): `Partial` — 2 gaps
+  - NFR not addressed: NFR-TEST-01 — All services must have unit tests with real assertions
+  - Open error-level review findings against implemented artifacts
+- **REQ-0778** (3.7 AI Validation Tests): `Partial` — 2 gaps
+  - NFR not addressed: NFR-TEST-01 — All services must have unit tests with real assertions
+  - Open error-level review findings against implemented artifacts
+- **REQ-0779** (4. Test Data Strategy): `Partial` — 2 gaps
+  - NFR not addressed: NFR-TEST-01 — All services must have unit tests with real assertions
+  - Open error-level review findings against implemented artifacts
+- **REQ-0780** (5. Multi-Tenancy Validation Requirements): `Partial` — 2 gaps
+  - NFR not addressed: NFR-TEST-01 — All services must have unit tests with real assertions
+  - Open error-level review findings against implemented artifacts
+- **REQ-0781** (6. Safety-Critical Workflow Validation): `GapIdentified` — 1 gaps
+  - NFR not addressed: NFR-TEST-01 — All services must have unit tests with real assertions
+- **REQ-0782** (Medication Safety): `Partial` — 3 gaps
+  - Acceptance criterion not covered: "duplicate dose prevention"
+  - NFR not addressed: NFR-TEST-01 — All services must have unit tests with real assertions
+  - Open error-level review findings against implemented artifacts
+- **REQ-0783** (Emergency and ICU Safety): `Partial` — 2 gaps
+  - NFR not addressed: NFR-TEST-01 — All services must have unit tests with real assertions
+  - Open error-level review findings against implemented artifacts
+- **REQ-0784** (Diagnostic Safety): `Partial` — 3 gaps
+  - Missing unit tests for DiagnosticsService
+  - NFR not addressed: NFR-TEST-01 — All services must have unit tests with real assertions
+  - Open error-level review findings against implemented artifacts
+- **REQ-0785** (7. Compliance Validation Matrix): `Partial` — 2 gaps
+  - NFR not addressed: NFR-TEST-01 — All services must have unit tests with real assertions
+  - Open error-level review findings against implemented artifacts
+- **REQ-0786** (8. Environment Strategy): `Partial` — 2 gaps
+  - NFR not addressed: NFR-TEST-01 — All services must have unit tests with real assertions
+  - Open error-level review findings against implemented artifacts
+- **REQ-0787** (9. Release Gates): `Partial` — 2 gaps
+  - NFR not addressed: NFR-TEST-01 — All services must have unit tests with real assertions
+  - Open error-level review findings against implemented artifacts
+- **REQ-0788** (10. Recommended Test Suites by Wave): `GapIdentified` — 1 gaps
+  - NFR not addressed: NFR-TEST-01 — All services must have unit tests with real assertions
+- **REQ-0789** (Wave 1): `Partial` — 2 gaps
+  - NFR not addressed: NFR-TEST-01 — All services must have unit tests with real assertions
+  - Open error-level review findings against implemented artifacts
+- **REQ-0790** (Wave 2): `Partial` — 3 gaps
+  - Missing unit tests for DiagnosticsService
+  - NFR not addressed: NFR-TEST-01 — All services must have unit tests with real assertions
+  - Open error-level review findings against implemented artifacts
+- **REQ-0791** (Wave 3): `Partial` — 5 gaps
+  - Missing unit tests for RevenueService
+  - Acceptance criterion not covered: "OT workflows"
+  - Acceptance criterion not covered: "pharmacy depth"
+  - NFR not addressed: NFR-TEST-01 — All services must have unit tests with real assertions
+  - Open error-level review findings against implemented artifacts
+- **REQ-0792** (Wave 4): `Partial` — 2 gaps
+  - NFR not addressed: NFR-TEST-01 — All services must have unit tests with real assertions
+  - Open error-level review findings against implemented artifacts
+- **REQ-0793** (11. Evidence Produced by Testing): `Partial` — 2 gaps
+  - NFR not addressed: NFR-TEST-01 — All services must have unit tests with real assertions
+  - Open error-level review findings against implemented artifacts
+- **REQ-0794** (12. Follow-On Deliverables): `Partial` — 2 gaps
+  - NFR not addressed: NFR-TEST-01 — All services must have unit tests with real assertions
+  - Open error-level review findings against implemented artifacts
+- **REQ-0796** (1. Purpose): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0797** (2. Vendor Categories): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0799** (Tier 1: High Risk): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0802** (4. Onboarding Requirements): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0803** (5. Business Associate Governance): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0804** (6. AI Vendor Requirements): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0805** (7. Ongoing Oversight): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+- **REQ-0806** (8. Offboarding and Termination): `Partial` — 1 gaps
+  - Open error-level review findings against implemented artifacts
+
+**Summary**: 0 covered, 591 partial, 216 gaps out of 807 requirements
+
+## Cross-Cutting Gap Detection
+- 20 unresolved critical/security findings need stories to remediate
+
+## Generated Stories to Close Gaps
+
+## Dependency Resolution
+- Resolved dependency chains for 13576 items
+
+## Totals: 0 new stories added to backlog

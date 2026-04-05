@@ -19,7 +19,7 @@ public class EmergencyArrivalRepositoryTests : IDisposable
     public EmergencyArrivalRepositoryTests()
     {
         var options = new DbContextOptionsBuilder<EmergencyServiceDbContext>()
-            .UseInMemoryDatabase($"EmergencyArrival_9048cd9202644a7887009bc0e679269d")
+            .UseInMemoryDatabase($"EmergencyArrival_230fcef0f9ad40d395407cc61f0d2db0")
             .Options;
         var tenant = new TestTenantProvider("tenant-1");
         _db = new EmergencyServiceDbContext(options, tenant);

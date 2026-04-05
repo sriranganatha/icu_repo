@@ -207,12 +207,81 @@ public sealed class AgentPipelineDb : IDisposable
                 FOREIGN KEY (RunId) REFERENCES PipelineRuns(RunId)
             );
 
+            CREATE TABLE IF NOT EXISTS OrchestratorInstructions (
+                Id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                RunId           TEXT,
+                Instruction     TEXT NOT NULL,
+                Source          TEXT NOT NULL DEFAULT 'Manual',
+                CreatedAt       TEXT NOT NULL,
+                FOREIGN KEY (RunId) REFERENCES PipelineRuns(RunId)
+            );
+
             CREATE INDEX IF NOT EXISTS IX_AuditLog_RunId ON AuditLog(RunId);
             CREATE INDEX IF NOT EXISTS IX_AuditLog_RunId_Sequence ON AuditLog(RunId, Sequence);
             CREATE INDEX IF NOT EXISTS IX_HumanDecisions_RunId ON HumanDecisions(RunId);
             CREATE INDEX IF NOT EXISTS IX_HumanDecisions_Pending ON HumanDecisions(Decision) WHERE Decision = 'Pending';
+            CREATE INDEX IF NOT EXISTS IX_OrchestratorInstructions_RunId ON OrchestratorInstructions(RunId);
         """;
         cmd.ExecuteNonQuery();
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    //  Pipeline Run lifecycle
+    // ════════════════════════════════════════════════════════════════
+
+    // ════════════════════════════════════════════════════════════════
+    //  Orchestrator Instructions
+    // ════════════════════════════════════════════════════════════════
+
+    public void SaveInstruction(string? runId, string instruction, string source = "Manual")
+    {
+        using var conn = Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            INSERT INTO OrchestratorInstructions (RunId, Instruction, Source, CreatedAt)
+            VALUES (@runId, @instruction, @source, @now)
+        """;
+        cmd.Parameters.AddWithValue("@runId", (object?)runId ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@instruction", instruction);
+        cmd.Parameters.AddWithValue("@source", source);
+        cmd.Parameters.AddWithValue("@now", DateTime.UtcNow.ToString("o"));
+        cmd.ExecuteNonQuery();
+    }
+
+    public List<InstructionRow> GetInstructionHistory(int limit = 50)
+    {
+        using var conn = Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT Id, RunId, Instruction, Source, CreatedAt
+            FROM OrchestratorInstructions
+            ORDER BY CreatedAt DESC
+            LIMIT @limit
+        """;
+        cmd.Parameters.AddWithValue("@limit", limit);
+        using var reader = cmd.ExecuteReader();
+        var rows = new List<InstructionRow>();
+        while (reader.Read())
+        {
+            rows.Add(new InstructionRow
+            {
+                Id = reader.GetInt32(0),
+                RunId = reader.IsDBNull(1) ? null : reader.GetString(1),
+                Instruction = reader.GetString(2),
+                Source = reader.GetString(3),
+                CreatedAt = reader.GetString(4)
+            });
+        }
+        return rows;
+    }
+
+    public sealed class InstructionRow
+    {
+        public int Id { get; set; }
+        public string? RunId { get; set; }
+        public string Instruction { get; set; } = "";
+        public string Source { get; set; } = "Manual";
+        public string CreatedAt { get; set; } = "";
     }
 
     // ════════════════════════════════════════════════════════════════

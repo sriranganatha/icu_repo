@@ -19,7 +19,7 @@ public class PatientProfileRepositoryTests : IDisposable
     public PatientProfileRepositoryTests()
     {
         var options = new DbContextOptionsBuilder<PatientServiceDbContext>()
-            .UseInMemoryDatabase($"PatientProfile_1f5a358546f94f0f9cc46aca9cf35738")
+            .UseInMemoryDatabase($"PatientProfile_47cc798fe7df4647855cbbcdfbae4acc")
             .Options;
         var tenant = new TestTenantProvider("tenant-1");
         _db = new PatientServiceDbContext(options, tenant);

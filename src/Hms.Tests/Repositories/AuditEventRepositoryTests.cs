@@ -19,7 +19,7 @@ public class AuditEventRepositoryTests : IDisposable
     public AuditEventRepositoryTests()
     {
         var options = new DbContextOptionsBuilder<AuditServiceDbContext>()
-            .UseInMemoryDatabase($"AuditEvent_9e5f5b6fcf7247ceb34d7594d407b988")
+            .UseInMemoryDatabase($"AuditEvent_f3fbc618f57948bf8cf52c07e7c1d7bb")
             .Options;
         var tenant = new TestTenantProvider("tenant-1");
         _db = new AuditServiceDbContext(options, tenant);

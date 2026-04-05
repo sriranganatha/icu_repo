@@ -12,12 +12,12 @@ public sealed class PipelineConfig
     public List<string> TargetModules { get; init; } = [];
 
     // Docker & database provisioning
-    public string DockerContainerName { get; init; } = "icu-postgres";
+    public string DockerContainerName { get; init; } = "ICU-postgres";
     public string DbHost { get; init; } = "localhost";
-    public int DbPort { get; init; } = 5432;
-    public string DbName { get; init; } = "hms";
-    public string DbPassword { get; init; } = "hms_dev_pw";
-    public string DbUser { get; init; } = "hms";
+    public int DbPort { get; init; } = 5418;
+    public string DbName { get; init; } = "icu_db";
+    public string DbPassword { get; init; } = "ICU@1234";
+    public string DbUser { get; init; } = "icu_admin";
     public bool SpinUpDocker { get; init; } = true;
     public bool ExecuteDdl { get; set; } = true;
 

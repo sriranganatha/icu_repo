@@ -34,7 +34,9 @@ public sealed class EmergencyArrivalService : IEmergencyArrivalService
 
     public async Task<List<EmergencyArrivalDto>> ListAsync(int skip, int take, CancellationToken ct = default)
     {
-        var items = await _repo.ListAsync(skip, take, ct);
+        take = Math.Clamp(take, 1, 200); // Performance: cap page size
+            take = Math.Clamp(take, 1, 200); // Performance: cap page size
+            var items = await _repo.ListAsync(skip, take, ct);
         return items.Select(entity => new EmergencyArrivalDto
         {
 
