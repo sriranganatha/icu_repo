@@ -19,7 +19,7 @@ public class ResultRecordRepositoryTests : IDisposable
     public ResultRecordRepositoryTests()
     {
         var options = new DbContextOptionsBuilder<DiagnosticsServiceDbContext>()
-            .UseInMemoryDatabase($"ResultRecord_4a62e538436647b78d0e8c1b91b68c7d")
+            .UseInMemoryDatabase($"ResultRecord_b0c5b4795db1474c84408d046783b408")
             .Options;
         var tenant = new TestTenantProvider("tenant-1");
         _db = new DiagnosticsServiceDbContext(options, tenant);

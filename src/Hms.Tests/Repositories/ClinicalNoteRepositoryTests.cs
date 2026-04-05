@@ -19,7 +19,7 @@ public class ClinicalNoteRepositoryTests : IDisposable
     public ClinicalNoteRepositoryTests()
     {
         var options = new DbContextOptionsBuilder<EncounterServiceDbContext>()
-            .UseInMemoryDatabase($"ClinicalNote_3e1d98f98f0a46958557c73b108579fe")
+            .UseInMemoryDatabase($"ClinicalNote_f59fb12f64bc45dcaba0947f3fee7cd2")
             .Options;
         var tenant = new TestTenantProvider("tenant-1");
         _db = new EncounterServiceDbContext(options, tenant);

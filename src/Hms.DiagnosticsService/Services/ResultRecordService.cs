@@ -34,7 +34,8 @@ public sealed class ResultRecordService : IResultRecordService
 
     public async Task<List<ResultRecordDto>> ListAsync(int skip, int take, CancellationToken ct = default)
     {
-        var items = await _repo.ListAsync(skip, take, ct);
+        take = Math.Clamp(take, 1, 200); // Performance: cap page size
+            var items = await _repo.ListAsync(skip, take, ct);
         return items.Select(entity => new ResultRecordDto
         {
 

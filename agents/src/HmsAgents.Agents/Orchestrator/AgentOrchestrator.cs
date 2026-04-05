@@ -56,6 +56,10 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
         [AgentType.Deploy]               = [AgentType.Review, AgentType.Testing, AgentType.Infrastructure],
         // Requirement Analyzer — runs after code generation cycle to find gaps
         [AgentType.RequirementAnalyzer]  = [AgentType.Database, AgentType.ServiceLayer, AgentType.Application, AgentType.Integration, AgentType.Review],
+        // Build — compiles the generated solution after all code-gen + review
+        [AgentType.Build]                = [AgentType.Database, AgentType.ServiceLayer, AgentType.Application, AgentType.Integration, AgentType.Testing, AgentType.Review, AgentType.BugFix],
+        // Monitor — runs after Deploy to check containers and service health
+        [AgentType.Monitor]              = [AgentType.Deploy],
     };
 
     // Finding → remediation dispatch
@@ -78,11 +82,17 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
         ["SOC2-CC6"]           = [AgentType.Soc2Compliance],
         ["SOC2-CC7"]           = [AgentType.Soc2Compliance],
         ["SOC2-CC8"]           = [AgentType.Soc2Compliance],
+        // Build/Deploy/Monitor findings → BugFix remediation
+        ["Build"]              = [AgentType.BugFix],
+        ["Deployment"]         = [AgentType.BugFix],
+        ["Runtime"]            = [AgentType.BugFix],
     };
 
     // Heal-cycle agents skip the BugFix→Performance→Review loop themselves
     private static readonly HashSet<AgentType> s_healCycleAgents =
-        [AgentType.BugFix, AgentType.Performance, AgentType.Review, AgentType.Supervisor, AgentType.Backlog, AgentType.RequirementsExpander, AgentType.Deploy];
+        [AgentType.BugFix, AgentType.Performance, AgentType.Review, AgentType.Supervisor, AgentType.Backlog, AgentType.RequirementsExpander, AgentType.Deploy, AgentType.Build, AgentType.Monitor];
+
+    private const int MaxBuildFixCycles = 3; // Max build→fix→rebuild iterations
 
     // Queue for mid-pipeline requirement injection
     private readonly ConcurrentQueue<List<Requirement>> _pendingRequirements = new();
@@ -345,6 +355,26 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
             var backlog = _agents.FirstOrDefault(a => a.Type == AgentType.Backlog);
             if (backlog is not null)
                 await RunAgentWithHealingAsync(context, backlog, ct);
+        }
+
+        // ── Build → Fix → Rebuild automated loop ───────────────────
+        var buildAgent = _agents.FirstOrDefault(a => a.Type == AgentType.Build);
+        if (buildAgent is not null)
+        {
+            await RunBuildFixCycleAsync(context, buildAgent, ct);
+        }
+
+        // ── Deploy → Monitor → Fix feedback loop ───────────────────
+        var deployAgent = _agents.FirstOrDefault(a => a.Type == AgentType.Deploy);
+        if (deployAgent is not null)
+        {
+            await RunAgentWithHealingAsync(context, deployAgent, ct);
+
+            var monitorAgent = _agents.FirstOrDefault(a => a.Type == AgentType.Monitor);
+            if (monitorAgent is not null)
+            {
+                await RunMonitorFixCycleAsync(context, monitorAgent, deployAgent, ct);
+            }
         }
 
         // ── Final: Supervisor report ────────────────────────────────
@@ -674,6 +704,145 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
         });
         context.AgentStatuses[agent.Type] = AgentStatus.Completed;
         return false;
+    }
+
+    // ─── Build → Fix → Rebuild Cycle ────────────────────────────────
+
+    private async Task RunBuildFixCycleAsync(AgentContext context, IAgent buildAgent, CancellationToken ct)
+    {
+        for (var cycle = 0; cycle < MaxBuildFixCycles; cycle++)
+        {
+            ct.ThrowIfCancellationRequested();
+            _logger.LogInformation("[Build-Fix] Cycle {Cycle}/{Max}", cycle + 1, MaxBuildFixCycles);
+
+            await PublishEvent(context, AgentType.Build, AgentStatus.Running,
+                $"Build cycle {cycle + 1}/{MaxBuildFixCycles} — compiling generated solution...", ct: ct);
+
+            var buildResult = await buildAgent.ExecuteAsync(context, ct);
+
+            await PublishEvent(context, AgentType.Build,
+                buildResult.Success ? AgentStatus.Completed : AgentStatus.Failed,
+                buildResult.Summary, ct: ct);
+
+            if (buildResult.Success)
+            {
+                _logger.LogInformation("[Build-Fix] Build succeeded on cycle {Cycle}", cycle + 1);
+                await PublishEvent(context, AgentType.Orchestrator, AgentStatus.Running,
+                    $"Build passed on cycle {cycle + 1} — proceeding to deployment", ct: ct);
+
+                await _audit.LogAsync(AgentType.Build, context.RunId, AuditAction.AgentCompleted,
+                    $"Build succeeded on cycle {cycle + 1}/{MaxBuildFixCycles}",
+                    $"Errors: 0, Findings: {buildResult.Findings.Count}",
+                    severity: AuditSeverity.Info, ct: ct);
+                return;
+            }
+
+            // Build failed — collect error findings and dispatch to BugFix
+            var buildErrors = buildResult.Findings
+                .Where(f => f.Category == "Build" && f.Severity >= ReviewSeverity.Error)
+                .ToList();
+
+            _logger.LogWarning("[Build-Fix] Build failed with {Count} errors — dispatching to BugFix", buildErrors.Count);
+            await PublishEvent(context, AgentType.Orchestrator, AgentStatus.Running,
+                $"Build failed with {buildErrors.Count} errors — dispatching BugFix agent (cycle {cycle + 1})...", ct: ct);
+
+            await _audit.LogAsync(AgentType.Build, context.RunId, AuditAction.AgentFailed,
+                $"Build failed on cycle {cycle + 1}: {buildErrors.Count} errors",
+                $"Errors: {string.Join("; ", buildErrors.Take(5).Select(e => Truncate(e.Message, 80)))}",
+                severity: AuditSeverity.Warning, ct: ct);
+
+            // Run BugFix to attempt code repairs
+            var bugFix = _agents.FirstOrDefault(a => a.Type == AgentType.BugFix);
+            if (bugFix is not null)
+            {
+                await PublishEvent(context, AgentType.BugFix, AgentStatus.Running,
+                    $"BugFix repairing {buildErrors.Count} build errors (cycle {cycle + 1})...", ct: ct);
+                await RunSingleHealAgent(context, bugFix,
+                    $"BugFix repairing {buildErrors.Count} build errors from build cycle {cycle + 1}", ct);
+            }
+            else
+            {
+                _logger.LogWarning("[Build-Fix] BugFix agent not available — cannot auto-repair");
+                break;
+            }
+
+            if (cycle + 1 >= MaxBuildFixCycles)
+            {
+                _logger.LogWarning("[Build-Fix] Exhausted {Max} build-fix cycles — build still failing", MaxBuildFixCycles);
+                await PublishEvent(context, AgentType.Orchestrator, AgentStatus.Running,
+                    $"Build-Fix cycle exhausted ({MaxBuildFixCycles} attempts) — build errors remain, proceeding to deployment anyway", ct: ct);
+            }
+        }
+    }
+
+    // ─── Monitor → Fix → Redeploy Cycle ────────────────────────────
+
+    private async Task RunMonitorFixCycleAsync(
+        AgentContext context, IAgent monitorAgent, IAgent deployAgent, CancellationToken ct)
+    {
+        const int maxMonitorCycles = 2;
+
+        for (var cycle = 0; cycle < maxMonitorCycles; cycle++)
+        {
+            ct.ThrowIfCancellationRequested();
+            _logger.LogInformation("[Monitor-Fix] Cycle {Cycle}/{Max}", cycle + 1, maxMonitorCycles);
+
+            await PublishEvent(context, AgentType.Monitor, AgentStatus.Running,
+                $"Monitor cycle {cycle + 1}/{maxMonitorCycles} — checking containers and services...", ct: ct);
+
+            var monitorResult = await monitorAgent.ExecuteAsync(context, ct);
+
+            await PublishEvent(context, AgentType.Monitor,
+                monitorResult.Success ? AgentStatus.Completed : AgentStatus.Failed,
+                monitorResult.Summary, ct: ct);
+
+            await _audit.LogAsync(AgentType.Monitor, context.RunId,
+                monitorResult.Success ? AuditAction.AgentCompleted : AuditAction.AgentFailed,
+                monitorResult.Summary,
+                $"Issues: {monitorResult.Findings.Count}, Errors: {monitorResult.Errors.Count}",
+                severity: monitorResult.Success ? AuditSeverity.Info : AuditSeverity.Warning, ct: ct);
+
+            if (monitorResult.Success)
+            {
+                _logger.LogInformation("[Monitor-Fix] All services healthy on cycle {Cycle}", cycle + 1);
+                await PublishEvent(context, AgentType.Orchestrator, AgentStatus.Running,
+                    $"Monitor: all services healthy — deployment verified on cycle {cycle + 1}", ct: ct);
+                return;
+            }
+
+            // Monitor detected issues — attempt remediation
+            var monitorIssues = monitorResult.Findings.Count;
+            _logger.LogWarning("[Monitor-Fix] Detected {Count} issues — attempting remediation", monitorIssues);
+            await PublishEvent(context, AgentType.Orchestrator, AgentStatus.Running,
+                $"Monitor detected {monitorIssues} issues — dispatching BugFix + Redeploy (cycle {cycle + 1})...", ct: ct);
+
+            // Dispatch BugFix for deployment/runtime errors
+            var bugFix = _agents.FirstOrDefault(a => a.Type == AgentType.BugFix);
+            if (bugFix is not null)
+            {
+                await RunSingleHealAgent(context, bugFix,
+                    $"BugFix addressing {monitorIssues} monitor-detected issues (cycle {cycle + 1})", ct);
+            }
+
+            // Rebuild if code was changed
+            var buildAgent = _agents.FirstOrDefault(a => a.Type == AgentType.Build);
+            if (buildAgent is not null)
+            {
+                await RunBuildFixCycleAsync(context, buildAgent, ct);
+            }
+
+            // Redeploy after fixes
+            await PublishEvent(context, AgentType.Deploy, AgentStatus.Running,
+                $"Redeploying after monitor-fix cycle {cycle + 1}...", ct: ct);
+            await RunAgentWithHealingAsync(context, deployAgent, ct);
+
+            if (cycle + 1 >= maxMonitorCycles)
+            {
+                _logger.LogWarning("[Monitor-Fix] Exhausted {Max} monitor-fix cycles — issues may remain", maxMonitorCycles);
+                await PublishEvent(context, AgentType.Orchestrator, AgentStatus.Running,
+                    $"Monitor-Fix cycle exhausted ({maxMonitorCycles} attempts) — some issues may persist", ct: ct);
+            }
+        }
     }
 
     // ─── Heal Cycle: BugFix → Performance → Review ─────────────────

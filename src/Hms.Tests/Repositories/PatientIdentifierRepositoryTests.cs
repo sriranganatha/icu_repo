@@ -19,7 +19,7 @@ public class PatientIdentifierRepositoryTests : IDisposable
     public PatientIdentifierRepositoryTests()
     {
         var options = new DbContextOptionsBuilder<PatientServiceDbContext>()
-            .UseInMemoryDatabase($"PatientIdentifier_675a3b3f904a477bbb1b1301584a0c58")
+            .UseInMemoryDatabase($"PatientIdentifier_ed4652627b844b3a889a21f840fca50d")
             .Options;
         var tenant = new TestTenantProvider("tenant-1");
         _db = new PatientServiceDbContext(options, tenant);

@@ -25,6 +25,7 @@ public enum AgentType
     Deploy,
     RequirementAnalyzer,
     Build,
+    Monitor,
     Migration,
     CodeQuality,
     DependencyAudit,

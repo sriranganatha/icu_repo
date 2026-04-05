@@ -1,5 +1,6 @@
 using HmsAgents.Agents.AccessControl;
 using HmsAgents.Agents.Backlog;
+using HmsAgents.Agents.Build;
 using HmsAgents.Agents.BugFix;
 using HmsAgents.Agents.Compliance;
 using HmsAgents.Agents.Database;
@@ -8,6 +9,7 @@ using HmsAgents.Agents.Documentation;
 using HmsAgents.Agents.Infrastructure;
 using HmsAgents.Agents.Integration;
 using HmsAgents.Agents.Llm;
+using HmsAgents.Agents.Monitor;
 using HmsAgents.Agents.Observability;
 using HmsAgents.Agents.Orchestrator;
 using HmsAgents.Agents.Performance;
@@ -77,6 +79,10 @@ builder.Services.AddSingleton<IAgent, BacklogAgent>();
 
 // Deployment agent
 builder.Services.AddSingleton<IAgent, DeployAgent>();
+
+// Build & Monitor agents
+builder.Services.AddSingleton<IAgent, BuildAgent>();
+builder.Services.AddSingleton<IAgent, MonitorAgent>();
 
 builder.Services.AddSingleton<IAgentOrchestrator, AgentOrchestrator>();
 

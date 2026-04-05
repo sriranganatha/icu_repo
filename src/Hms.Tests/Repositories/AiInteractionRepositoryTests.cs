@@ -19,7 +19,7 @@ public class AiInteractionRepositoryTests : IDisposable
     public AiInteractionRepositoryTests()
     {
         var options = new DbContextOptionsBuilder<AiServiceDbContext>()
-            .UseInMemoryDatabase($"AiInteraction_70bc1c08a0984fb5b0c4603dd9b21eb8")
+            .UseInMemoryDatabase($"AiInteraction_0db57e5573a64bd7a4332ec02efbe5cb")
             .Options;
         var tenant = new TestTenantProvider("tenant-1");
         _db = new AiServiceDbContext(options, tenant);

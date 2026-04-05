@@ -19,7 +19,7 @@ public class TriageAssessmentRepositoryTests : IDisposable
     public TriageAssessmentRepositoryTests()
     {
         var options = new DbContextOptionsBuilder<EmergencyServiceDbContext>()
-            .UseInMemoryDatabase($"TriageAssessment_d0f3e2bff6004e938851e125c020a258")
+            .UseInMemoryDatabase($"TriageAssessment_c85233cc0518439c8694998d9a40a7e0")
             .Options;
         var tenant = new TestTenantProvider("tenant-1");
         _db = new EmergencyServiceDbContext(options, tenant);
