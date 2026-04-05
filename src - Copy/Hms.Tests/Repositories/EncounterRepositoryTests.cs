@@ -1,35 +1,35 @@
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
-using Hms.EmergencyService.Data;
-using Hms.EmergencyService.Data.Entities;
-using Hms.EmergencyService.Data.Repositories;
+using Hms.EncounterService.Data;
+using Hms.EncounterService.Data.Entities;
+using Hms.EncounterService.Data.Repositories;
 using Xunit;
 
 namespace Hms.Tests.Repositories;
 
 /// <summary>
-/// Repository tests for TriageAssessment using EF Core InMemory provider.
-/// Feature coverage: EP-03, Module-E, Emergency
+/// Repository tests for Encounter using EF Core InMemory provider.
+/// Feature coverage: EP-02, Module-D, Encounters
 /// </summary>
-public class TriageAssessmentRepositoryTests : IDisposable
+public class EncounterRepositoryTests : IDisposable
 {
-    private readonly EmergencyServiceDbContext _db;
-    private readonly TriageAssessmentRepository _repo;
+    private readonly EncounterServiceDbContext _db;
+    private readonly EncounterRepository _repo;
 
-    public TriageAssessmentRepositoryTests()
+    public EncounterRepositoryTests()
     {
-        var options = new DbContextOptionsBuilder<EmergencyServiceDbContext>()
-            .UseInMemoryDatabase($"TriageAssessment_c85233cc0518439c8694998d9a40a7e0")
+        var options = new DbContextOptionsBuilder<EncounterServiceDbContext>()
+            .UseInMemoryDatabase($"Encounter_f27d45813fe24edc8597bdbdf11afa3b")
             .Options;
         var tenant = new TestTenantProvider("tenant-1");
-        _db = new EmergencyServiceDbContext(options, tenant);
-        _repo = new TriageAssessmentRepository(_db);
+        _db = new EncounterServiceDbContext(options, tenant);
+        _repo = new EncounterRepository(_db);
     }
 
     [Fact]
     public async Task Create_PersistsEntity()
     {
-        var entity = new TriageAssessment
+        var entity = new Encounter
         {
 
         };
@@ -54,7 +54,7 @@ public class TriageAssessmentRepositoryTests : IDisposable
     {
         for (int i = 0; i < 5; i++)
         {
-            await _repo.CreateAsync(new TriageAssessment
+            await _repo.CreateAsync(new Encounter
             {
 
             });
@@ -70,7 +70,7 @@ public class TriageAssessmentRepositoryTests : IDisposable
     [Fact]
     public async Task Update_ModifiesEntity()
     {
-        var entity = new TriageAssessment
+        var entity = new Encounter
         {
 
         };

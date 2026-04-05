@@ -1,35 +1,35 @@
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
-using Hms.RevenueService.Data;
-using Hms.RevenueService.Data.Entities;
-using Hms.RevenueService.Data.Repositories;
+using Hms.EncounterService.Data;
+using Hms.EncounterService.Data.Entities;
+using Hms.EncounterService.Data.Repositories;
 using Xunit;
 
 namespace Hms.Tests.Repositories;
 
 /// <summary>
-/// Repository tests for Claim using EF Core InMemory provider.
-/// Feature coverage: EP-12, Module-L, Revenue
+/// Repository tests for ClinicalNote using EF Core InMemory provider.
+/// Feature coverage: EP-02, Module-D, ClinicalDocs
 /// </summary>
-public class ClaimRepositoryTests : IDisposable
+public class ClinicalNoteRepositoryTests : IDisposable
 {
-    private readonly RevenueServiceDbContext _db;
-    private readonly ClaimRepository _repo;
+    private readonly EncounterServiceDbContext _db;
+    private readonly ClinicalNoteRepository _repo;
 
-    public ClaimRepositoryTests()
+    public ClinicalNoteRepositoryTests()
     {
-        var options = new DbContextOptionsBuilder<RevenueServiceDbContext>()
-            .UseInMemoryDatabase($"Claim_55b41d0f7e0048f2997fd32fff9445ca")
+        var options = new DbContextOptionsBuilder<EncounterServiceDbContext>()
+            .UseInMemoryDatabase($"ClinicalNote_eb985e3dd4c543409e0c16acdfbd8ba8")
             .Options;
         var tenant = new TestTenantProvider("tenant-1");
-        _db = new RevenueServiceDbContext(options, tenant);
-        _repo = new ClaimRepository(_db);
+        _db = new EncounterServiceDbContext(options, tenant);
+        _repo = new ClinicalNoteRepository(_db);
     }
 
     [Fact]
     public async Task Create_PersistsEntity()
     {
-        var entity = new Claim
+        var entity = new ClinicalNote
         {
 
         };
@@ -54,7 +54,7 @@ public class ClaimRepositoryTests : IDisposable
     {
         for (int i = 0; i < 5; i++)
         {
-            await _repo.CreateAsync(new Claim
+            await _repo.CreateAsync(new ClinicalNote
             {
 
             });
@@ -70,7 +70,7 @@ public class ClaimRepositoryTests : IDisposable
     [Fact]
     public async Task Update_ModifiesEntity()
     {
-        var entity = new Claim
+        var entity = new ClinicalNote
         {
 
         };

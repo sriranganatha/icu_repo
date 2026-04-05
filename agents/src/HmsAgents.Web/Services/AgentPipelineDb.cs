@@ -720,6 +720,51 @@ public sealed class AgentPipelineDb : IDisposable
         return items;
     }
 
+    /// <summary>Update priority for a single backlog item.</summary>
+    public bool UpdateBacklogPriority(string runId, string itemId, int priority)
+    {
+        using var conn = Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "UPDATE BacklogItems SET Priority = @priority WHERE RunId = @runId AND Id = @id";
+        cmd.Parameters.AddWithValue("@priority", priority);
+        cmd.Parameters.AddWithValue("@runId", runId);
+        cmd.Parameters.AddWithValue("@id", itemId);
+        return cmd.ExecuteNonQuery() > 0;
+    }
+
+    /// <summary>Update status for a single backlog item.</summary>
+    public bool UpdateBacklogStatus(string runId, string itemId, string status)
+    {
+        using var conn = Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "UPDATE BacklogItems SET Status = @status WHERE RunId = @runId AND Id = @id";
+        cmd.Parameters.AddWithValue("@status", status);
+        cmd.Parameters.AddWithValue("@runId", runId);
+        cmd.Parameters.AddWithValue("@id", itemId);
+        return cmd.ExecuteNonQuery() > 0;
+    }
+
+    /// <summary>Update multiple fields on a single backlog item.</summary>
+    public bool UpdateBacklogItem(string runId, string itemId, int? priority, string? status, string? assignedAgent, int? iteration)
+    {
+        var setClauses = new List<string>();
+        var parameters = new List<(string name, object value)>();
+
+        if (priority.HasValue) { setClauses.Add("Priority = @priority"); parameters.Add(("@priority", priority.Value)); }
+        if (status is not null) { setClauses.Add("Status = @status"); parameters.Add(("@status", status)); }
+        if (assignedAgent is not null) { setClauses.Add("AssignedAgent = @agent"); parameters.Add(("@agent", assignedAgent)); }
+        if (iteration.HasValue) { setClauses.Add("Iteration = @iter"); parameters.Add(("@iter", iteration.Value)); }
+        if (setClauses.Count == 0) return false;
+
+        using var conn = Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = $"UPDATE BacklogItems SET {string.Join(", ", setClauses)} WHERE RunId = @runId AND Id = @id";
+        cmd.Parameters.AddWithValue("@runId", runId);
+        cmd.Parameters.AddWithValue("@id", itemId);
+        foreach (var (name, value) in parameters) cmd.Parameters.AddWithValue(name, value);
+        return cmd.ExecuteNonQuery() > 0;
+    }
+
     public List<RequirementRow> GetRequirements(string runId)
     {
         using var conn = Open();
@@ -1094,6 +1139,30 @@ public sealed class AgentPipelineDb : IDisposable
     private static DateTimeOffset? ParseNullableDateTimeOffset(string? s)
         => string.IsNullOrEmpty(s) ? null : DateTimeOffset.Parse(s);
 
+    /// <summary>Deletes all data from every table — full project reset.</summary>
+    public void PurgeAllData()
+    {
+        using var conn = Open();
+        using var tx = conn.BeginTransaction();
+        try
+        {
+            var tables = new[]
+            {
+                "AgentEvents", "AgentStatuses", "Requirements", "BacklogItems",
+                "Findings", "Artifacts", "TestDiagnostics", "AuditLog",
+                "HumanDecisions", "OrchestratorInstructions", "PipelineRuns"
+            };
+            foreach (var table in tables)
+            {
+                using var cmd = conn.CreateCommand();
+                cmd.CommandText = $"DELETE FROM {table}";
+                cmd.ExecuteNonQuery();
+            }
+            tx.Commit();
+        }
+        catch { tx.Rollback(); throw; }
+    }
+
     public void Dispose() { /* SQLite connections are opened/closed per operation */ }
 }
 
@@ -1145,6 +1214,13 @@ public sealed class BacklogItemRow
     public DateTimeOffset? StartedAt { get; set; }
     public DateTimeOffset? CompletedAt { get; set; }
     public string AssignedAgent { get; set; } = "";
+    // Gap-analysis & detail fields
+    public string? DetailedSpec { get; set; }
+    public List<string>? AffectedServices { get; set; }
+    public List<string>? IdentifiedGaps { get; set; }
+    public List<string>? MatchingArtifactPaths { get; set; }
+    public string Coverage { get; set; } = "NotAssessed";
+    public string ProducedBy { get; set; } = "";
 }
 
 public sealed class RequirementRow

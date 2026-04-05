@@ -1,35 +1,35 @@
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
-using Hms.AiService.Data;
-using Hms.AiService.Data.Entities;
-using Hms.AiService.Data.Repositories;
+using Hms.PatientService.Data;
+using Hms.PatientService.Data.Entities;
+using Hms.PatientService.Data.Repositories;
 using Xunit;
 
 namespace Hms.Tests.Repositories;
 
 /// <summary>
-/// Repository tests for AiInteraction using EF Core InMemory provider.
-/// Feature coverage: EP-P1, Module-P, AI
+/// Repository tests for PatientProfile using EF Core InMemory provider.
+/// Feature coverage: EP-01, Module-B, Patient
 /// </summary>
-public class AiInteractionRepositoryTests : IDisposable
+public class PatientProfileRepositoryTests : IDisposable
 {
-    private readonly AiServiceDbContext _db;
-    private readonly AiInteractionRepository _repo;
+    private readonly PatientServiceDbContext _db;
+    private readonly PatientProfileRepository _repo;
 
-    public AiInteractionRepositoryTests()
+    public PatientProfileRepositoryTests()
     {
-        var options = new DbContextOptionsBuilder<AiServiceDbContext>()
-            .UseInMemoryDatabase($"AiInteraction_0db57e5573a64bd7a4332ec02efbe5cb")
+        var options = new DbContextOptionsBuilder<PatientServiceDbContext>()
+            .UseInMemoryDatabase($"PatientProfile_46d87f1800094608a5dde54de9173aa6")
             .Options;
         var tenant = new TestTenantProvider("tenant-1");
-        _db = new AiServiceDbContext(options, tenant);
-        _repo = new AiInteractionRepository(_db);
+        _db = new PatientServiceDbContext(options, tenant);
+        _repo = new PatientProfileRepository(_db);
     }
 
     [Fact]
     public async Task Create_PersistsEntity()
     {
-        var entity = new AiInteraction
+        var entity = new PatientProfile
         {
 
         };
@@ -54,7 +54,7 @@ public class AiInteractionRepositoryTests : IDisposable
     {
         for (int i = 0; i < 5; i++)
         {
-            await _repo.CreateAsync(new AiInteraction
+            await _repo.CreateAsync(new PatientProfile
             {
 
             });
@@ -70,7 +70,7 @@ public class AiInteractionRepositoryTests : IDisposable
     [Fact]
     public async Task Update_ModifiesEntity()
     {
-        var entity = new AiInteraction
+        var entity = new PatientProfile
         {
 
         };

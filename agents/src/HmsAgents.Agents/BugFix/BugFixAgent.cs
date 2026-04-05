@@ -32,7 +32,10 @@ public sealed class BugFixAgent : IAgent
         var fixableCategories = new HashSet<string>
         {
             "NFR-CODE-01", "NFR-CODE-02", "NFR-TEST-01",
-            "Implementation", "MultiTenant", "Audit", "Conventions"
+            "Implementation", "MultiTenant", "Audit", "Conventions",
+            "Security", "Traceability", "Coverage",
+            "FeatureCoverage", "TestCoverage",
+            "Build", "Deployment", "Runtime", "Database"
         };
 
         var findings = context.Findings

@@ -72,16 +72,19 @@ public sealed class DatabaseAgent : IAgent
 
             // Docker + DDL provisioning
             var config = context.PipelineConfig;
+            var ddlExecuted = false;
+            var ddlSuccess = true;
             if (config is not null)
             {
                 var provisioner = new DockerDbProvisioner(_logger);
+                var containerOk = true; // assume ok if not spinning up
 
                 if (config.SpinUpDocker)
                 {
                     _logger.LogInformation("Spinning up Docker PostgreSQL container...");
                     if (context.ReportProgress is not null)
                         await context.ReportProgress(Type, $"Spinning up Docker PostgreSQL — container: {config.DockerContainerName}, port: {config.DbPort}");
-                    var containerOk = await provisioner.EnsureContainerAsync(config, ct);
+                    containerOk = await provisioner.EnsureContainerAsync(config, ct);
                     messages.Add(new AgentMessage
                     {
                         From = Type, To = AgentType.Orchestrator,
@@ -91,45 +94,81 @@ public sealed class DatabaseAgent : IAgent
                             : "Could not start PostgreSQL container. DDL execution skipped."
                     });
 
-                    if (containerOk && config.ExecuteDdl)
+                    if (!containerOk)
                     {
-                        _logger.LogInformation("Executing DDL — per-service schemas, tables, indexes, stored procedures, RLS...");
-                        if (context.ReportProgress is not null)
-                            await context.ReportProgress(Type, "Executing DDL — creating schemas, tables, indexes, stored procedures, RLS policies...");
-                        var (ddlOk, objectsCreated, ddlErrors) = await provisioner.ExecuteDdlAsync(config, ct);
-                        if (context.ReportProgress is not null)
-                            await context.ReportProgress(Type, $"DDL execution: {objectsCreated} database objects created{(ddlErrors.Count > 0 ? $", {ddlErrors.Count} errors" : "")}");
-                        messages.Add(new AgentMessage
+                        ddlSuccess = false;
+                        context.Findings.Add(new ReviewFinding
                         {
-                            From = Type, To = AgentType.Orchestrator,
-                            Subject = ddlOk ? "DDL execution succeeded" : "DDL completed with errors",
-                            Body = $"Created {objectsCreated} database objects." +
-                                   (ddlErrors.Count > 0 ? $" Errors: {string.Join("; ", ddlErrors)}" : "")
+                            Category = "Deployment",
+                            Severity = ReviewSeverity.Critical,
+                            Message = $"Docker PostgreSQL container '{config.DockerContainerName}' failed to start. DDL execution was skipped.",
+                            FilePath = "Infrastructure/Docker",
+                            Suggestion = "Verify Docker is running, check container name and port conflicts."
                         });
-
-                        artifacts.Add(new CodeArtifact
-                        {
-                            Layer = ArtifactLayer.Migration,
-                            RelativePath = "Infrastructure/Migrations/DdlExecutionLog.txt",
-                            FileName = "DdlExecutionLog.txt",
-                            Namespace = "Hms.Infrastructure",
-                            ProducedBy = AgentType.Database,
-                            Content = $"Objects Created: {objectsCreated} | Errors: {ddlErrors.Count}\n" +
-                                      string.Join("\n", ddlErrors.Select(e => $"ERROR: {e}"))
-                        });
+                        if (context.ReportProgress is not null)
+                            await context.ReportProgress(Type, $"⚠ Docker container '{config.DockerContainerName}' failed — DDL skipped");
                     }
+                }
+
+                // Execute DDL — decoupled from SpinUpDocker so DDL runs against existing containers too
+                if (containerOk && config.ExecuteDdl)
+                {
+                    _logger.LogInformation("Executing DDL — per-service schemas, tables, indexes, stored procedures, RLS...");
+                    if (context.ReportProgress is not null)
+                        await context.ReportProgress(Type, "Executing DDL — creating schemas, tables, indexes, stored procedures, RLS policies...");
+                    var (ddlOk, objectsCreated, ddlErrors) = await provisioner.ExecuteDdlAsync(config, ct);
+                    ddlExecuted = true;
+                    ddlSuccess = ddlOk;
+                    if (context.ReportProgress is not null)
+                        await context.ReportProgress(Type, $"DDL execution: {objectsCreated} database objects created{(ddlErrors.Count > 0 ? $", {ddlErrors.Count} errors" : "")}");
+
+                    // Surface DDL errors as ReviewFindings so orchestrator can dispatch BugFix
+                    foreach (var ddlErr in ddlErrors)
+                    {
+                        context.Findings.Add(new ReviewFinding
+                        {
+                            Category = "Database",
+                            Severity = ReviewSeverity.Error,
+                            Message = $"DDL execution error: {ddlErr}",
+                            FilePath = "Infrastructure/Migrations/DDL",
+                            Suggestion = "Check PostgreSQL connectivity, verify schema/table DDL syntax, and ensure the database user has CREATE privileges."
+                        });
+                        _logger.LogWarning("DDL error surfaced as finding: {Error}", ddlErr);
+                        if (context.ReportProgress is not null)
+                            await context.ReportProgress(Type, $"⚠ DDL error: {ddlErr}");
+                    }
+
+                    messages.Add(new AgentMessage
+                    {
+                        From = Type, To = AgentType.Orchestrator,
+                        Subject = ddlOk ? "DDL execution succeeded" : "DDL completed with errors",
+                        Body = $"Created {objectsCreated} database objects." +
+                               (ddlErrors.Count > 0 ? $" Errors: {string.Join("; ", ddlErrors)}" : "")
+                    });
+
+                    artifacts.Add(new CodeArtifact
+                    {
+                        Layer = ArtifactLayer.Migration,
+                        RelativePath = "Infrastructure/Migrations/DdlExecutionLog.txt",
+                        FileName = "DdlExecutionLog.txt",
+                        Namespace = "Hms.Infrastructure",
+                        ProducedBy = AgentType.Database,
+                        Content = $"Objects Created: {objectsCreated} | Errors: {ddlErrors.Count}\n" +
+                                  string.Join("\n", ddlErrors.Select(e => $"ERROR: {e}"))
+                    });
                 }
             }
 
-            context.AgentStatuses[Type] = AgentStatus.Completed;
-            _logger.LogInformation("DatabaseAgent completed — {Count} artifacts across {Svc} microservices",
-                artifacts.Count, MicroserviceCatalog.All.Length);
+            context.AgentStatuses[Type] = ddlSuccess ? AgentStatus.Completed : AgentStatus.Failed;
+            var ddlSuffix = ddlExecuted ? (ddlSuccess ? " | DDL executed successfully" : " | DDL completed with errors") : "";
+            _logger.LogInformation("DatabaseAgent completed — {Count} artifacts across {Svc} microservices{Ddl}",
+                artifacts.Count, MicroserviceCatalog.All.Length, ddlSuffix);
 
             return new AgentResult
             {
                 Agent = Type,
-                Success = true,
-                Summary = $"Generated {artifacts.Count} DB artifacts across {MicroserviceCatalog.All.Length} microservices",
+                Success = ddlSuccess,
+                Summary = $"Generated {artifacts.Count} DB artifacts across {MicroserviceCatalog.All.Length} microservices{ddlSuffix}",
                 Artifacts = artifacts,
                 Messages =
                 [

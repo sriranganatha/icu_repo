@@ -30,4 +30,6 @@ public sealed class AgentContext
     public Func<AgentType, string, Task>? ReportProgress { get; set; }
     public DateTimeOffset StartedAt { get; init; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? CompletedAt { get; set; }
+    /// <summary>Set to true after the first DDL approval in this run — prevents re-prompting on agent re-dispatch.</summary>
+    public bool DdlApprovedForRun { get; set; }
 }

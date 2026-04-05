@@ -81,15 +81,32 @@ public sealed class DockerDbProvisioner
         int objectsCreated = 0;
 
         await using var conn = new NpgsqlConnection(connStr);
-        try
+
+        // Retry connection up to 3 times with delay — container may still be initializing
+        const int maxConnRetries = 3;
+        for (int retry = 0; retry < maxConnRetries; retry++)
         {
-            await conn.OpenAsync(ct);
-            _logger.LogInformation("Connected to PostgreSQL at localhost:{Port}/{Db}", config.DbPort, config.DbName);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to connect to PostgreSQL");
-            return (false, 0, [ex.Message]);
+            try
+            {
+                await conn.OpenAsync(ct);
+                _logger.LogInformation("Connected to PostgreSQL at {Host}:{Port}/{Db} (attempt {Attempt})",
+                    config.DbHost, config.DbPort, config.DbName, retry + 1);
+                break;
+            }
+            catch (Exception ex) when (retry < maxConnRetries - 1)
+            {
+                _logger.LogWarning(ex, "PostgreSQL connection attempt {Attempt}/{Max} failed, retrying in 3s...",
+                    retry + 1, maxConnRetries);
+                await Task.Delay(3000, ct);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to connect to PostgreSQL at {Host}:{Port}/{Db} after {Max} attempts. " +
+                    "User={User}, ConnStr={ConnStr}",
+                    config.DbHost, config.DbPort, config.DbName, maxConnRetries, config.DbUser,
+                    $"Host={config.DbHost};Port={config.DbPort};Database={config.DbName};Username={config.DbUser};Password=***");
+                return (false, 0, [$"Connection failed after {maxConnRetries} attempts: {ex.Message}"]);
+            }
         }
 
         // 1. Create schemas

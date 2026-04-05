@@ -33,7 +33,7 @@ public sealed class ExpandedRequirement
     public string Title { get; init; } = string.Empty;
     public string Description { get; init; } = string.Empty;
     public string Module { get; init; } = string.Empty;
-    public int Priority { get; init; }
+    public int Priority { get; set; }
     public int Iteration { get; set; }
     public List<string> AcceptanceCriteria { get; init; } = [];
     public List<string> DependsOn { get; init; } = [];

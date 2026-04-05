@@ -1,35 +1,35 @@
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
-using Hms.EmergencyService.Data;
-using Hms.EmergencyService.Data.Entities;
-using Hms.EmergencyService.Data.Repositories;
+using Hms.AiService.Data;
+using Hms.AiService.Data.Entities;
+using Hms.AiService.Data.Repositories;
 using Xunit;
 
 namespace Hms.Tests.Repositories;
 
 /// <summary>
-/// Repository tests for EmergencyArrival using EF Core InMemory provider.
-/// Feature coverage: EP-03, Module-E, Emergency
+/// Repository tests for AiInteraction using EF Core InMemory provider.
+/// Feature coverage: EP-P1, Module-P, AI
 /// </summary>
-public class EmergencyArrivalRepositoryTests : IDisposable
+public class AiInteractionRepositoryTests : IDisposable
 {
-    private readonly EmergencyServiceDbContext _db;
-    private readonly EmergencyArrivalRepository _repo;
+    private readonly AiServiceDbContext _db;
+    private readonly AiInteractionRepository _repo;
 
-    public EmergencyArrivalRepositoryTests()
+    public AiInteractionRepositoryTests()
     {
-        var options = new DbContextOptionsBuilder<EmergencyServiceDbContext>()
-            .UseInMemoryDatabase($"EmergencyArrival_bd2e7645456346f785bcbc30c644bdc3")
+        var options = new DbContextOptionsBuilder<AiServiceDbContext>()
+            .UseInMemoryDatabase($"AiInteraction_240f95dc17804de99280edbd16881ead")
             .Options;
         var tenant = new TestTenantProvider("tenant-1");
-        _db = new EmergencyServiceDbContext(options, tenant);
-        _repo = new EmergencyArrivalRepository(_db);
+        _db = new AiServiceDbContext(options, tenant);
+        _repo = new AiInteractionRepository(_db);
     }
 
     [Fact]
     public async Task Create_PersistsEntity()
     {
-        var entity = new EmergencyArrival
+        var entity = new AiInteraction
         {
 
         };
@@ -54,7 +54,7 @@ public class EmergencyArrivalRepositoryTests : IDisposable
     {
         for (int i = 0; i < 5; i++)
         {
-            await _repo.CreateAsync(new EmergencyArrival
+            await _repo.CreateAsync(new AiInteraction
             {
 
             });
@@ -70,7 +70,7 @@ public class EmergencyArrivalRepositoryTests : IDisposable
     [Fact]
     public async Task Update_ModifiesEntity()
     {
-        var entity = new EmergencyArrival
+        var entity = new AiInteraction
         {
 
         };

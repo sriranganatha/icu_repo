@@ -1,35 +1,35 @@
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
-using Hms.InpatientService.Data;
-using Hms.InpatientService.Data.Entities;
-using Hms.InpatientService.Data.Repositories;
+using Hms.RevenueService.Data;
+using Hms.RevenueService.Data.Entities;
+using Hms.RevenueService.Data.Repositories;
 using Xunit;
 
 namespace Hms.Tests.Repositories;
 
 /// <summary>
-/// Repository tests for Admission using EF Core InMemory provider.
-/// Feature coverage: EP-04, Module-F, ADT
+/// Repository tests for Claim using EF Core InMemory provider.
+/// Feature coverage: EP-12, Module-L, Revenue
 /// </summary>
-public class AdmissionRepositoryTests : IDisposable
+public class ClaimRepositoryTests : IDisposable
 {
-    private readonly InpatientServiceDbContext _db;
-    private readonly AdmissionRepository _repo;
+    private readonly RevenueServiceDbContext _db;
+    private readonly ClaimRepository _repo;
 
-    public AdmissionRepositoryTests()
+    public ClaimRepositoryTests()
     {
-        var options = new DbContextOptionsBuilder<InpatientServiceDbContext>()
-            .UseInMemoryDatabase($"Admission_fba34f48ef8c4793a17b6d9fdf695fcc")
+        var options = new DbContextOptionsBuilder<RevenueServiceDbContext>()
+            .UseInMemoryDatabase($"Claim_784ec37e522043acbfac0f3db959c8b8")
             .Options;
         var tenant = new TestTenantProvider("tenant-1");
-        _db = new InpatientServiceDbContext(options, tenant);
-        _repo = new AdmissionRepository(_db);
+        _db = new RevenueServiceDbContext(options, tenant);
+        _repo = new ClaimRepository(_db);
     }
 
     [Fact]
     public async Task Create_PersistsEntity()
     {
-        var entity = new Admission
+        var entity = new Claim
         {
 
         };
@@ -54,7 +54,7 @@ public class AdmissionRepositoryTests : IDisposable
     {
         for (int i = 0; i < 5; i++)
         {
-            await _repo.CreateAsync(new Admission
+            await _repo.CreateAsync(new Claim
             {
 
             });
@@ -70,7 +70,7 @@ public class AdmissionRepositoryTests : IDisposable
     [Fact]
     public async Task Update_ModifiesEntity()
     {
-        var entity = new Admission
+        var entity = new Claim
         {
 
         };

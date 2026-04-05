@@ -16,6 +16,9 @@
             <button id="btnRunPipeline" class="btn btn-primary" onclick="runPipeline()">
                 <i class="bi bi-play-fill"></i> Run Full Pipeline
             </button>
+            <button class="btn btn-outline-danger btn-sm" onclick="resetProject()" title="Reset everything and start from scratch">
+                <i class="bi bi-arrow-counterclockwise"></i> Reset Project
+            </button>
         </div>
     </div>
 
@@ -277,9 +280,9 @@
 
     <!-- Backlog Tracker Panel -->
     <div class="card mb-4 border-secondary">
-        <div class="card-header bg-secondary bg-opacity-10 d-flex justify-content-between align-items-center">
-            <span><i class="bi bi-kanban text-secondary me-2"></i><strong>Backlog Tracker</strong> <small class="text-muted ms-2">Work items expanded from requirements — managed by BacklogAgent</small></span>
-            <div>
+        <div class="card-header bg-secondary bg-opacity-10 d-flex justify-content-between align-items-center flex-wrap gap-2">
+            <span><i class="bi bi-kanban text-secondary me-2"></i><strong>Backlog Tracker</strong> <small class="text-muted ms-2">SDLC work items — managed by BacklogAgent</small></span>
+            <div class="d-flex align-items-center gap-1 flex-wrap">
                 <span class="badge bg-primary me-1" id="blStatNew">0 New</span>
                 <span class="badge bg-info me-1" id="blStatQueued">0 Queued</span>
                 <span class="badge bg-warning text-dark me-1" id="blStatDev">0 In Dev</span>
@@ -302,25 +305,83 @@
                         <div class="progress-bar bg-danger" id="blBarBlocked" role="progressbar" style="width: 0%"></div>
                     </div>
                 </div>
+
+                <!-- ── Filter / Search bar ── -->
+                <div class="col-12 px-3 pt-2 pb-1">
+                    <div class="d-flex gap-2 flex-wrap align-items-center">
+                        <input type="text" class="form-control form-control-sm" id="blSearchText" placeholder="Search title / module..." style="max-width:220px" oninput="_blPage=1;applyBacklogFilters()">
+                        <select class="form-select form-select-sm" id="blFilterStatus" style="max-width:130px" onchange="_blPage=1;applyBacklogFilters()">
+                            <option value="">All Statuses</option>
+                            <option value="New">New</option>
+                            <option value="InQueue">InQueue</option>
+                            <option value="UnderDev">UnderDev</option>
+                            <option value="Completed">Completed</option>
+                            <option value="Blocked">Blocked</option>
+                        </select>
+                        <select class="form-select form-select-sm" id="blFilterType" style="max-width:120px" onchange="_blPage=1;applyBacklogFilters()">
+                            <option value="">All Types</option>
+                            <option value="Epic">Epic</option>
+                            <option value="UserStory">UserStory</option>
+                            <option value="UseCase">UseCase</option>
+                            <option value="Task">Task</option>
+                        </select>
+                        <select class="form-select form-select-sm" id="blFilterModule" style="max-width:140px" onchange="_blPage=1;applyBacklogFilters()">
+                            <option value="">All Modules</option>
+                        </select>
+                        <select class="form-select form-select-sm" id="blFilterAgent" style="max-width:150px" onchange="_blPage=1;applyBacklogFilters()">
+                            <option value="">All Agents</option>
+                        </select>
+                        <select class="form-select form-select-sm" id="blFilterPriority" style="max-width:100px" onchange="_blPage=1;applyBacklogFilters()">
+                            <option value="">All P</option>
+                            <option value="0">P0 (Critical)</option>
+                            <option value="1">P1 (High)</option>
+                            <option value="2">P2 (Medium)</option>
+                            <option value="3">P3 (Low)</option>
+                        </select>
+                        <button class="btn btn-outline-secondary btn-sm" onclick="clearBacklogFilters()" title="Clear all filters"><i class="bi bi-x-circle"></i></button>
+                        <span class="text-muted small ms-auto" id="blFilterCount"></span>
+                    </div>
+                </div>
+
                 <!-- Backlog items table -->
                 <div class="col-12">
-                    <div style="max-height: 300px; overflow-y: auto;">
+                    <div style="max-height: 400px; overflow-y: auto;">
                         <table class="table table-sm table-hover mb-0" id="backlogTable">
                             <thead class="table-light sticky-top">
                                 <tr>
-                                    <th style="width:60px">Type</th>
-                                    <th>Title</th>
-                                    <th style="width:80px">Module</th>
-                                    <th style="width:80px">Status</th>
-                                    <th style="width:110px">Assigned Agent</th>
-                                    <th style="width:40px">P</th>
-                                    <th style="width:40px">Iter</th>
+                                    <th style="width:60px;cursor:pointer" onclick="sortBacklog('itemType')">Type <i class="bi bi-arrow-down-up text-muted" style="font-size:.7rem"></i></th>
+                                    <th style="cursor:pointer" onclick="sortBacklog('title')">Title <i class="bi bi-arrow-down-up text-muted" style="font-size:.7rem"></i></th>
+                                    <th style="width:90px;cursor:pointer" onclick="sortBacklog('module')">Module <i class="bi bi-arrow-down-up text-muted" style="font-size:.7rem"></i></th>
+                                    <th style="width:90px;cursor:pointer" onclick="sortBacklog('status')">Status <i class="bi bi-arrow-down-up text-muted" style="font-size:.7rem"></i></th>
+                                    <th style="width:110px;cursor:pointer" onclick="sortBacklog('assignedAgent')">Agent <i class="bi bi-arrow-down-up text-muted" style="font-size:.7rem"></i></th>
+                                    <th style="width:80px;cursor:pointer" onclick="sortBacklog('priority')">Priority <i class="bi bi-arrow-down-up text-muted" style="font-size:.7rem"></i></th>
+                                    <th style="width:40px;cursor:pointer" onclick="sortBacklog('iteration')">Iter <i class="bi bi-arrow-down-up text-muted" style="font-size:.7rem"></i></th>
+                                    <th style="width:80px">Actions</th>
                                 </tr>
                             </thead>
                             <tbody id="backlogBody">
-                                <tr><td colspan="7" class="text-center text-muted py-3">No backlog items yet — submit requirements or run pipeline</td></tr>
+                                <tr><td colspan="8" class="text-center text-muted py-3">No backlog items yet — submit requirements or run pipeline</td></tr>
                             </tbody>
                         </table>
+                    </div>
+                    <!-- Pagination controls -->
+                    <div class="d-flex justify-content-between align-items-center px-3 py-2 border-top bg-light" id="blPaginationBar" style="display:none!important">
+                        <div class="d-flex align-items-center gap-2">
+                            <small class="text-muted">Rows per page:</small>
+                            <select class="form-select form-select-sm" style="width:70px" id="blPageSize" onchange="blChangePageSize()">
+                                <option value="25" selected>25</option>
+                                <option value="50">50</option>
+                                <option value="100">100</option>
+                                <option value="0">All</option>
+                            </select>
+                        </div>
+                        <small class="text-muted" id="blPageInfo"></small>
+                        <div class="btn-group btn-group-sm">
+                            <button class="btn btn-outline-secondary" onclick="blGoPage('first')" title="First page"><i class="bi bi-chevron-bar-left"></i></button>
+                            <button class="btn btn-outline-secondary" onclick="blGoPage('prev')" title="Previous"><i class="bi bi-chevron-left"></i></button>
+                            <button class="btn btn-outline-secondary" onclick="blGoPage('next')" title="Next"><i class="bi bi-chevron-right"></i></button>
+                            <button class="btn btn-outline-secondary" onclick="blGoPage('last')" title="Last page"><i class="bi bi-chevron-bar-right"></i></button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -700,6 +761,7 @@
                     <li class="nav-item"><a class="nav-link active" data-bs-toggle="tab" href="#adTabTimeline">Activity Timeline</a></li>
                     <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#adTabAudit">Audit Log</a></li>
                     <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#adTabDecisions">Decisions</a></li>
+                    <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#adTabAsk"><i class="bi bi-chat-dots me-1"></i>Ask Agent</a></li>
                 </ul>
                 <div class="tab-content p-3">
                     <!-- Activity Timeline tab -->
@@ -723,6 +785,19 @@
                     <div class="tab-pane fade" id="adTabDecisions">
                         <div style="max-height: 450px; overflow-y: auto;">
                             <div id="adDecisionList" class="d-flex flex-column gap-2"></div>
+                        </div>
+                    </div>
+                    <!-- Ask Agent tab -->
+                    <div class="tab-pane fade" id="adTabAsk">
+                        <div class="mb-2">
+                            <small class="text-muted">Ask this agent about its completed or in-progress work. Scope is limited to this agent's artifacts, findings, and backlog items.</small>
+                        </div>
+                        <div id="adChatHistory" style="max-height:320px; overflow-y:auto; border:1px solid #dee2e6; border-radius:6px; padding:10px; background:#f8f9fa;" class="mb-2">
+                            <p class="text-muted text-center py-4 mb-0" id="adChatPlaceholder">Ask a question about this agent's work...</p>
+                        </div>
+                        <div class="input-group">
+                            <input type="text" class="form-control" id="adAskInput" placeholder="e.g. What artifacts did you generate? What errors did you fix?" onkeydown="if(event.key==='Enter')askAgent()">
+                            <button class="btn btn-primary" onclick="askAgent()" id="adAskBtn"><i class="bi bi-send me-1"></i>Ask</button>
                         </div>
                     </div>
                 </div>
@@ -1420,6 +1495,80 @@
         }
         restoreDashboardState();
 
+        // ─── Project Reset ──────────────────────────────────────────
+        async function resetProject() {
+            const deleteCode = await new Promise(resolve => {
+                const modal = document.createElement('div');
+                modal.className = 'modal fade';
+                modal.tabIndex = -1;
+                modal.innerHTML = `
+                    <div class="modal-dialog">
+                        <div class="modal-content">
+                            <div class="modal-header bg-danger text-white py-2">
+                                <h6 class="modal-title"><i class="bi bi-exclamation-triangle-fill me-1"></i> Reset Project — Confirm</h6>
+                                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                            </div>
+                            <div class="modal-body">
+                                <p><strong>This will permanently delete:</strong></p>
+                                <ul class="mb-3">
+                                    <li>All pipeline run history &amp; agent events</li>
+                                    <li>All backlog items, findings, artifacts, test diagnostics</li>
+                                    <li>All audit log entries and HITL decisions</li>
+                                    <li>In-memory pipeline state</li>
+                                </ul>
+                                <div class="form-check mb-2">
+                                    <input class="form-check-input" type="checkbox" id="resetDeleteCode">
+                                    <label class="form-check-label" for="resetDeleteCode">
+                                        Also delete generated code (Hms.* folders in Output Path)
+                                    </label>
+                                </div>
+                                <p class="text-muted small mb-0">The requirements source files will NOT be deleted.</p>
+                            </div>
+                            <div class="modal-footer py-2">
+                                <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+                                <button class="btn btn-danger btn-sm" id="resetConfirmBtn">Reset Everything</button>
+                            </div>
+                        </div>
+                    </div>`;
+                document.body.appendChild(modal);
+                const bsModal = new bootstrap.Modal(modal);
+                modal.querySelector('#resetConfirmBtn').onclick = () => {
+                    const del = modal.querySelector('#resetDeleteCode').checked;
+                    bsModal.hide();
+                    resolve(del);
+                };
+                modal.addEventListener('hidden.bs.modal', () => { modal.remove(); resolve(null); });
+                bsModal.show();
+            });
+
+            if (deleteCode === null) return; // cancelled
+
+            const outputPath = document.getElementById('inputOutputPath')?.value?.trim() || '';
+            try {
+                const res = await fetch('/api/pipeline/reset', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ deleteGeneratedCode: deleteCode, outputPath })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    // Clear all UI state
+                    resetCards();
+                    nocResetCharts();
+                    clearLog();
+                    _backlogItems = [];
+                    _blPage = 1;
+                    applyBacklogFilters();
+                    document.getElementById('btnRunPipeline').disabled = false;
+                    appendLog('info', `Project reset complete.${data.outputDeleted ? ' Generated code deleted.' : ''} Ready to start fresh.`);
+                } else {
+                    appendLog('error', 'Reset failed: ' + (data.error || 'unknown'));
+                }
+            } catch (e) {
+                appendLog('error', 'Reset request failed: ' + e.message);
+            }
+        }
+
         // ─── Pipeline + Card logic ──────────────────────────────────────
         async function runPipeline() {
             document.getElementById("btnRunPipeline").disabled = true;
@@ -1676,6 +1825,17 @@
         }
 
         // ─── Backlog Tracker ────────────────────────────────────────
+        let _backlogItems = [];         // raw items from API
+        let _backlogSortField = 'priority';
+        let _backlogSortAsc = true;
+        let _blPage = 1;
+        let _blPageSize = 25;
+
+        const blStatusColors = { 'New': 'primary', 'InQueue': 'info', 'UnderDev': 'warning', 'Completed': 'success', 'Blocked': 'danger' };
+        const blTypeIcons = { 'Epic': 'bi-layers', 'UserStory': 'bi-person', 'UseCase': 'bi-lightning', 'Task': 'bi-check-square' };
+        const blPriorityLabels = { 0: 'P0 Critical', 1: 'P1 High', 2: 'P2 Medium', 3: 'P3 Low' };
+        const blPriorityBadge = { 0: 'danger', 1: 'warning text-dark', 2: 'info', 3: 'secondary' };
+
         async function refreshBacklog() {
             try {
                 const res = await fetch('/api/pipeline/backlog');
@@ -1697,29 +1857,267 @@
                 document.getElementById('blBarDone').style.width = ((s.completed || 0) / total * 100) + '%';
                 document.getElementById('blBarBlocked').style.width = ((s.blocked || 0) / total * 100) + '%';
 
-                // Table
-                const statusColors = { 'New': 'primary', 'InQueue': 'info', 'UnderDev': 'warning', 'Completed': 'success', 'Blocked': 'danger' };
-                const typeIcons = { 'Epic': 'bi-layers', 'UserStory': 'bi-person', 'UseCase': 'bi-lightning', 'Task': 'bi-check-square' };
-                const tbody = document.getElementById('backlogBody');
-                const items = Array.isArray(data.items) ? data.items : [];
-                if (items.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-3">No backlog items yet</td></tr>';
-                    return;
-                }
-                tbody.innerHTML = items.map(item => `
-                    <tr>
-                        <td><i class="bi ${typeIcons[item.itemType] || 'bi-circle'} me-1"></i><small>${item.itemType}</small></td>
-                        <td title="${(item.description||'').replace(/"/g,'&quot;')}">${item.title}</td>
-                        <td><small>${item.module}</small></td>
-                        <td><span class="badge bg-${statusColors[item.status] || 'secondary'}">${item.status}</span></td>
-                        <td><small class="text-muted">${item.assignedAgent || '—'}</small></td>
-                        <td>${item.priority}</td>
-                        <td>${item.iteration}</td>
-                    </tr>
-                `).join('');
+                // Store items and populate filters
+                _backlogItems = Array.isArray(data.items) ? data.items : [];
+                populateBacklogFilterDropdowns();
+                applyBacklogFilters();
             } catch (e) {
                 console.warn('Backlog refresh failed:', e);
             }
+        }
+
+        function populateBacklogFilterDropdowns() {
+            const modules = [...new Set(_backlogItems.map(i => i.module).filter(Boolean))].sort();
+            const agents = [...new Set(_backlogItems.map(i => i.assignedAgent).filter(Boolean))].sort();
+
+            const modSel = document.getElementById('blFilterModule');
+            const curMod = modSel.value;
+            modSel.innerHTML = '<option value="">All Modules</option>' + modules.map(m => `<option value="${m}">${m}</option>`).join('');
+            modSel.value = curMod;
+
+            const agSel = document.getElementById('blFilterAgent');
+            const curAg = agSel.value;
+            agSel.innerHTML = '<option value="">All Agents</option>' + agents.map(a => `<option value="${a}">${a}</option>`).join('');
+            agSel.value = curAg;
+        }
+
+        function getFilteredBacklogItems() {
+            const search = (document.getElementById('blSearchText').value || '').toLowerCase();
+            const fStatus = document.getElementById('blFilterStatus').value;
+            const fType = document.getElementById('blFilterType').value;
+            const fModule = document.getElementById('blFilterModule').value;
+            const fAgent = document.getElementById('blFilterAgent').value;
+            const fPriority = document.getElementById('blFilterPriority').value;
+
+            let items = _backlogItems.filter(item => {
+                if (search && !(item.title || '').toLowerCase().includes(search) && !(item.module || '').toLowerCase().includes(search) && !(item.description || '').toLowerCase().includes(search)) return false;
+                if (fStatus && item.status !== fStatus) return false;
+                if (fType && item.itemType !== fType) return false;
+                if (fModule && item.module !== fModule) return false;
+                if (fAgent && item.assignedAgent !== fAgent) return false;
+                if (fPriority !== '' && item.priority !== parseInt(fPriority)) return false;
+                return true;
+            });
+
+            // Sort
+            items.sort((a, b) => {
+                let va = a[_backlogSortField] ?? '';
+                let vb = b[_backlogSortField] ?? '';
+                if (typeof va === 'number') return _backlogSortAsc ? va - vb : vb - va;
+                va = String(va).toLowerCase(); vb = String(vb).toLowerCase();
+                return _backlogSortAsc ? va.localeCompare(vb) : vb.localeCompare(va);
+            });
+            return items;
+        }
+
+        function applyBacklogFilters() {
+            const allFiltered = getFilteredBacklogItems();
+            const totalFiltered = allFiltered.length;
+            const tbody = document.getElementById('backlogBody');
+            const pagBar = document.getElementById('blPaginationBar');
+
+            // Pagination math
+            const pageSize = _blPageSize > 0 ? _blPageSize : totalFiltered;
+            const totalPages = Math.max(1, Math.ceil(totalFiltered / pageSize));
+            if (_blPage > totalPages) _blPage = totalPages;
+            if (_blPage < 1) _blPage = 1;
+            const start = (_blPage - 1) * pageSize;
+            const items = allFiltered.slice(start, start + pageSize);
+
+            document.getElementById('blFilterCount').textContent = `${totalFiltered} of ${_backlogItems.length} items`;
+
+            // Show/hide pagination bar
+            if (totalFiltered > 25) {
+                pagBar.style.removeProperty('display');
+                pagBar.classList.add('d-flex');
+                document.getElementById('blPageInfo').textContent = `${start + 1}–${Math.min(start + pageSize, totalFiltered)} of ${totalFiltered} (page ${_blPage}/${totalPages})`;
+            } else {
+                pagBar.classList.remove('d-flex');
+                pagBar.style.display = 'none';
+            }
+
+            if (items.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted py-3">No items match current filters</td></tr>';
+                return;
+            }
+            tbody.innerHTML = items.map(item => {
+                const pLabel = blPriorityLabels[item.priority] || `P${item.priority}`;
+                const pBadge = blPriorityBadge[item.priority] || 'secondary';
+                const escapedDesc = (item.description || '').replace(/"/g, '&quot;');
+                return `
+                <tr data-item-id="${item.id}">
+                    <td><i class="bi ${blTypeIcons[item.itemType] || 'bi-circle'} me-1"></i><small>${item.itemType}</small></td>
+                    <td title="${escapedDesc}">
+                        <span>${item.title}</span>
+                        ${item.tags && item.tags.length ? '<br>' + item.tags.map(t => `<span class="badge bg-light text-dark border me-1" style="font-size:.65rem">${t}</span>`).join('') : ''}
+                    </td>
+                    <td><small>${item.module || '—'}</small></td>
+                    <td>
+                        <select class="form-select form-select-sm border-0 p-0" style="font-size:.75rem;background-color:transparent" onchange="updateBacklogField('${item.id}','status',this.value)">
+                            ${['New','InQueue','UnderDev','Completed','Blocked'].map(s => `<option value="${s}" ${item.status === s ? 'selected' : ''} class="bg-white">${s}</option>`).join('')}
+                        </select>
+                    </td>
+                    <td><small class="text-muted">${item.assignedAgent || '—'}</small></td>
+                    <td>
+                        <select class="form-select form-select-sm border-0 p-0" style="font-size:.75rem;background-color:transparent" onchange="updateBacklogField('${item.id}','priority',parseInt(this.value))">
+                            <option value="0" ${item.priority === 0 ? 'selected' : ''} class="bg-white">P0 Critical</option>
+                            <option value="1" ${item.priority === 1 ? 'selected' : ''} class="bg-white">P1 High</option>
+                            <option value="2" ${item.priority === 2 ? 'selected' : ''} class="bg-white">P2 Medium</option>
+                            <option value="3" ${item.priority === 3 ? 'selected' : ''} class="bg-white">P3 Low</option>
+                        </select>
+                    </td>
+                    <td>${item.iteration}</td>
+                    <td>
+                        <div class="btn-group btn-group-sm">
+                            <button class="btn btn-outline-primary btn-sm py-0 px-1" onclick="showBacklogDetail('${item.id}')" title="Details"><i class="bi bi-eye"></i></button>
+                            <button class="btn btn-outline-warning btn-sm py-0 px-1" onclick="promoteBacklogItem('${item.id}')" title="Promote priority"><i class="bi bi-arrow-up"></i></button>
+                        </div>
+                    </td>
+                </tr>`;
+            }).join('');
+        }
+
+        function sortBacklog(field) {
+            if (_backlogSortField === field) { _backlogSortAsc = !_backlogSortAsc; }
+            else { _backlogSortField = field; _backlogSortAsc = true; }
+            _blPage = 1;
+            applyBacklogFilters();
+        }
+
+        function clearBacklogFilters() {
+            document.getElementById('blSearchText').value = '';
+            document.getElementById('blFilterStatus').value = '';
+            document.getElementById('blFilterType').value = '';
+            document.getElementById('blFilterModule').value = '';
+            document.getElementById('blFilterAgent').value = '';
+            document.getElementById('blFilterPriority').value = '';
+            _backlogSortField = 'priority'; _backlogSortAsc = true;
+            _blPage = 1;
+            applyBacklogFilters();
+        }
+
+        function blGoPage(dir) {
+            const total = getFilteredBacklogItems().length;
+            const pageSize = _blPageSize > 0 ? _blPageSize : total;
+            const totalPages = Math.max(1, Math.ceil(total / pageSize));
+            if (dir === 'first') _blPage = 1;
+            else if (dir === 'prev') _blPage = Math.max(1, _blPage - 1);
+            else if (dir === 'next') _blPage = Math.min(totalPages, _blPage + 1);
+            else if (dir === 'last') _blPage = totalPages;
+            applyBacklogFilters();
+        }
+
+        function blChangePageSize() {
+            _blPageSize = parseInt(document.getElementById('blPageSize').value);
+            _blPage = 1;
+            applyBacklogFilters();
+        }
+
+        async function updateBacklogField(itemId, field, value) {
+            try {
+                const body = {};
+                body[field] = value;
+                const res = await fetch(`/api/pipeline/backlog/${itemId}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+                if (!res.ok) { console.warn('Update failed:', await res.text()); return; }
+                // Update local cache
+                const item = _backlogItems.find(i => i.id === itemId);
+                if (item) item[field] = value;
+                // Re-render stats if status changed
+                if (field === 'status') refreshBacklog();
+            } catch (e) { console.warn('Backlog update failed:', e); }
+        }
+
+        async function promoteBacklogItem(itemId) {
+            const item = _backlogItems.find(i => i.id === itemId);
+            if (!item || item.priority <= 0) return;
+            await updateBacklogField(itemId, 'priority', item.priority - 1);
+            applyBacklogFilters();
+        }
+
+        function showBacklogDetail(itemId) {
+            const item = _backlogItems.find(i => i.id === itemId);
+            if (!item) return;
+            const pLabel = blPriorityLabels[item.priority] || `P${item.priority}`;
+            const ac = item.acceptanceCriteria || [];
+            const deps = item.dependsOn || [];
+            const tags = item.tags || [];
+
+            const html = `
+                <div class="mb-3">
+                    <div class="d-flex justify-content-between align-items-start mb-2">
+                        <div>
+                            <h6 class="mb-1">${item.title}</h6>
+                            <span class="badge bg-${blStatusColors[item.status] || 'secondary'} me-1">${item.status}</span>
+                            <span class="badge bg-${blPriorityBadge[item.priority] || 'secondary'} me-1">${pLabel}</span>
+                            <span class="badge bg-light text-dark border me-1">${item.itemType}</span>
+                            ${item.module ? `<span class="badge bg-light text-dark border">${item.module}</span>` : ''}
+                        </div>
+                        <small class="text-muted">ID: ${item.id}</small>
+                    </div>
+                    <p class="text-muted small mb-2">${item.description || 'No description'}</p>
+                    ${item.assignedAgent ? `<p class="small"><strong>Assigned:</strong> ${item.assignedAgent}</p>` : ''}
+                    <p class="small mb-1"><strong>Iteration:</strong> ${item.iteration} &nbsp; <strong>Created:</strong> ${new Date(item.createdAt).toLocaleString()}</p>
+                    ${item.startedAt ? `<p class="small mb-1"><strong>Started:</strong> ${new Date(item.startedAt).toLocaleString()}</p>` : ''}
+                    ${item.completedAt ? `<p class="small mb-1"><strong>Completed:</strong> ${new Date(item.completedAt).toLocaleString()}</p>` : ''}
+                </div>
+                ${ac.length ? `<div class="mb-2"><strong class="small">Acceptance Criteria:</strong><ul class="small mb-0">${ac.map(c => `<li>${c}</li>`).join('')}</ul></div>` : ''}
+                ${deps.length ? `<div class="mb-2"><strong class="small">Dependencies:</strong><ul class="small mb-0">${deps.map(d => `<li>${d}</li>`).join('')}</ul></div>` : ''}
+                ${tags.length ? `<div class="mb-2"><strong class="small">Tags:</strong> ${tags.map(t => `<span class="badge bg-light text-dark border me-1">${t}</span>`).join('')}</div>` : ''}
+                <hr>
+                <div class="row g-2">
+                    <div class="col-6">
+                        <label class="form-label small mb-1">Priority</label>
+                        <select class="form-select form-select-sm" id="detailPriority">
+                            <option value="0" ${item.priority===0?'selected':''}>P0 — Critical</option>
+                            <option value="1" ${item.priority===1?'selected':''}>P1 — High</option>
+                            <option value="2" ${item.priority===2?'selected':''}>P2 — Medium</option>
+                            <option value="3" ${item.priority===3?'selected':''}>P3 — Low</option>
+                        </select>
+                    </div>
+                    <div class="col-6">
+                        <label class="form-label small mb-1">Status</label>
+                        <select class="form-select form-select-sm" id="detailStatus">
+                            ${['New','InQueue','UnderDev','Completed','Blocked'].map(s => `<option value="${s}" ${item.status===s?'selected':''}>${s}</option>`).join('')}
+                        </select>
+                    </div>
+                </div>
+                <button class="btn btn-primary btn-sm mt-2 w-100" onclick="saveBacklogDetail('${item.id}')">Save Changes</button>
+            `;
+
+            // Re-use the existing modal or create one
+            let modal = document.getElementById('backlogDetailModal');
+            if (!modal) {
+                modal = document.createElement('div');
+                modal.id = 'backlogDetailModal';
+                modal.className = 'modal fade';
+                modal.tabIndex = -1;
+                modal.innerHTML = `
+                    <div class="modal-dialog">
+                        <div class="modal-content">
+                            <div class="modal-header py-2">
+                                <h6 class="modal-title">Backlog Item Detail</h6>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                            </div>
+                            <div class="modal-body" id="backlogDetailBody"></div>
+                        </div>
+                    </div>`;
+                document.body.appendChild(modal);
+            }
+            document.getElementById('backlogDetailBody').innerHTML = html;
+            new bootstrap.Modal(modal).show();
+        }
+
+        async function saveBacklogDetail(itemId) {
+            const priority = parseInt(document.getElementById('detailPriority').value);
+            const status = document.getElementById('detailStatus').value;
+            await updateBacklogField(itemId, 'priority', priority);
+            await updateBacklogField(itemId, 'status', status);
+            bootstrap.Modal.getInstance(document.getElementById('backlogDetailModal')).hide();
+            refreshBacklog();
         }
 
         // Auto-refresh backlog every 5 seconds during pipeline run
@@ -1840,7 +2238,58 @@
         });
 
         // ─── Agent Detail Modal ─────────────────────────────────────
+        // ─── Ask Agent ──────────────────────────────────────────────
+        let _askAgentKey = '';
+        let _askChatHistory = [];
+
+        async function askAgent() {
+            const input = document.getElementById('adAskInput');
+            const question = input.value.trim();
+            if (!question) return;
+
+            const chatDiv = document.getElementById('adChatHistory');
+            const placeholder = document.getElementById('adChatPlaceholder');
+            if (placeholder) placeholder.remove();
+
+            // Show user message
+            chatDiv.innerHTML += `<div class="d-flex justify-content-end mb-2"><div class="bg-primary text-white rounded-3 px-3 py-2" style="max-width:80%;font-size:0.88rem;">${escapeHtml(question)}</div></div>`;
+            input.value = '';
+            input.disabled = true;
+            document.getElementById('adAskBtn').disabled = true;
+
+            // Show typing indicator
+            const typingId = 'typing-' + Date.now();
+            chatDiv.innerHTML += `<div id="${typingId}" class="d-flex mb-2"><div class="bg-white border rounded-3 px-3 py-2 text-muted" style="font-size:0.85rem;"><i class="bi bi-three-dots"></i> Thinking...</div></div>`;
+            chatDiv.scrollTop = chatDiv.scrollHeight;
+
+            try {
+                const res = await fetch('/api/pipeline/agent/ask', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ agentKey: _askAgentKey, question: question })
+                });
+                const data = await res.json();
+                document.getElementById(typingId)?.remove();
+
+                const answer = data.answer || data.error || 'No response received.';
+                chatDiv.innerHTML += `<div class="d-flex mb-2"><div class="bg-white border rounded-3 px-3 py-2" style="max-width:85%;font-size:0.88rem;white-space:pre-wrap;">${escapeHtml(answer)}</div></div>`;
+            } catch (err) {
+                document.getElementById(typingId)?.remove();
+                chatDiv.innerHTML += `<div class="d-flex mb-2"><div class="bg-danger-subtle border rounded-3 px-3 py-2" style="font-size:0.85rem;">Failed to get response: ${escapeHtml(err.message)}</div></div>`;
+            }
+
+            chatDiv.scrollTop = chatDiv.scrollHeight;
+            input.disabled = false;
+            document.getElementById('adAskBtn').disabled = false;
+            input.focus();
+        }
+
         async function openAgentDetail(agentKey) {
+            _askAgentKey = agentKey;
+            // Reset Ask Agent chat
+            document.getElementById('adChatHistory').innerHTML = '<p class="text-muted text-center py-4 mb-0" id="adChatPlaceholder">Ask a question about this agent\'s work...</p>';
+            document.getElementById('adAskInput').value = '';
+
             const idx = ALL_AGENTS.indexOf(agentKey);
             const label = idx >= 0 ? ALL_AGENT_LABELS[idx] : agentKey;
             const icon = idx >= 0 ? ALL_AGENT_ICONS[idx] : 'bi-cpu';

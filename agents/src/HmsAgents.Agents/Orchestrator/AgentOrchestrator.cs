@@ -71,6 +71,12 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
         ["Implementation"]     = [AgentType.BugFix, AgentType.ServiceLayer],
         ["MultiTenant"]        = [AgentType.BugFix, AgentType.Database],
         ["Audit"]              = [AgentType.BugFix],
+        ["Security"]           = [AgentType.BugFix, AgentType.Security],
+        ["Traceability"]       = [AgentType.BugFix],
+        ["Conventions"]        = [AgentType.BugFix],
+        ["Coverage"]           = [AgentType.BugFix],
+        ["FeatureCoverage"]    = [AgentType.BugFix],
+        ["TestCoverage"]       = [AgentType.BugFix, AgentType.Testing],
         ["Performance"]        = [AgentType.Performance],
         ["Performance-N+1"]    = [AgentType.Performance],
         ["Performance-EF"]     = [AgentType.Performance],
@@ -82,10 +88,11 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
         ["SOC2-CC6"]           = [AgentType.Soc2Compliance],
         ["SOC2-CC7"]           = [AgentType.Soc2Compliance],
         ["SOC2-CC8"]           = [AgentType.Soc2Compliance],
-        // Build/Deploy/Monitor findings → BugFix remediation
+        // Build/Deploy/Monitor/Database findings → BugFix remediation
         ["Build"]              = [AgentType.BugFix],
         ["Deployment"]         = [AgentType.BugFix],
         ["Runtime"]            = [AgentType.BugFix],
+        ["Database"]           = [AgentType.BugFix],
     };
 
     // Heal-cycle agents skip the BugFix→Performance→Review loop themselves
@@ -114,6 +121,8 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
     }
 
     public AgentContext? GetCurrentContext() => _current;
+
+    public void ResetContext() => _current = null;
 
     // ─── Mid-Pipeline Requirement Injection ────────────────────────
     public async Task AddRequirementsAsync(List<Requirement> newRequirements, CancellationToken ct = default)
@@ -536,8 +545,8 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                 $"Agent: {agent.Name}, Attempt: {attempt + 1}/{MaxAgentRetries + 1}",
                 severity: attempt > 0 ? AuditSeverity.Warning : AuditSeverity.Info, ct: ct);
 
-            // ── HITL: gate for Database DDL execution
-            if (agent.Type == AgentType.Database && context.PipelineConfig.ExecuteDdl && attempt == 0)
+            // ── HITL: gate for Database DDL execution (only prompt once per run)
+            if (agent.Type == AgentType.Database && context.PipelineConfig.ExecuteDdl && !context.DdlApprovedForRun && attempt == 0)
             {
                 var ddlDecision = await _humanGate.RequestApprovalAsync(new HumanApprovalRequest
                 {
@@ -552,12 +561,26 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                     Timeout = TimeSpan.FromMinutes(15)
                 }, ct);
 
-                if (ddlDecision == HumanDecision.Rejected)
+                if (ddlDecision == HumanDecision.Approved)
+                {
+                    context.DdlApprovedForRun = true; // don't prompt again on re-dispatch
+                    _logger.LogInformation("[HITL] Human APPROVED DDL execution for run {RunId}", context.RunId);
+                    await _audit.LogAsync(agent.Type, context.RunId, AuditAction.HumanApproved,
+                        "DDL execution approved by human operator", severity: AuditSeverity.Decision, ct: ct);
+                }
+                else if (ddlDecision == HumanDecision.Rejected)
                 {
                     _logger.LogWarning("[HITL] Human REJECTED DDL execution — skipping Database agent");
                     await _audit.LogAsync(agent.Type, context.RunId, AuditAction.HumanRejected,
                         "DDL execution rejected by human operator", severity: AuditSeverity.Decision, ct: ct);
                     context.PipelineConfig.ExecuteDdl = false; // disable DDL, let it generate artifacts only
+                }
+                else // TimedOut
+                {
+                    _logger.LogWarning("[HITL] DDL approval timed out — disabling DDL execution");
+                    await _audit.LogAsync(agent.Type, context.RunId, AuditAction.HumanRejected,
+                        "DDL approval timed out — DDL execution disabled for safety", severity: AuditSeverity.Warning, ct: ct);
+                    context.PipelineConfig.ExecuteDdl = false;
                 }
             }
 
@@ -1117,6 +1140,8 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
             if (MatchesAgent(item, agentType))
                 result.Add(item);
         }
+        // Higher priority (lower number) first so orchestrator picks most important items first
+        result.Sort((a, b) => a.Priority.CompareTo(b.Priority));
         return result;
     }
 

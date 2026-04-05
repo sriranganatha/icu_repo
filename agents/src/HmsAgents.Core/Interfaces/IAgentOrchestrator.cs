@@ -12,4 +12,6 @@ public interface IAgentOrchestrator
     /// triggers RequirementsExpander + Backlog, then dispatches affected agents.
     /// </summary>
     Task AddRequirementsAsync(List<Requirement> newRequirements, CancellationToken ct = default);
+    /// <summary>Clears the in-memory context so the next run starts completely fresh.</summary>
+    void ResetContext();
 }

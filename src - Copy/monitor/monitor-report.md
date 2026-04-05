@@ -1,9 +1,9 @@
 # Monitor Report
-**Timestamp**: 2026-04-05 08:47:25Z
+**Timestamp**: 2026-04-05 15:39:45Z
 
 ## Docker Container Status
 - ICU-postgres: **running** ✓
-- ICU-postgres: **Up 6 hours** ✓
+- ICU-postgres: **Up 13 hours** ✓
 
 ## Service Health Checks
 - PatientService (:5101): **UNHEALTHY** (HTTP 0)
@@ -17,11 +17,11 @@
 - ApiGateway (:5100): **UNHEALTHY** (HTTP 0)
 
 ## Log Analysis
-- **ICU-postgres**: FATAL/PANIC errors detected in PostgreSQL logs
+- No critical error patterns detected in logs.
 
 ## Resource Usage
-- NAME           CPU %     MEM USAGE / LIMIT   NET I/O
-- ICU-postgres   0.00%     41.3MiB / 15.5GiB   2.11MB / 609kB
+- NAME           CPU %     MEM USAGE / LIMIT    NET I/O
+- ICU-postgres   0.03%     44.76MiB / 15.5GiB   2.73MB / 799kB
 
 
 ## Database Connectivity
@@ -30,7 +30,7 @@
 ## Summary
 - Docker containers checked: 2
 - Services healthy: 0/9
-- Log issues detected: 1
-- Total findings: 10
-- Duration: 38.1s
-- **Overall: 10 ISSUES DETECTED**
+- Log issues detected: 0
+- Total findings: 9
+- Duration: 38.0s
+- **Overall: 9 ISSUES DETECTED**

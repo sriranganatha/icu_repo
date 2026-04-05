@@ -1,35 +1,35 @@
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
-using Hms.AuditService.Data;
-using Hms.AuditService.Data.Entities;
-using Hms.AuditService.Data.Repositories;
+using Hms.EmergencyService.Data;
+using Hms.EmergencyService.Data.Entities;
+using Hms.EmergencyService.Data.Repositories;
 using Xunit;
 
 namespace Hms.Tests.Repositories;
 
 /// <summary>
-/// Repository tests for AuditEvent using EF Core InMemory provider.
-/// Feature coverage: EP-Y1, Module-Y, Compliance
+/// Repository tests for EmergencyArrival using EF Core InMemory provider.
+/// Feature coverage: EP-03, Module-E, Emergency
 /// </summary>
-public class AuditEventRepositoryTests : IDisposable
+public class EmergencyArrivalRepositoryTests : IDisposable
 {
-    private readonly AuditServiceDbContext _db;
-    private readonly AuditEventRepository _repo;
+    private readonly EmergencyServiceDbContext _db;
+    private readonly EmergencyArrivalRepository _repo;
 
-    public AuditEventRepositoryTests()
+    public EmergencyArrivalRepositoryTests()
     {
-        var options = new DbContextOptionsBuilder<AuditServiceDbContext>()
-            .UseInMemoryDatabase($"AuditEvent_2be8addfa4924b988b846e55c8e0202c")
+        var options = new DbContextOptionsBuilder<EmergencyServiceDbContext>()
+            .UseInMemoryDatabase($"EmergencyArrival_0bf7a72f03ba4af8b4c0a492361a3058")
             .Options;
         var tenant = new TestTenantProvider("tenant-1");
-        _db = new AuditServiceDbContext(options, tenant);
-        _repo = new AuditEventRepository(_db);
+        _db = new EmergencyServiceDbContext(options, tenant);
+        _repo = new EmergencyArrivalRepository(_db);
     }
 
     [Fact]
     public async Task Create_PersistsEntity()
     {
-        var entity = new AuditEvent
+        var entity = new EmergencyArrival
         {
 
         };
@@ -54,7 +54,7 @@ public class AuditEventRepositoryTests : IDisposable
     {
         for (int i = 0; i < 5; i++)
         {
-            await _repo.CreateAsync(new AuditEvent
+            await _repo.CreateAsync(new EmergencyArrival
             {
 
             });
@@ -70,7 +70,7 @@ public class AuditEventRepositoryTests : IDisposable
     [Fact]
     public async Task Update_ModifiesEntity()
     {
-        var entity = new AuditEvent
+        var entity = new EmergencyArrival
         {
 
         };

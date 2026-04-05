@@ -1,35 +1,35 @@
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
-using Hms.EncounterService.Data;
-using Hms.EncounterService.Data.Entities;
-using Hms.EncounterService.Data.Repositories;
+using Hms.DiagnosticsService.Data;
+using Hms.DiagnosticsService.Data.Entities;
+using Hms.DiagnosticsService.Data.Repositories;
 using Xunit;
 
 namespace Hms.Tests.Repositories;
 
 /// <summary>
-/// Repository tests for Encounter using EF Core InMemory provider.
-/// Feature coverage: EP-02, Module-D, Encounters
+/// Repository tests for ResultRecord using EF Core InMemory provider.
+/// Feature coverage: EP-10, Module-J, Diagnostics
 /// </summary>
-public class EncounterRepositoryTests : IDisposable
+public class ResultRecordRepositoryTests : IDisposable
 {
-    private readonly EncounterServiceDbContext _db;
-    private readonly EncounterRepository _repo;
+    private readonly DiagnosticsServiceDbContext _db;
+    private readonly ResultRecordRepository _repo;
 
-    public EncounterRepositoryTests()
+    public ResultRecordRepositoryTests()
     {
-        var options = new DbContextOptionsBuilder<EncounterServiceDbContext>()
-            .UseInMemoryDatabase($"Encounter_529577e677f64c18822398e3f07b576a")
+        var options = new DbContextOptionsBuilder<DiagnosticsServiceDbContext>()
+            .UseInMemoryDatabase($"ResultRecord_92b88902fb824fe38ea450b1f6160cc5")
             .Options;
         var tenant = new TestTenantProvider("tenant-1");
-        _db = new EncounterServiceDbContext(options, tenant);
-        _repo = new EncounterRepository(_db);
+        _db = new DiagnosticsServiceDbContext(options, tenant);
+        _repo = new ResultRecordRepository(_db);
     }
 
     [Fact]
     public async Task Create_PersistsEntity()
     {
-        var entity = new Encounter
+        var entity = new ResultRecord
         {
 
         };
@@ -54,7 +54,7 @@ public class EncounterRepositoryTests : IDisposable
     {
         for (int i = 0; i < 5; i++)
         {
-            await _repo.CreateAsync(new Encounter
+            await _repo.CreateAsync(new ResultRecord
             {
 
             });
@@ -70,7 +70,7 @@ public class EncounterRepositoryTests : IDisposable
     [Fact]
     public async Task Update_ModifiesEntity()
     {
-        var entity = new Encounter
+        var entity = new ResultRecord
         {
 
         };

@@ -1,35 +1,35 @@
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
-using Hms.InpatientService.Data;
-using Hms.InpatientService.Data.Entities;
-using Hms.InpatientService.Data.Repositories;
+using Hms.AuditService.Data;
+using Hms.AuditService.Data.Entities;
+using Hms.AuditService.Data.Repositories;
 using Xunit;
 
 namespace Hms.Tests.Repositories;
 
 /// <summary>
-/// Repository tests for AdmissionEligibility using EF Core InMemory provider.
-/// Feature coverage: EP-04, Module-F, ADT
+/// Repository tests for AuditEvent using EF Core InMemory provider.
+/// Feature coverage: EP-Y1, Module-Y, Compliance
 /// </summary>
-public class AdmissionEligibilityRepositoryTests : IDisposable
+public class AuditEventRepositoryTests : IDisposable
 {
-    private readonly InpatientServiceDbContext _db;
-    private readonly AdmissionEligibilityRepository _repo;
+    private readonly AuditServiceDbContext _db;
+    private readonly AuditEventRepository _repo;
 
-    public AdmissionEligibilityRepositoryTests()
+    public AuditEventRepositoryTests()
     {
-        var options = new DbContextOptionsBuilder<InpatientServiceDbContext>()
-            .UseInMemoryDatabase($"AdmissionEligibility_30612ddac47646b984149fc9f7bf28c6")
+        var options = new DbContextOptionsBuilder<AuditServiceDbContext>()
+            .UseInMemoryDatabase($"AuditEvent_eca21fcbb5b04814a9fa2ec31b547575")
             .Options;
         var tenant = new TestTenantProvider("tenant-1");
-        _db = new InpatientServiceDbContext(options, tenant);
-        _repo = new AdmissionEligibilityRepository(_db);
+        _db = new AuditServiceDbContext(options, tenant);
+        _repo = new AuditEventRepository(_db);
     }
 
     [Fact]
     public async Task Create_PersistsEntity()
     {
-        var entity = new AdmissionEligibility
+        var entity = new AuditEvent
         {
 
         };
@@ -54,7 +54,7 @@ public class AdmissionEligibilityRepositoryTests : IDisposable
     {
         for (int i = 0; i < 5; i++)
         {
-            await _repo.CreateAsync(new AdmissionEligibility
+            await _repo.CreateAsync(new AuditEvent
             {
 
             });
@@ -70,7 +70,7 @@ public class AdmissionEligibilityRepositoryTests : IDisposable
     [Fact]
     public async Task Update_ModifiesEntity()
     {
-        var entity = new AdmissionEligibility
+        var entity = new AuditEvent
         {
 
         };

@@ -1,35 +1,35 @@
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
-using Hms.DiagnosticsService.Data;
-using Hms.DiagnosticsService.Data.Entities;
-using Hms.DiagnosticsService.Data.Repositories;
+using Hms.InpatientService.Data;
+using Hms.InpatientService.Data.Entities;
+using Hms.InpatientService.Data.Repositories;
 using Xunit;
 
 namespace Hms.Tests.Repositories;
 
 /// <summary>
-/// Repository tests for ResultRecord using EF Core InMemory provider.
-/// Feature coverage: EP-10, Module-J, Diagnostics
+/// Repository tests for Admission using EF Core InMemory provider.
+/// Feature coverage: EP-04, Module-F, ADT
 /// </summary>
-public class ResultRecordRepositoryTests : IDisposable
+public class AdmissionRepositoryTests : IDisposable
 {
-    private readonly DiagnosticsServiceDbContext _db;
-    private readonly ResultRecordRepository _repo;
+    private readonly InpatientServiceDbContext _db;
+    private readonly AdmissionRepository _repo;
 
-    public ResultRecordRepositoryTests()
+    public AdmissionRepositoryTests()
     {
-        var options = new DbContextOptionsBuilder<DiagnosticsServiceDbContext>()
-            .UseInMemoryDatabase($"ResultRecord_b0c5b4795db1474c84408d046783b408")
+        var options = new DbContextOptionsBuilder<InpatientServiceDbContext>()
+            .UseInMemoryDatabase($"Admission_e20947ef9c4a46d09f6ffee2acf7559b")
             .Options;
         var tenant = new TestTenantProvider("tenant-1");
-        _db = new DiagnosticsServiceDbContext(options, tenant);
-        _repo = new ResultRecordRepository(_db);
+        _db = new InpatientServiceDbContext(options, tenant);
+        _repo = new AdmissionRepository(_db);
     }
 
     [Fact]
     public async Task Create_PersistsEntity()
     {
-        var entity = new ResultRecord
+        var entity = new Admission
         {
 
         };
@@ -54,7 +54,7 @@ public class ResultRecordRepositoryTests : IDisposable
     {
         for (int i = 0; i < 5; i++)
         {
-            await _repo.CreateAsync(new ResultRecord
+            await _repo.CreateAsync(new Admission
             {
 
             });
@@ -70,7 +70,7 @@ public class ResultRecordRepositoryTests : IDisposable
     [Fact]
     public async Task Update_ModifiesEntity()
     {
-        var entity = new ResultRecord
+        var entity = new Admission
         {
 
         };

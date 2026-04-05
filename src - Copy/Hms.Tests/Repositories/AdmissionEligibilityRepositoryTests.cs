@@ -1,35 +1,35 @@
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
-using Hms.PatientService.Data;
-using Hms.PatientService.Data.Entities;
-using Hms.PatientService.Data.Repositories;
+using Hms.InpatientService.Data;
+using Hms.InpatientService.Data.Entities;
+using Hms.InpatientService.Data.Repositories;
 using Xunit;
 
 namespace Hms.Tests.Repositories;
 
 /// <summary>
-/// Repository tests for PatientIdentifier using EF Core InMemory provider.
-/// Feature coverage: EP-01, Module-B, Patient
+/// Repository tests for AdmissionEligibility using EF Core InMemory provider.
+/// Feature coverage: EP-04, Module-F, ADT
 /// </summary>
-public class PatientIdentifierRepositoryTests : IDisposable
+public class AdmissionEligibilityRepositoryTests : IDisposable
 {
-    private readonly PatientServiceDbContext _db;
-    private readonly PatientIdentifierRepository _repo;
+    private readonly InpatientServiceDbContext _db;
+    private readonly AdmissionEligibilityRepository _repo;
 
-    public PatientIdentifierRepositoryTests()
+    public AdmissionEligibilityRepositoryTests()
     {
-        var options = new DbContextOptionsBuilder<PatientServiceDbContext>()
-            .UseInMemoryDatabase($"PatientIdentifier_ed4652627b844b3a889a21f840fca50d")
+        var options = new DbContextOptionsBuilder<InpatientServiceDbContext>()
+            .UseInMemoryDatabase($"AdmissionEligibility_24a2ca6aaecd42edb90ea266ecef5a2c")
             .Options;
         var tenant = new TestTenantProvider("tenant-1");
-        _db = new PatientServiceDbContext(options, tenant);
-        _repo = new PatientIdentifierRepository(_db);
+        _db = new InpatientServiceDbContext(options, tenant);
+        _repo = new AdmissionEligibilityRepository(_db);
     }
 
     [Fact]
     public async Task Create_PersistsEntity()
     {
-        var entity = new PatientIdentifier
+        var entity = new AdmissionEligibility
         {
 
         };
@@ -54,7 +54,7 @@ public class PatientIdentifierRepositoryTests : IDisposable
     {
         for (int i = 0; i < 5; i++)
         {
-            await _repo.CreateAsync(new PatientIdentifier
+            await _repo.CreateAsync(new AdmissionEligibility
             {
 
             });
@@ -70,7 +70,7 @@ public class PatientIdentifierRepositoryTests : IDisposable
     [Fact]
     public async Task Update_ModifiesEntity()
     {
-        var entity = new PatientIdentifier
+        var entity = new AdmissionEligibility
         {
 
         };

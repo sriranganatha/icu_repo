@@ -491,6 +491,80 @@ public sealed class PipelineController : ControllerBase
         return Ok(new { totalItems = 0, items = Array.Empty<object>(), stats = new { epics = 0, stories = 0, useCases = 0, tasks = 0, newCount = 0, inQueue = 0, underDev = 0, completed = 0, blocked = 0 } });
     }
 
+    /// <summary>Update priority, status, assignedAgent, or iteration for a single backlog item.</summary>
+    [HttpPatch("backlog/{itemId}")]
+    public IActionResult UpdateBacklogItem(string itemId, [FromBody] BacklogItemPatchDto patch)
+    {
+        // Resolve runId
+        var ctx = _orchestrator.GetCurrentContext();
+        var runId = ctx?.RunId ?? _db.GetLatestRun()?.RunId;
+        if (string.IsNullOrEmpty(runId))
+            return NotFound(new { error = "No pipeline run found" });
+
+        // Validate status if provided
+        string[]? validStatuses = ["New", "InQueue", "UnderDev", "Completed", "Blocked"];
+        if (patch.Status is not null && !validStatuses.Contains(patch.Status))
+            return BadRequest(new { error = $"Invalid status. Must be one of: {string.Join(", ", validStatuses)}" });
+
+        // Update in-memory context if live
+        if (ctx is not null)
+        {
+            var item = ctx.ExpandedRequirements.FirstOrDefault(e => e.Id == itemId);
+            if (item is not null)
+            {
+                if (patch.Priority.HasValue) item.Priority = patch.Priority.Value;
+                if (patch.Status is not null && Enum.TryParse<WorkItemStatus>(patch.Status, out var ws)) item.Status = ws;
+                if (patch.AssignedAgent is not null) item.AssignedAgent = patch.AssignedAgent;
+                if (patch.Iteration.HasValue) item.Iteration = patch.Iteration.Value;
+            }
+        }
+
+        // Persist to DB
+        var updated = _db.UpdateBacklogItem(runId, itemId, patch.Priority, patch.Status, patch.AssignedAgent, patch.Iteration);
+        return updated
+            ? Ok(new { success = true, itemId, runId })
+            : NotFound(new { error = "Backlog item not found", itemId });
+    }
+
+    /// <summary>Bulk update priorities for multiple backlog items.</summary>
+    [HttpPost("backlog/priorities")]
+    public IActionResult BulkUpdatePriorities([FromBody] List<BacklogPriorityDto> items)
+    {
+        var ctx = _orchestrator.GetCurrentContext();
+        var runId = ctx?.RunId ?? _db.GetLatestRun()?.RunId;
+        if (string.IsNullOrEmpty(runId))
+            return NotFound(new { error = "No pipeline run found" });
+
+        var updatedCount = 0;
+        foreach (var dto in items)
+        {
+            // Update in-memory
+            if (ctx is not null)
+            {
+                var item = ctx.ExpandedRequirements.FirstOrDefault(e => e.Id == dto.ItemId);
+                if (item is not null) item.Priority = dto.Priority;
+            }
+            // Update DB
+            if (_db.UpdateBacklogPriority(runId, dto.ItemId, dto.Priority))
+                updatedCount++;
+        }
+        return Ok(new { success = true, updatedCount, total = items.Count });
+    }
+
+    public sealed class BacklogItemPatchDto
+    {
+        public int? Priority { get; set; }
+        public string? Status { get; set; }
+        public string? AssignedAgent { get; set; }
+        public int? Iteration { get; set; }
+    }
+
+    public sealed class BacklogPriorityDto
+    {
+        public string ItemId { get; set; } = "";
+        public int Priority { get; set; }
+    }
+
     // ═══════════════════════════════════════════════════════════════
     //  Audit Log Endpoints
     // ═══════════════════════════════════════════════════════════════
@@ -741,6 +815,152 @@ public sealed class PipelineController : ControllerBase
             report = deployArtifacts.FirstOrDefault(a => a.FileName == "deployment-report.md")?.Content
         });
     }
+
+    // ── Ask Agent ────────────────────────────────────────────────────────
+    [HttpPost("agent/ask")]
+    public async Task<IActionResult> AskAgent(
+        [FromBody] AskAgentRequest request,
+        [FromServices] ILlmProvider llm,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(request.AgentKey) || string.IsNullOrWhiteSpace(request.Question))
+            return BadRequest(new { error = "agentKey and question are required." });
+
+        if (!Enum.TryParse<AgentType>(request.AgentKey, ignoreCase: true, out var agentType))
+            return BadRequest(new { error = $"Unknown agent: {request.AgentKey}" });
+
+        var ctx = _orchestrator.GetCurrentContext();
+        if (ctx is null)
+            return Ok(new { answer = "No pipeline context available. Please run the pipeline first." });
+
+        // Gather ONLY this agent's work context
+        var artifacts = ctx.Artifacts
+            .Where(a => a.ProducedBy == agentType)
+            .Select(a => $"[{a.Layer}] {a.RelativePath}/{a.FileName} ({a.Content.Length} chars)")
+            .ToList();
+
+        var findings = ctx.Findings
+            .Where(f => f.Category != null)
+            .ToList();
+
+        var backlogItems = ctx.ExpandedRequirements
+            .Where(r => r.AssignedAgent?.Equals(agentType.ToString(), StringComparison.OrdinalIgnoreCase) == true
+                     || r.ProducedBy?.Equals(agentType.ToString(), StringComparison.OrdinalIgnoreCase) == true)
+            .Select(r => $"[{r.Status}] {r.Title} (P{r.Priority})")
+            .ToList();
+
+        var agentStatus = ctx.AgentStatuses.GetValueOrDefault(agentType, AgentStatus.Idle);
+
+        var messages = ctx.Messages
+            .Where(m => m.From == agentType || m.To == agentType)
+            .Select(m => $"{m.From}→{m.To}: {m.Subject} — {m.Body}")
+            .Take(20)
+            .ToList();
+
+        // Build scoped context for the LLM
+        var contextParts = new List<string>();
+        contextParts.Add($"Agent: {agentType}, Status: {agentStatus}");
+
+        if (artifacts.Count > 0)
+            contextParts.Add($"Artifacts produced ({artifacts.Count}):\n" + string.Join("\n", artifacts.Take(50)));
+
+        // Include artifact content snippets (first 500 chars each, up to 10 artifacts)
+        var artifactContents = ctx.Artifacts
+            .Where(a => a.ProducedBy == agentType)
+            .Take(10)
+            .Select(a => $"--- {a.FileName} ---\n{(a.Content.Length > 500 ? a.Content[..500] + "..." : a.Content)}")
+            .ToList();
+        if (artifactContents.Count > 0)
+            contextParts.Add("Artifact content samples:\n" + string.Join("\n\n", artifactContents));
+
+        if (findings.Count > 0)
+            contextParts.Add($"Related findings ({findings.Count}):\n" + string.Join("\n",
+                findings.Take(30).Select(f => $"[{f.Severity}] {f.Category}: {f.Message}")));
+
+        if (backlogItems.Count > 0)
+            contextParts.Add($"Backlog items ({backlogItems.Count}):\n" + string.Join("\n", backlogItems.Take(30)));
+
+        if (messages.Count > 0)
+            contextParts.Add($"Inter-agent messages:\n" + string.Join("\n", messages));
+
+        var prompt = new LlmPrompt
+        {
+            SystemPrompt = $"""
+                You are the {agentType} agent in an HMS (Hospital Management System) multi-agent pipeline.
+                Answer the user's question ONLY based on the work context provided below.
+                Be concise, factual, and specific. Reference actual file names, finding categories, or backlog items when relevant.
+                If requested information is not in your context, say so clearly.
+                Do NOT make up information. Scope is strictly limited to your agent's work.
+                """,
+            UserPrompt = request.Question,
+            ContextSnippets = contextParts,
+            Temperature = 0.1,
+            MaxTokens = 2048,
+            RequestingAgent = $"AskAgent-{agentType}"
+        };
+
+        var response = await llm.GenerateAsync(prompt, ct);
+
+        if (!response.Success)
+            return Ok(new { answer = $"LLM error: {response.Error ?? "unknown"}" });
+
+        return Ok(new { answer = response.Content, model = response.Model, tokens = response.CompletionTokens });
+    }
+
+    // ─── Reset Project ─────────────────────────────────────────
+    [HttpPost("reset")]
+    public IActionResult ResetProject([FromBody] ResetRequest? request)
+    {
+        try
+        {
+            // 1. Clear in-memory context
+            _orchestrator.ResetContext();
+
+            // 2. Reset state store (in-memory + pipeline-state.json)
+            _stateStore.Reset("reset");
+
+            // 3. Purge all SQLite data
+            _db.PurgeAllData();
+
+            // 4. Optionally delete generated output directory
+            var deleteOutput = request?.DeleteGeneratedCode ?? false;
+            var outputDeleted = false;
+            if (deleteOutput && !string.IsNullOrEmpty(request?.OutputPath) && Directory.Exists(request.OutputPath))
+            {
+                // Safety: only delete known subdirectories, not the root
+                var srcDir = new DirectoryInfo(request.OutputPath);
+                foreach (var sub in srcDir.GetDirectories("Hms.*"))
+                {
+                    sub.Delete(recursive: true);
+                }
+                // Also delete solution files generated by agents
+                foreach (var f in srcDir.GetFiles("*.sln"))
+                    f.Delete();
+                outputDeleted = true;
+            }
+
+            _logger.LogWarning("PROJECT RESET performed. DB purged, context cleared, state reset. OutputDeleted={Del}", outputDeleted);
+
+            return Ok(new { success = true, message = "Project reset complete. All pipeline data cleared.", outputDeleted });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Reset failed");
+            return StatusCode(500, new { error = ex.Message });
+        }
+    }
+}
+
+public sealed class ResetRequest
+{
+    public bool DeleteGeneratedCode { get; init; }
+    public string? OutputPath { get; init; }
+}
+
+public sealed class AskAgentRequest
+{
+    public string AgentKey { get; init; } = string.Empty;
+    public string Question { get; init; } = string.Empty;
 }
 
 public sealed class DecisionResponse

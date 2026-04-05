@@ -1,6 +1,6 @@
 # Build Report
 **Output**: `C:\sri\mywork\icu\src`
-**Time**: 2026-04-05 08:46:41Z
+**Time**: 2026-04-05 15:42:33Z
 
 ## Discovery
 - Solutions: 0
@@ -21,4 +21,4 @@
 - Build: FAIL
 - Errors: 0 | Warnings: 0
 - Findings: 0
-- Duration: 0.4s
+- Duration: 0.5s

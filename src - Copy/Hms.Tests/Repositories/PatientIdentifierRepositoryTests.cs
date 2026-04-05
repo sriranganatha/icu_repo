@@ -8,28 +8,28 @@ using Xunit;
 namespace Hms.Tests.Repositories;
 
 /// <summary>
-/// Repository tests for PatientProfile using EF Core InMemory provider.
+/// Repository tests for PatientIdentifier using EF Core InMemory provider.
 /// Feature coverage: EP-01, Module-B, Patient
 /// </summary>
-public class PatientProfileRepositoryTests : IDisposable
+public class PatientIdentifierRepositoryTests : IDisposable
 {
     private readonly PatientServiceDbContext _db;
-    private readonly PatientProfileRepository _repo;
+    private readonly PatientIdentifierRepository _repo;
 
-    public PatientProfileRepositoryTests()
+    public PatientIdentifierRepositoryTests()
     {
         var options = new DbContextOptionsBuilder<PatientServiceDbContext>()
-            .UseInMemoryDatabase($"PatientProfile_114c2b8c15e94049af4400db3546c43d")
+            .UseInMemoryDatabase($"PatientIdentifier_e1987e825eb54924b1a60c9da05d4aab")
             .Options;
         var tenant = new TestTenantProvider("tenant-1");
         _db = new PatientServiceDbContext(options, tenant);
-        _repo = new PatientProfileRepository(_db);
+        _repo = new PatientIdentifierRepository(_db);
     }
 
     [Fact]
     public async Task Create_PersistsEntity()
     {
-        var entity = new PatientProfile
+        var entity = new PatientIdentifier
         {
 
         };
@@ -54,7 +54,7 @@ public class PatientProfileRepositoryTests : IDisposable
     {
         for (int i = 0; i < 5; i++)
         {
-            await _repo.CreateAsync(new PatientProfile
+            await _repo.CreateAsync(new PatientIdentifier
             {
 
             });
@@ -70,7 +70,7 @@ public class PatientProfileRepositoryTests : IDisposable
     [Fact]
     public async Task Update_ModifiesEntity()
     {
-        var entity = new PatientProfile
+        var entity = new PatientIdentifier
         {
 
         };
