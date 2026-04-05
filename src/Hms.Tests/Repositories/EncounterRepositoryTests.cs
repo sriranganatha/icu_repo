@@ -19,7 +19,7 @@ public class EncounterRepositoryTests : IDisposable
     public EncounterRepositoryTests()
     {
         var options = new DbContextOptionsBuilder<EncounterServiceDbContext>()
-            .UseInMemoryDatabase($"Encounter_771ee147ea63498695c3a392f4b3e29b")
+            .UseInMemoryDatabase($"Encounter_b883338e21fb4083abd9ac6eca9ef022")
             .Options;
         var tenant = new TestTenantProvider("tenant-1");
         _db = new EncounterServiceDbContext(options, tenant);

@@ -1,19 +1,19 @@
 # Requirement Gap Analysis Report
-**Run**: 22cbbd98c764431f9843d9541a593070 | **Iteration**: 0 | **Time**: 2026-04-05 08:25:16Z
+**Run**: 1cdd549a364e473db61cd6ccb945f342 | **Iteration**: 0 | **Time**: 2026-04-05 08:30:17Z
 
 ## Artifact Inventory
-- **AiService**: Documentation(1), RazorPage(2), Configuration(4), Migration(1), Repository(1), Database(2), Infrastructure(1), Integration(3), Service(2), Dto(1)
+- **AiService**: Migration(1), Repository(1), Database(2), Documentation(1), Infrastructure(1), Integration(3), Service(2), Dto(1), RazorPage(2), Configuration(4)
 - **ApiGateway**: Configuration(4)
-- **AuditService**: Documentation(1), RazorPage(2), Configuration(4), Migration(1), Repository(1), Database(2), Infrastructure(1), Integration(2), Service(2), Dto(1)
-- **DiagnosticsService**: Documentation(1), RazorPage(2), Configuration(4), Migration(1), Repository(1), Database(2), Infrastructure(1), Integration(3), Service(2), Dto(1)
-- **EmergencyService**: Documentation(1), RazorPage(3), Configuration(4), Migration(1), Repository(2), Database(3), Infrastructure(1), Integration(3), Service(4), Dto(2)
-- **EncounterService**: Documentation(1), RazorPage(3), Configuration(4), Migration(1), Repository(2), Database(3), Infrastructure(1), Integration(3), Service(4), Dto(2)
+- **AuditService**: Migration(1), Repository(1), Database(2), Documentation(1), Infrastructure(1), Integration(2), Service(2), Dto(1), RazorPage(2), Configuration(4)
+- **DiagnosticsService**: Migration(1), Repository(1), Database(2), Documentation(1), Infrastructure(1), Integration(3), Service(2), Dto(1), RazorPage(2), Configuration(4)
+- **EmergencyService**: Migration(1), Repository(2), Database(3), Documentation(1), Infrastructure(1), Integration(3), Service(4), Dto(2), RazorPage(3), Configuration(4)
+- **EncounterService**: Migration(1), Repository(2), Database(3), Documentation(1), Infrastructure(1), Integration(3), Service(4), Dto(2), RazorPage(3), Configuration(4)
 - **Infrastructure**: Configuration(1), Migration(1)
-- **InpatientService**: RazorPage(3), Configuration(4), Migration(1), Repository(2), Database(3), Integration(3), Service(4), Dto(2)
-- **PatientService**: Documentation(2), RazorPage(3), Configuration(4), Migration(1), Repository(2), Database(3), Infrastructure(2), Integration(2), Service(4), Dto(2)
-- **RevenueService**: Documentation(1), RazorPage(2), Configuration(4), Migration(1), Repository(1), Database(2), Infrastructure(1), Integration(3), Service(2), Dto(1)
-- **Shared**: Documentation(2), Observability(2), Infrastructure(5)
-- **SharedKernel**: Documentation(1), Observability(4), Compliance(10), Configuration(14), Infrastructure(1), Integration(9), Security(5)
+- **InpatientService**: Migration(1), Repository(2), Database(3), Integration(3), Service(4), Dto(2), RazorPage(3), Configuration(4)
+- **PatientService**: Migration(1), Repository(2), Database(3), Documentation(2), Infrastructure(2), Integration(2), Service(4), Dto(2), RazorPage(3), Configuration(4)
+- **RevenueService**: Migration(1), Repository(1), Database(2), Documentation(1), Infrastructure(1), Integration(3), Service(2), Dto(1), RazorPage(2), Configuration(4)
+- **Shared**: Observability(2), Documentation(2), Infrastructure(5)
+- **SharedKernel**: Compliance(10), Observability(4), Documentation(1), Infrastructure(1), Configuration(11), Integration(9), Security(5)
 - **Tests**: Test(29)
 
 ## Coverage Analysis

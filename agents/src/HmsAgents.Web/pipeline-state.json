@@ -2,7 +2,7 @@
   "runId": "1cdd549a364e473db61cd6ccb945f342",
   "completed": false,
   "completedAt": null,
-  "lastUpdated": "2026-04-05T08:31:44.0985986+00:00",
+  "lastUpdated": "2026-04-05T08:33:48.110443+00:00",
   "requirementCount": 0,
   "artifactCount": 0,
   "findingCount": 0,
@@ -10,7 +10,7 @@
   "backlogCount": 0,
   "durationMs": 0,
   "agentStatuses": {
-    "Orchestrator": "Running",
+    "Orchestrator": "Completed",
     "RequirementsReader": "Completed",
     "RequirementsExpander": "Completed",
     "Backlog": "Completed",
@@ -27,13 +27,14 @@
     "ApiDocumentation": "Completed",
     "Performance": "Running",
     "Testing": "Running",
-    "Review": "Completed",
+    "Review": "Running",
     "BugFix": "Completed",
     "Deploy": "Failed",
-    "RequirementAnalyzer": "Completed"
+    "RequirementAnalyzer": "Completed",
+    "Supervisor": "Completed"
   },
   "agentMessages": {
-    "Orchestrator": "Dispatching Backlog Manager \u2014 dependencies satisfied",
+    "Orchestrator": "Pipeline complete \u2014 255 artifacts, 189 findings, 13576 backlog items",
     "RequirementsReader": "Extracted 807 requirements, built domain model with 12 entities",
     "RequirementsExpander": "Expanded: 0 items (0 epics, 0 stories, 0 use cases, 0 tasks) with dependency chains \u002B specs",
     "Backlog": "Backlog: 13576 items \u2014 0 new, 0 queued, 0 in-dev, 13576 done, 0 blocked",
@@ -50,16 +51,17 @@
     "ApiDocumentation": "API Docs Agent: 11 documentation artifacts for 8 services (AI: Gemini-gemini-3.1-pro-preview)",
     "Performance": "Completed 14 backlog items",
     "Testing": "Completed 6298 backlog items",
-    "Review": "Review complete: 186 findings (21 errors, 12 security violations, 153 warnings/info)",
+    "Review": "Review complete: 186 findings \u2014 21 errors, 12 security violations, 153 warnings/info",
     "BugFix": "BugFixAgent resolved 0/34 findings",
     "Deploy": "Deploy Agent: Build failed \u2014 cannot deploy",
-    "RequirementAnalyzer": "Gap Analysis: 0/807 covered, 216 gaps \u2192 0 new stories"
+    "RequirementAnalyzer": "Gap Analysis: 0/807 covered, 216 gaps \u2192 0 new stories",
+    "Supervisor": "Supervisor: 37 checks \u2014 34 passed, 2 failed, 1 remediated, 0 skipped"
   },
   "agentElapsed": {
     "Orchestrator": 0,
     "RequirementsReader": 33.6829,
     "RequirementsExpander": 10073.6376,
-    "Backlog": 41.7965,
+    "Backlog": 6.8615,
     "Database": 0,
     "ServiceLayer": 0,
     "Application": 0,
@@ -73,10 +75,11 @@
     "ApiDocumentation": 5222.8916,
     "Performance": 0,
     "Testing": 0,
-    "Review": 4.702,
+    "Review": 0,
     "BugFix": 10.5805,
     "Deploy": 379.6402,
-    "RequirementAnalyzer": 86162.9862
+    "RequirementAnalyzer": 86162.9862,
+    "Supervisor": 27.526
   },
   "agentArtifacts": {
     "Performance": 1,
@@ -93,11 +96,13 @@
     "Database": 43,
     "Testing": 29,
     "Deploy": 1,
-    "RequirementAnalyzer": 1
+    "RequirementAnalyzer": 1,
+    "Orchestrator": 255
   },
   "agentFindings": {
     "Soc2Compliance": 3,
-    "Review": 186
+    "Review": 186,
+    "Orchestrator": 189
   },
   "agentRetries": {
     "Deploy": 2

@@ -19,7 +19,7 @@ public class ClaimRepositoryTests : IDisposable
     public ClaimRepositoryTests()
     {
         var options = new DbContextOptionsBuilder<RevenueServiceDbContext>()
-            .UseInMemoryDatabase($"Claim_1439d45a41474ca2a219534450964f3c")
+            .UseInMemoryDatabase($"Claim_1506d88fe5934147a5dda95532bb26a3")
             .Options;
         var tenant = new TestTenantProvider("tenant-1");
         _db = new RevenueServiceDbContext(options, tenant);

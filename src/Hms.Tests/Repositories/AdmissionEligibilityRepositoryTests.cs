@@ -19,7 +19,7 @@ public class AdmissionEligibilityRepositoryTests : IDisposable
     public AdmissionEligibilityRepositoryTests()
     {
         var options = new DbContextOptionsBuilder<InpatientServiceDbContext>()
-            .UseInMemoryDatabase($"AdmissionEligibility_e43146f167e3438f9ef49155322b4cf5")
+            .UseInMemoryDatabase($"AdmissionEligibility_38998bdc8be3401cbd2bae56f625cee8")
             .Options;
         var tenant = new TestTenantProvider("tenant-1");
         _db = new InpatientServiceDbContext(options, tenant);
