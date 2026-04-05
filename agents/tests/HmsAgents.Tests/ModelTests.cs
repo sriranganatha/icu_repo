@@ -66,7 +66,7 @@ public class ModelTests
     {
         var cfg = new PipelineConfig();
         cfg.DbPort.Should().Be(5432);
-        cfg.DbName.Should().Be("hms_db");
+        cfg.DbName.Should().Be("hms");
         cfg.SpinUpDocker.Should().BeTrue();
         cfg.ExecuteDdl.Should().BeTrue();
         cfg.SolutionNamespace.Should().Be("Hms");

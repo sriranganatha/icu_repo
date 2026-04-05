@@ -35,11 +35,15 @@ public sealed class TestingAgent : IAgent
         try
         {
             // 1. Generate test project file
+            if (context.ReportProgress is not null)
+                await context.ReportProgress(Type, "Generating test project — xUnit, Moq, FluentAssertions, InMemory EF Core");
             artifacts.Add(GenerateTestCsproj());
 
             // 2. Per-entity service tests with Moq
             foreach (var svc in MicroserviceCatalog.All)
             {
+                if (context.ReportProgress is not null)
+                    await context.ReportProgress(Type, $"Generating tests for {svc.Name} — {svc.Entities.Length} service tests + {svc.Entities.Length} repository tests with Moq");
                 foreach (var entityName in svc.Entities)
                 {
                     var entity = model?.Entities.FirstOrDefault(e =>
@@ -53,11 +57,15 @@ public sealed class TestingAgent : IAgent
             }
 
             // 3. Cross-cutting tests
+            if (context.ReportProgress is not null)
+                await context.ReportProgress(Type, "Generating cross-cutting tests — tenant isolation, entity field coverage, AI safety, feature traceability");
             artifacts.Add(GenerateTenantIsolationTests(model));
             artifacts.Add(GenerateEntityFieldCoverageTests(model));
             artifacts.Add(GenerateAiSafetyTests());
 
             // 4. Feature traceability matrix
+            if (context.ReportProgress is not null)
+                await context.ReportProgress(Type, $"Generating feature traceability tests — mapping {model?.FeatureMappings.Count ?? 0} features to test coverage");
             artifacts.Add(GenerateFeatureTraceabilityTests(model));
 
             context.Artifacts.AddRange(artifacts);

@@ -1,0 +1,62 @@
+{
+  "runId": "6607837354c4424b9c72bbbd2b562c37",
+  "completed": false,
+  "completedAt": null,
+  "lastUpdated": "2026-04-05T07:29:34.9035501+00:00",
+  "requirementCount": 0,
+  "artifactCount": 0,
+  "findingCount": 0,
+  "testDiagnosticCount": 0,
+  "backlogCount": 0,
+  "durationMs": 0,
+  "agentStatuses": {
+    "Orchestrator": "Running",
+    "RequirementsReader": "Completed",
+    "RequirementsExpander": "Running",
+    "Backlog": "Running",
+    "Database": "Running",
+    "ServiceLayer": "Completed",
+    "Application": "Running",
+    "Integration": "Running",
+    "BugFix": "Completed",
+    "Performance": "Completed",
+    "Review": "Completed"
+  },
+  "agentMessages": {
+    "Orchestrator": "Dispatching Integration Agent \u2014 dependencies satisfied",
+    "RequirementsReader": "Extracted 807 requirements, built domain model with 12 entities",
+    "RequirementsExpander": "Expanding module \u0027MultiTenant\u0027: 37 requirements \u2192 services: AiService, AuditService, PatientService",
+    "Backlog": "Completed 157 backlog items",
+    "Database": "Database Agent starting...",
+    "ServiceLayer": "Generated 54 service-layer artifacts across 8 microservices (domain-model-driven, complete implementations)",
+    "Application": "Completed 96 backlog items",
+    "Integration": "Completed 96 backlog items",
+    "BugFix": "BugFixAgent resolved 0/2 findings",
+    "Performance": "PerformanceAgent applied 13 optimizations, raised 16 advisory findings",
+    "Review": "Review complete: 33 findings (2 errors, 0 security violations, 31 warnings/info)"
+  },
+  "agentElapsed": {
+    "Orchestrator": 0,
+    "RequirementsReader": 55.1784,
+    "RequirementsExpander": 0,
+    "Backlog": 0,
+    "Database": 0,
+    "ServiceLayer": 25.2126,
+    "Application": 0,
+    "Integration": 0,
+    "BugFix": 6.8077,
+    "Performance": 14.2682,
+    "Review": 5.2456
+  },
+  "agentArtifacts": {
+    "ServiceLayer": 54,
+    "Integration": 14,
+    "Application": 59
+  },
+  "agentFindings": {},
+  "agentRetries": {
+    "Application": 1,
+    "Integration": 1
+  },
+  "backlogItems": []
+}

@@ -3,7 +3,6 @@ using Hms.SharedKernel.Middleware;
 using Microsoft.EntityFrameworkCore;
 using Hms.EncounterService.Data;
 using Hms.EncounterService.Data.Repositories;
-using Hms.EncounterService.Endpoints;
 using Hms.EncounterService.Kafka;
 using Hms.EncounterService.Services;
 

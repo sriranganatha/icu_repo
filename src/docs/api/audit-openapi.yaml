@@ -1,0 +1,308 @@
+```yaml
+openapi: 3.1.0
+info:
+  title: HMS AuditService
+  version: 1.0.0
+  description: >
+    Healthcare Management System (HMS) Audit Service API. 
+    Manages audit logs and security events, mapping closely to the HL7 FHIR AuditEvent resource.
+servers:
+  - url: /api/v1
+    description: Base API path
+
+paths:
+  /AuditEvent:
+    get:
+      summary: List AuditEvents
+      description: Retrieves a paginated list of AuditEvent records.
+      operationId: listAuditEvents
+      tags:
+        - AuditEvent
+      parameters:
+        - $ref: '#/components/parameters/TenantIdHeader'
+        - $ref: '#/components/parameters/SkipQuery'
+        - $ref: '#/components/parameters/TakeQuery'
+      responses:
+        '200':
+          description: A paginated list of AuditEvents
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AuditEvent'
+                  total:
+                    type: integer
+                    example: 150
+        '401':
+          $ref: '#/components/responses/401Unauthorized'
+        '403':
+          $ref: '#/components/responses/403Forbidden'
+        '422':
+          $ref: '#/components/responses/422UnprocessableEntity'
+
+    post:
+      summary: Create AuditEvent
+      description: Creates a new AuditEvent record.
+      operationId: createAuditEvent
+      tags:
+        - AuditEvent
+      parameters:
+        - $ref: '#/components/parameters/TenantIdHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuditEventCreateRequest'
+      responses:
+        '201':
+          description: AuditEvent successfully created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditEvent'
+        '401':
+          $ref: '#/components/responses/401Unauthorized'
+        '403':
+          $ref: '#/components/responses/403Forbidden'
+        '422':
+          $ref: '#/components/responses/422UnprocessableEntity'
+
+  /AuditEvent/{id}:
+    get:
+      summary: Get AuditEvent by ID
+      description: Retrieves a specific AuditEvent by its unique identifier.
+      operationId: getAuditEventById
+      tags:
+        - AuditEvent
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - $ref: '#/components/parameters/TenantIdHeader'
+      responses:
+        '200':
+          description: The requested AuditEvent
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditEvent'
+        '401':
+          $ref: '#/components/responses/401Unauthorized'
+        '403':
+          $ref: '#/components/responses/403Forbidden'
+        '404':
+          $ref: '#/components/responses/404NotFound'
+        '422':
+          $ref: '#/components/responses/422UnprocessableEntity'
+
+    put:
+      summary: Update AuditEvent
+      description: >
+        Updates an existing AuditEvent. Note: In strict compliance environments, 
+        audit events are typically immutable. This endpoint is provided for administrative 
+        corrections or appending outcome details.
+      operationId: updateAuditEvent
+      tags:
+        - AuditEvent
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - $ref: '#/components/parameters/TenantIdHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuditEventUpdateRequest'
+      responses:
+        '200':
+          description: AuditEvent successfully updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditEvent'
+        '401':
+          $ref: '#/components/responses/401Unauthorized'
+        '403':
+          $ref: '#/components/responses/403Forbidden'
+        '404':
+          $ref: '#/components/responses/404NotFound'
+        '422':
+          $ref: '#/components/responses/422UnprocessableEntity'
+
+components:
+  parameters:
+    TenantIdHeader:
+      name: X-Tenant-Id
+      in: header
+      description: The unique identifier of the tenant making the request.
+      required: true
+      schema:
+        type: string
+        format: uuid
+    SkipQuery:
+      name: skip
+      in: query
+      description: Number of records to skip for pagination.
+      required: false
+      schema:
+        type: integer
+        minimum: 0
+        default: 0
+    TakeQuery:
+      name: take
+      in: query
+      description: Maximum number of records to return.
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+    IdPath:
+      name: id
+      in: path
+      description: The unique identifier of the entity.
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  responses:
+    401Unauthorized:
+      description: Unauthorized. Authentication is required and has failed or has not yet been provided.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    403Forbidden:
+      description: Forbidden. The user does not have the necessary permissions for the resource.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    404NotFound:
+      description: Not Found. The requested resource could not be found.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    422UnprocessableEntity:
+      description: Unprocessable Entity. The request was well-formed but was unable to be followed due to semantic errors.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+  schemas:
+    AuditEvent:
+      type: object
+      description: A record of an event made for purposes of maintaining a security log.
+      x-fhir-resource: AuditEvent
+      required:
+        - id
+        - type
+        - recorded
+        - agent
+        - source
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Logical id of this artifact
+        type:
+          $ref: '#/components/schemas/Coding'
+          description: Type/identifier of event
+        subtype:
+          type: array
+          items:
+            $ref: '#/components/schemas/Coding'
+          description: More specific type/id for the event
+        action:
+          type: string
+          enum: [C, R, U, D, E]
+          description: Type of action performed during the event (Create, Read, Update, Delete, Execute)
+        recorded:
+          type: string
+          format: date-time
+          description: Time when the event was recorded
+        outcome:
+          type: string
+          enum: ["0", "4", "8", "12"]
+          description: Whether the event succeeded or failed (0=Success, 4=Minor failure, 8=Serious failure, 12=Major failure)
+        outcomeDesc:
+          type: string
+          description: Description of the event outcome
+          x-phi-classification: Restricted
+        patientId:
+          type: string
+          format: uuid
+          description: The patient associated with the audit event, if applicable.
+          x-phi-classification: PHI
+        agent:
+          type: array
+          description: Actor involved in the event
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/AuditAgent'
+        source:
+          $ref: '#/components/schemas/AuditSource'
+          description: Audit Event Reporter
+        entity:
+          type: array
+          description: Data or objects used
+          items:
+            $ref: '#/components/schemas/AuditEntity'
+
+    AuditEventCreateRequest:
+      type: object
+      description: DTO for creating a new AuditEvent.
+      required:
+        - type
+        - recorded
+        - agent
+        - source
+      properties:
+        type:
+          $ref: '#/components/schemas/Coding'
+        subtype:
+          type: array
+          items:
+            $ref: '#/components/schemas/Coding'
+        action:
+          type: string
+          enum: [C, R, U, D, E]
+        recorded:
+          type: string
+          format: date-time
+        outcome:
+          type: string
+          enum: ["0", "4", "8", "12"]
+        outcomeDesc:
+          type: string
+          x-phi-classification: Restricted
+        patientId:
+          type: string
+          format: uuid
+          x-phi-classification: PHI
+        agent:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/AuditAgent'
+        source:
+          $ref: '#/components/schemas/AuditSource'
+        entity:
+          type: array
+          items:
+            $ref: '#/components/schemas/AuditEntity'
+
+    AuditEventUpdateRequest:
+      type: object
+      description: DTO for updating an existing AuditEvent.
+      properties:
+        outcome:
+          type: string
+          enum: ["0", "4", "8",

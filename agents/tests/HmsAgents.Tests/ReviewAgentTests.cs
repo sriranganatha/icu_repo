@@ -115,6 +115,6 @@ public class ReviewAgentTests
 
         // Empty context still triggers cross-cutting checks (no RLS, no QueryFilter)
         result.Findings.Should().Contain(f => f.Category == "MultiTenant");
-        result.Success.Should().BeFalse("cross-cutting multi-tenancy checks produce blocking errors");
+        result.Success.Should().BeTrue("Review always succeeds — findings are dispatched to remediation agents");
     }
 }

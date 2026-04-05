@@ -1,0 +1,77 @@
+groups:
+  - name: hms_critical_alerts
+    rules:
+      - alert: HighErrorRate
+        expr: rate(hms_errors_total[5m]) > 0.05
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High error rate on {{ $labels.service }}"
+          description: "Error rate is {{ $value }} errors/sec (threshold: 0.05)"
+
+      - alert: SlowResponses
+        expr: histogram_quantile(0.95, rate(hms_requests_duration_ms_bucket[5m])) > 2000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "P95 latency above 2s on {{ $labels.service }}"
+
+      - alert: EmergencyBacklog
+        expr: increase(hms_requests_total{operation="emergency.arrival"}[1h]) > 50
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Emergency department surge: {{ $value }} arrivals in 1h"
+
+      - alert: UnauthorizedPhiAccess
+        expr: rate(hms_security_breach_attempts[5m]) > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Potential unauthorized PHI access detected ({{ $value }}/sec)"
+
+      - alert: ServiceDown
+        expr: up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Service {{ $labels.instance }} is down"
+
+      - alert: KafkaPublishSlow
+        expr: histogram_quantile(0.95, rate(hms_kafka_publish_ms_bucket[5m])) > 500
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Kafka publish P95 latency above 500ms"
+
+      - alert: AiResponseSlow
+        expr: histogram_quantile(0.95, rate(hms_requests_duration_ms_bucket{operation="ai.interact"}[5m])) > 10000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "AI interaction P95 latency above 10s"
+
+  - name: hms_compliance_alerts
+    rules:
+      - alert: PhiAccessSpike
+        expr: rate(hms_phi_access_total[5m]) > 100
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Unusual PHI access rate: {{ $value }}/sec from {{ $labels.user }}"
+
+      - alert: BreakTheGlassUsed
+        expr: increase(hms_requests_total{operation="break_the_glass"}[1h]) > 0
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Break-the-glass emergency access activated"

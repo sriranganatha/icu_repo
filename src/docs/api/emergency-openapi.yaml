@@ -1,0 +1,387 @@
+```yaml
+openapi: 3.1.0
+info:
+  title: HMS Emergency Service API
+  description: API for managing emergency department arrivals and triage assessments in the Healthcare Management System.
+  version: 1.0.0
+  contact:
+    name: API Support
+    email: support@hms-system.com
+
+servers:
+  - url: /api/v1
+    description: Main API server
+
+tags:
+  - name: EmergencyArrival
+    description: Management of patient arrivals at the emergency department
+  - name: TriageAssessment
+    description: Clinical triage assessments for emergency arrivals
+
+paths:
+  /emergency-arrivals:
+    parameters:
+      - $ref: '#/components/parameters/TenantIdHeader'
+    get:
+      tags:
+        - EmergencyArrival
+      summary: List Emergency Arrivals
+      description: Retrieves a paginated list of emergency arrivals.
+      parameters:
+        - $ref: '#/components/parameters/SkipParam'
+        - $ref: '#/components/parameters/TakeParam'
+      responses:
+        '200':
+          description: A paginated list of emergency arrivals
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/EmergencyArrival'
+                  totalCount:
+                    type: integer
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+    post:
+      tags:
+        - EmergencyArrival
+      summary: Create Emergency Arrival
+      description: Registers a new patient arrival in the emergency department.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateEmergencyArrivalRequest'
+      responses:
+        '201':
+          description: Emergency arrival created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmergencyArrival'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /emergency-arrivals/{id}:
+    parameters:
+      - $ref: '#/components/parameters/TenantIdHeader'
+      - $ref: '#/components/parameters/IdPathParam'
+    get:
+      tags:
+        - EmergencyArrival
+      summary: Get Emergency Arrival by ID
+      description: Retrieves details of a specific emergency arrival.
+      responses:
+        '200':
+          description: Emergency arrival details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmergencyArrival'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    put:
+      tags:
+        - EmergencyArrival
+      summary: Update Emergency Arrival
+      description: Updates an existing emergency arrival record.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateEmergencyArrivalRequest'
+      responses:
+        '200':
+          description: Emergency arrival updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmergencyArrival'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /triage-assessments:
+    parameters:
+      - $ref: '#/components/parameters/TenantIdHeader'
+    get:
+      tags:
+        - TriageAssessment
+      summary: List Triage Assessments
+      description: Retrieves a paginated list of triage assessments.
+      parameters:
+        - $ref: '#/components/parameters/SkipParam'
+        - $ref: '#/components/parameters/TakeParam'
+      responses:
+        '200':
+          description: A paginated list of triage assessments
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/TriageAssessment'
+                  totalCount:
+                    type: integer
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+    post:
+      tags:
+        - TriageAssessment
+      summary: Create Triage Assessment
+      description: Records a new triage assessment for an emergency arrival.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTriageAssessmentRequest'
+      responses:
+        '201':
+          description: Triage assessment created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TriageAssessment'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /triage-assessments/{id}:
+    parameters:
+      - $ref: '#/components/parameters/TenantIdHeader'
+      - $ref: '#/components/parameters/IdPathParam'
+    get:
+      tags:
+        - TriageAssessment
+      summary: Get Triage Assessment by ID
+      description: Retrieves details of a specific triage assessment.
+      responses:
+        '200':
+          description: Triage assessment details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TriageAssessment'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    put:
+      tags:
+        - TriageAssessment
+      summary: Update Triage Assessment
+      description: Updates an existing triage assessment record.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateTriageAssessmentRequest'
+      responses:
+        '200':
+          description: Triage assessment updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TriageAssessment'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+components:
+  parameters:
+    TenantIdHeader:
+      name: X-Tenant-Id
+      in: header
+      required: true
+      description: The unique identifier for the tenant (hospital/clinic).
+      schema:
+        type: string
+        format: uuid
+    SkipParam:
+      name: skip
+      in: query
+      description: Number of records to skip for pagination.
+      required: false
+      schema:
+        type: integer
+        minimum: 0
+        default: 0
+    TakeParam:
+      name: take
+      in: query
+      description: Number of records to retrieve for pagination.
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+    IdPathParam:
+      name: id
+      in: path
+      required: true
+      description: The unique identifier of the entity.
+      schema:
+        type: string
+        format: uuid
+
+  responses:
+    Unauthorized:
+      description: Authentication is required and has failed or has not yet been provided.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Forbidden:
+      description: The request was valid, but the server is refusing action. The user might not have the necessary permissions.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    NotFound:
+      description: The requested resource could not be found.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    UnprocessableEntity:
+      description: The request was well-formed but was unable to be followed due to semantic errors (e.g., validation failures).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+  schemas:
+    ErrorResponse:
+      type: object
+      properties:
+        code:
+          type: string
+          description: Application-specific error code.
+        message:
+          type: string
+          description: Human-readable error message.
+        details:
+          type: array
+          items:
+            type: string
+          description: Additional error details or validation messages.
+
+    EmergencyArrival:
+      type: object
+      x-fhir-resource: Encounter
+      description: Represents a patient's arrival at the emergency department.
+      properties:
+        id:
+          type: string
+          format: uuid
+        patientId:
+          type: string
+          format: uuid
+          x-phi-classification: PHI
+          description: Identifier of the patient.
+        arrivalTime:
+          type: string
+          format: date-time
+        transportMode:
+          type: string
+          enum: [Ambulance, WalkIn, Helicopter, Police, Other]
+        chiefComplaint:
+          type: string
+          x-phi-classification: PHI
+          description: The primary reason the patient is seeking emergency care.
+        status:
+          type: string
+          enum: [Arrived, Triaged, InTreatment, Discharged, Admitted, Transferred]
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    CreateEmergencyArrivalRequest:
+      type: object
+      required:
+        - patientId
+        - arrivalTime
+        - transportMode
+        - chiefComplaint
+      properties:
+        patientId:
+          type: string
+          format: uuid
+          x-phi-classification: PHI
+        arrivalTime:
+          type: string
+          format: date-time
+        transportMode:
+          type: string
+          enum: [Ambulance, WalkIn, Helicopter, Police, Other]
+        chiefComplaint:
+          type: string
+          x-phi-classification: PHI
+
+    UpdateEmergencyArrivalRequest:
+      type: object
+      properties:
+        transportMode:
+          type: string
+          enum: [Ambulance, WalkIn, Helicopter, Police, Other]
+        chiefComplaint:
+          type: string
+          x-phi-classification: PHI
+        status:
+          type: string
+          enum: [Arrived, Triaged, InTreatment, Discharged, Admitted, Transferred]
+
+    TriageAssessment:
+      type: object
+      x-fhir-resource: ClinicalImpression
+      description:

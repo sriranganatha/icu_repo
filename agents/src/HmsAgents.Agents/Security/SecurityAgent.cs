@@ -36,6 +36,8 @@ public sealed class SecurityAgent : IAgent
         try
         {
             // ── Scan existing artifacts ──
+            if (context.ReportProgress is not null)
+                await context.ReportProgress(Type, $"Scanning {context.Artifacts.Count} artifacts for OWASP Top 10 vulnerabilities...");
             foreach (var artifact in context.Artifacts)
             {
                 ct.ThrowIfCancellationRequested();
@@ -45,8 +47,12 @@ public sealed class SecurityAgent : IAgent
                 findings.AddRange(ScanForCryptoIssues(artifact));
                 findings.AddRange(ScanForInputValidation(artifact));
             }
+            if (context.ReportProgress is not null)
+                await context.ReportProgress(Type, $"Security scan complete: {findings.Count} findings (injection, auth gaps, sensitive data, crypto, input validation)");
 
             // ── Generate security artifacts ──
+            if (context.ReportProgress is not null)
+                await context.ReportProgress(Type, "Generating security middleware — input validation, rate limiting, security headers, API key validator, encryption, PHI redaction");
             artifacts.Add(GenerateInputValidationMiddleware());
             artifacts.Add(GenerateRateLimitingPolicy());
             artifacts.Add(GenerateSecurityHeadersMiddleware());

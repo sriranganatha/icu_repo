@@ -1,4 +1,5 @@
 using Hms.AuditService.Contracts;
+using Hms.AuditService.Data.Entities;
 using Hms.AuditService.Data.Repositories;
 using Hms.AuditService.Kafka;
 using Microsoft.Extensions.Logging;
@@ -27,50 +28,67 @@ public sealed class AuditEventService : IAuditEventService
         if (entity is null) return null;
         return new AuditEventDto
         {
-            Id = entity.Id, TenantId = entity.TenantId,
-            CreatedAt = entity.CreatedAt
+
         };
     }
 
     public async Task<List<AuditEventDto>> ListAsync(int skip, int take, CancellationToken ct = default)
     {
         var items = await _repo.ListAsync(skip, take, ct);
-        return items.Select(e => new AuditEventDto
+        return items.Select(entity => new AuditEventDto
         {
-            Id = e.Id, TenantId = e.TenantId, CreatedAt = e.CreatedAt
+
         }).ToList();
     }
 
     public async Task<AuditEventDto> CreateAsync(CreateAuditEventRequest request, CancellationToken ct = default)
     {
         _logger.LogInformation("Creating AuditEvent for tenant {Tenant}", request.TenantId);
-        // TODO: map request to entity and save via repository
-        var dto = new AuditEventDto
+
+        var entity = new AuditEvent
         {
             Id = Guid.NewGuid().ToString("N"),
-            TenantId = request.TenantId,
-            FacilityId = request.FacilityId,
-            StatusCode = "active",
+
             CreatedAt = DateTimeOffset.UtcNow,
-            UpdatedAt = DateTimeOffset.UtcNow
+            UpdatedAt = DateTimeOffset.UtcNow,
         };
 
-        // Publish domain event to Kafka
+        var saved = await _repo.CreateAsync(entity, ct);
+
         await _events.PublishAsync(new AuditEventCreatedEvent
         {
-            EntityId = dto.Id, TenantId = dto.TenantId
+            EntityId = saved.Id, TenantId = saved.TenantId
         }, ct);
 
-        return dto;
+        _logger.LogInformation("Created AuditEvent {Id} for tenant {Tenant}", saved.Id, saved.TenantId);
+
+        return new AuditEventDto
+        {
+
+        };
     }
 
     public async Task<AuditEventDto> UpdateAsync(UpdateAuditEventRequest request, CancellationToken ct = default)
     {
         _logger.LogInformation("Updating AuditEvent {Id}", request.Id);
+
+        var entity = await _repo.GetByIdAsync(request.Id, ct)
+            ?? throw new KeyNotFoundException($"AuditEvent {request.Id} not found");
+
+
+        entity.UpdatedAt = DateTimeOffset.UtcNow;
+        entity.UpdatedBy = "system";
+
+        await _repo.UpdateAsync(entity, ct);
+
         await _events.PublishAsync(new AuditEventUpdatedEvent
         {
-            EntityId = request.Id, TenantId = string.Empty
+            EntityId = entity.Id, TenantId = entity.TenantId
         }, ct);
-        return new AuditEventDto { Id = request.Id, StatusCode = request.StatusCode ?? "active" };
+
+        return new AuditEventDto
+        {
+
+        };
     }
 }

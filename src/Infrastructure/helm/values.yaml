@@ -1,0 +1,269 @@
+Here is a comprehensive, production-ready `values.yaml` for a Healthcare Microservices Platform (HMS). It is structured to support an umbrella chart deployment, utilizing global variables for shared configurations and specific overrides for each microservice and infrastructure dependency.
+
+```yaml
+# =========================================================================
+# Healthcare Microservices Platform (HMS) - Helm Values
+# =========================================================================
+
+# -------------------------------------------------------------------------
+# Global Settings (Inherited by all subcharts/microservices)
+# -------------------------------------------------------------------------
+global:
+  imageRegistry: "registry.hms.internal/healthcare"
+  namespace: "hms-prod"
+  
+  tls:
+    enabled: true
+    certSecretName: "hms-wildcard-tls"
+    minVersion: "TLSv1.2" # Enforced for HIPAA compliance
+
+  # Healthcare-specific Compliance & Security Settings
+  healthcare:
+    # KMS reference for envelope encryption of PHI at rest
+    hipaaEncryptionKeyRef: "arn:aws:kms:us-east-1:123456789012:key/phi-master-key-001"
+    # Number of days to retain PHI access logs (7 years = 2555 days)
+    phiAuditRetentionDays: 2555
+    # Minutes before an emergency "Break-the-Glass" access session expires
+    breakTheGlassTimeoutMinutes: 15
+    # Default FHIR version for APIs
+    fhirVersion: "R4"
+
+# -------------------------------------------------------------------------
+# API Gateway (Ingress, Routing, and Authentication)
+# -------------------------------------------------------------------------
+apiGateway:
+  replicaCount: 3
+  image:
+    repository: "api-gateway"
+    tag: "v2.1.0"
+  ingress:
+    enabled: true
+    className: "nginx"
+    annotations:
+      nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
+      nginx.ingress.kubernetes.io/enable-modsecurity: "true" # WAF enabled
+    hosts:
+      - host: api.hms.internal
+        paths:
+          - path: /
+            pathType: Prefix
+  resources:
+    requests:
+      cpu: 500m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+
+# -------------------------------------------------------------------------
+# Microservices Configuration
+# -------------------------------------------------------------------------
+patientService:
+  replicaCount: 3
+  image:
+    repository: "patient-service"
+    tag: "v1.4.2"
+  env:
+    - name: ENABLE_FHIR_VALIDATION
+      value: "true"
+    - name: MPI_INTEGRATION_ENABLED # Master Patient Index
+      value: "true"
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+
+encounterService:
+  replicaCount: 2
+  image:
+    repository: "encounter-service"
+    tag: "v1.2.0"
+  env:
+    - name: HL7_V2_LISTENER_PORT
+      value: "2575"
+
+inpatientService:
+  replicaCount: 2
+  image:
+    repository: "inpatient-service"
+    tag: "v1.1.5"
+  env:
+    - name: BED_MANAGEMENT_SYNC_INTERVAL
+      value: "30s"
+
+emergencyService:
+  # Critical service: Higher replicas and aggressive auto-scaling
+  replicaCount: 4
+  image:
+    repository: "emergency-service"
+    tag: "v2.0.1"
+  autoscaling:
+    enabled: true
+    minReplicas: 4
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 60
+  priorityClassName: "system-cluster-critical"
+
+diagnosticsService:
+  replicaCount: 2
+  image:
+    repository: "diagnostics-service"
+    tag: "v1.3.0"
+  env:
+    - name: DICOM_WADO_URI
+      value: "https://pacs.hms.internal/wado"
+    - name: LIS_HL7_ENDPOINT
+      value: "tcp://lis.hms.internal:2576"
+  # Requires larger memory for processing imaging metadata
+  resources:
+    requests:
+      memory: 2Gi
+    limits:
+      memory: 4Gi
+
+revenueService:
+  replicaCount: 2
+  image:
+    repository: "revenue-service"
+    tag: "v1.0.8"
+  env:
+    - name: X12_EDI_GENERATION_ENABLED
+      value: "true"
+    - name: ICD10_CODING_STRICT_MODE
+      value: "true"
+
+auditService:
+  replicaCount: 3
+  image:
+    repository: "audit-service"
+    tag: "v1.5.0"
+  persistence:
+    enabled: true
+    size: 500Gi
+    storageClass: "encrypted-block-storage"
+  env:
+    - name: FLUSH_INTERVAL_SECONDS
+      value: "5"
+
+aiService:
+  replicaCount: 1
+  image:
+    repository: "clinical-ai-service"
+    tag: "v0.9.0"
+  env:
+    - name: MODEL_SEPSIS_PREDICTION_ENABLED
+      value: "true"
+    - name: MODEL_READMISSION_RISK_ENABLED
+      value: "true"
+  # AI workloads require GPU nodes
+  nodeSelector:
+    accelerator: nvidia-tesla-t4
+  resources:
+    limits:
+      nvidia.com/gpu: 1
+      memory: 8Gi
+
+# -------------------------------------------------------------------------
+# Infrastructure Dependencies
+# -------------------------------------------------------------------------
+
+# PostgreSQL Database (Stores relational clinical/admin data)
+postgresql:
+  enabled: true
+  architecture: replication
+  auth:
+    username: "hms_admin"
+    database: "hms_core"
+    existingSecret: "hms-db-credentials"
+  primary:
+    persistence:
+      size: 1Ti
+      storageClass: "encrypted-block-storage"
+  readReplicas:
+    replicaCount: 2
+
+# Kafka (Event streaming for HL7, FHIR events, and Audit logs)
+kafka:
+  enabled: true
+  replicaCount: 3
+  auth:
+    clientProtocol: tls
+  persistence:
+    size: 200Gi
+  provisioning:
+    topics:
+      - name: "phi-audit-events"
+        partitions: 6
+        replicationFactor: 3
+        config:
+          retention.ms: "604800000" # 7 days in Kafka before cold storage
+      - name: "fhir-resource-updates"
+        partitions: 3
+        replicationFactor: 3
+      - name: "hl7-v2-messages"
+        partitions: 3
+        replicationFactor: 3
+
+# Redis (Caching for fast patient lookups and session management)
+redis:
+  enabled: true
+  architecture: replication
+  auth:
+    enabled: true
+    existingSecret: "hms-redis-credentials"
+  master:
+    persistence:
+      enabled: false # Purely in-memory cache for PHI security
+  replica:
+    replicaCount: 2
+
+# -------------------------------------------------------------------------
+# Observability & Monitoring
+# -------------------------------------------------------------------------
+monitoring:
+  enabled: true
+  prometheus:
+    enabled: true
+    retention: "30d"
+    resources:
+      requests:
+        memory: 2Gi
+  grafana:
+    enabled: true
+    adminPasswordKey: "admin-password"
+    adminPasswordSecret: "hms-grafana-secret"
+    dashboards:
+      default: true
+      healthcare:
+        # Custom dashboards for healthcare metrics
+        fhir-api-latency: true
+        hl7-message-throughput: true
+        break-the-glass-alerts: true
+  alertmanager:
+    enabled: true
+    config:
+      receivers:
+        - name: 'security-team'
+          slack_configs:
+            - channel: '#hms-security-alerts'
+        - name: 'clinical-it'
+          pagerduty_configs:
+            - service_key: "<secret>"
+      route:
+        routes:
+          - match:
+              alertname: BreakTheGlassActivated
+            receiver: 'security-team'
+```
+
+### Key Features of this Configuration:
+1. **Global Healthcare Context:** The `global.healthcare` block centralizes compliance settings like the KMS key for envelope encryption, the 7-year PHI audit retention policy, and the 15-minute timeout for "Break-the-Glass" emergency access.
+2. **Service-Specific Tuning:** 
+   * `emergencyService` is given a `system-cluster-critical` priority class and aggressive autoscaling.
+   * `aiService` is configured with a `nodeSelector` and resource limits to request an NVIDIA GPU for clinical decision support models.
+   * `diagnosticsService` includes specific environment variables for DICOM and LIS (Laboratory Information System) integrations.
+3. **Secure Infrastructure:** 
+   * **Kafka** is pre-provisioned with specific topics for PHI audits and FHIR/HL7 events.
+   * **Redis** persistence is disabled to ensure PHI isn't accidentally written to unencrypted disk caches.
+   * **PostgreSQL** and **Audit** volumes explicitly request `encrypted-block-storage`.
+4. **Healthcare Observability:** The monitoring stack includes custom Grafana dashboard toggles for FHIR API latency, HL7 throughput, and specific Alertmanager routing for "Break-the-Glass" security events.

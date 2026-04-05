@@ -1,0 +1,93 @@
+using FluentAssertions;
+using Microsoft.EntityFrameworkCore;
+using Hms.DiagnosticsService.Data;
+using Hms.DiagnosticsService.Data.Entities;
+using Hms.DiagnosticsService.Data.Repositories;
+using Xunit;
+
+namespace Hms.Tests.Repositories;
+
+/// <summary>
+/// Repository tests for ResultRecord using EF Core InMemory provider.
+/// Feature coverage: EP-10, Module-J, Diagnostics
+/// </summary>
+public class ResultRecordRepositoryTests : IDisposable
+{
+    private readonly DiagnosticsServiceDbContext _db;
+    private readonly ResultRecordRepository _repo;
+
+    public ResultRecordRepositoryTests()
+    {
+        var options = new DbContextOptionsBuilder<DiagnosticsServiceDbContext>()
+            .UseInMemoryDatabase($"ResultRecord_cc5b83c4399342489232b9ab4f769a1c")
+            .Options;
+        var tenant = new TestTenantProvider("tenant-1");
+        _db = new DiagnosticsServiceDbContext(options, tenant);
+        _repo = new ResultRecordRepository(_db);
+    }
+
+    [Fact]
+    public async Task Create_PersistsEntity()
+    {
+        var entity = new ResultRecord
+        {
+
+        };
+
+        var saved = await _repo.CreateAsync(entity);
+
+        saved.Id.Should().NotBeNullOrEmpty();
+        var loaded = await _repo.GetByIdAsync(saved.Id);
+        loaded.Should().NotBeNull();
+        loaded!.TenantId.Should().Be("tenant-1");
+    }
+
+    [Fact]
+    public async Task GetById_ReturnsNull_WhenNotFound()
+    {
+        var result = await _repo.GetByIdAsync("nonexistent");
+        result.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task List_ReturnsPaginatedResults()
+    {
+        for (int i = 0; i < 5; i++)
+        {
+            await _repo.CreateAsync(new ResultRecord
+            {
+
+            });
+        }
+
+        var page = await _repo.ListAsync(0, 3);
+        page.Should().HaveCount(3);
+
+        var page2 = await _repo.ListAsync(3, 10);
+        page2.Should().HaveCount(2);
+    }
+
+    [Fact]
+    public async Task Update_ModifiesEntity()
+    {
+        var entity = new ResultRecord
+        {
+
+        };
+        await _repo.CreateAsync(entity);
+
+        entity.TenantId = "tenant-1";
+        await _repo.UpdateAsync(entity);
+
+        var loaded = await _repo.GetByIdAsync(entity.Id);
+        loaded.Should().NotBeNull();
+    }
+
+    public void Dispose() => _db.Dispose();
+}
+
+file class TestTenantProvider : ITenantProvider
+{
+    public string TenantId { get; }
+    public TestTenantProvider(string tenantId) => TenantId = tenantId;
+}

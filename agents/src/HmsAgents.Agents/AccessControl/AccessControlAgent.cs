@@ -37,10 +37,24 @@ public sealed class AccessControlAgent : IAgent
 
         try
         {
+            if (context.ReportProgress is not null)
+                await context.ReportProgress(Type, "Generating healthcare role definitions — Physician, Nurse, Pharmacist, Admin, Patient + 15 more roles");
             artifacts.Add(GenerateRoleDefinitions());
+
+            if (context.ReportProgress is not null)
+                await context.ReportProgress(Type, "Building permission matrix — mapping roles to resources with CRUD granularity");
             artifacts.Add(GeneratePermissionMatrix());
+
+            if (context.ReportProgress is not null)
+                await context.ReportProgress(Type, "AI-generating authorization policy provider — resource-level ABAC with Gemini LLM");
             artifacts.Add(await GenerateAuthorizationPolicyProvider(ct));
+
+            if (context.ReportProgress is not null)
+                await context.ReportProgress(Type, "Generating break-the-glass emergency access service — time-limited PHI override with full audit trail");
             artifacts.Add(GenerateBreakTheGlassService());
+
+            if (context.ReportProgress is not null)
+                await context.ReportProgress(Type, "Generating consent management — patient consent tracking, revocation, HIPAA minimum necessary");
             artifacts.Add(GenerateConsentManagement());
 
             context.Artifacts.AddRange(artifacts);

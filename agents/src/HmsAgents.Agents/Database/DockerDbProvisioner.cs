@@ -76,7 +76,7 @@ public sealed class DockerDbProvisioner
     public async Task<(bool success, int objectsCreated, List<string> errors)> ExecuteDdlAsync(
         PipelineConfig config, CancellationToken ct = default)
     {
-        var connStr = $"Host=localhost;Port={config.DbPort};Database={config.DbName};Username={config.DbUser};Password={config.DbPassword}";
+        var connStr = $"Host={config.DbHost};Port={config.DbPort};Database={config.DbName};Username={config.DbUser};Password={config.DbPassword}";
         var errors = new List<string>();
         int objectsCreated = 0;
 

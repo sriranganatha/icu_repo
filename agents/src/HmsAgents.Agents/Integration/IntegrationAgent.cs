@@ -31,6 +31,8 @@ public sealed class IntegrationAgent : IAgent
         try
         {
             // Kafka infrastructure
+            if (context.ReportProgress is not null)
+                await context.ReportProgress(Type, "Generating Kafka infrastructure — consumer hosted service, outbox pattern, dead-letter handler");
             artifacts.Add(GenerateKafkaConsumerHostedService());
             artifacts.Add(GenerateOutboxEntity());
             artifacts.Add(GenerateOutboxProcessor());
@@ -41,11 +43,15 @@ public sealed class IntegrationAgent : IAgent
             {
                 if (svc.DependsOn.Length > 0)
                 {
+                    if (context.ReportProgress is not null)
+                        await context.ReportProgress(Type, $"Generating Kafka consumer for {svc.Name} — subscribes to: {string.Join(", ", svc.DependsOn)}");
                     artifacts.Add(GenerateServiceConsumer(svc));
                 }
             }
 
             // Kafka topic provisioner (admin client)
+            if (context.ReportProgress is not null)
+                await context.ReportProgress(Type, "Generating Kafka topic provisioner, FHIR R4 adapter, HL7v2 processor");
             artifacts.Add(GenerateTopicProvisioner());
 
             // FHIR adapter
@@ -55,6 +61,8 @@ public sealed class IntegrationAgent : IAgent
             artifacts.Add(GenerateHl7Processor());
 
             // Integration event contracts
+            if (context.ReportProgress is not null)
+                await context.ReportProgress(Type, "Generating integration event catalog — cross-service event contracts");
             artifacts.Add(GenerateIntegrationEventCatalog());
 
             context.Artifacts.AddRange(artifacts);

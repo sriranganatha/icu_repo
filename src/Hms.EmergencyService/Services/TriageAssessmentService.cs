@@ -1,4 +1,5 @@
 using Hms.EmergencyService.Contracts;
+using Hms.EmergencyService.Data.Entities;
 using Hms.EmergencyService.Data.Repositories;
 using Hms.EmergencyService.Kafka;
 using Microsoft.Extensions.Logging;
@@ -27,50 +28,67 @@ public sealed class TriageAssessmentService : ITriageAssessmentService
         if (entity is null) return null;
         return new TriageAssessmentDto
         {
-            Id = entity.Id, TenantId = entity.TenantId,
-            CreatedAt = entity.CreatedAt
+
         };
     }
 
     public async Task<List<TriageAssessmentDto>> ListAsync(int skip, int take, CancellationToken ct = default)
     {
         var items = await _repo.ListAsync(skip, take, ct);
-        return items.Select(e => new TriageAssessmentDto
+        return items.Select(entity => new TriageAssessmentDto
         {
-            Id = e.Id, TenantId = e.TenantId, CreatedAt = e.CreatedAt
+
         }).ToList();
     }
 
     public async Task<TriageAssessmentDto> CreateAsync(CreateTriageAssessmentRequest request, CancellationToken ct = default)
     {
         _logger.LogInformation("Creating TriageAssessment for tenant {Tenant}", request.TenantId);
-        // TODO: map request to entity and save via repository
-        var dto = new TriageAssessmentDto
+
+        var entity = new TriageAssessment
         {
             Id = Guid.NewGuid().ToString("N"),
-            TenantId = request.TenantId,
-            FacilityId = request.FacilityId,
-            StatusCode = "active",
+
             CreatedAt = DateTimeOffset.UtcNow,
-            UpdatedAt = DateTimeOffset.UtcNow
+            UpdatedAt = DateTimeOffset.UtcNow,
         };
 
-        // Publish domain event to Kafka
+        var saved = await _repo.CreateAsync(entity, ct);
+
         await _events.PublishAsync(new TriageAssessmentCreatedEvent
         {
-            EntityId = dto.Id, TenantId = dto.TenantId
+            EntityId = saved.Id, TenantId = saved.TenantId
         }, ct);
 
-        return dto;
+        _logger.LogInformation("Created TriageAssessment {Id} for tenant {Tenant}", saved.Id, saved.TenantId);
+
+        return new TriageAssessmentDto
+        {
+
+        };
     }
 
     public async Task<TriageAssessmentDto> UpdateAsync(UpdateTriageAssessmentRequest request, CancellationToken ct = default)
     {
         _logger.LogInformation("Updating TriageAssessment {Id}", request.Id);
+
+        var entity = await _repo.GetByIdAsync(request.Id, ct)
+            ?? throw new KeyNotFoundException($"TriageAssessment {request.Id} not found");
+
+
+        entity.UpdatedAt = DateTimeOffset.UtcNow;
+        entity.UpdatedBy = "system";
+
+        await _repo.UpdateAsync(entity, ct);
+
         await _events.PublishAsync(new TriageAssessmentUpdatedEvent
         {
-            EntityId = request.Id, TenantId = string.Empty
+            EntityId = entity.Id, TenantId = entity.TenantId
         }, ct);
-        return new TriageAssessmentDto { Id = request.Id, StatusCode = request.StatusCode ?? "active" };
+
+        return new TriageAssessmentDto
+        {
+
+        };
     }
 }

@@ -33,17 +33,17 @@
                 <div class="row g-3">
                     <div class="col-md-6">
                         <label class="form-label fw-semibold"><i class="bi bi-folder2-open me-1"></i>Requirements Path</label>
-                        <input type="text" id="inputReqsPath" class="form-control" placeholder="e.g. C:\sri\mywork\icu\docs" />
+                        <input type="text" id="inputReqsPath" class="form-control" value="C:\sri\mywork\icu\docs" placeholder="e.g. C:\sri\mywork\icu\docs" />
                         <small class="text-muted">Folder containing requirement markdown files</small>
                     </div>
                     <div class="col-md-6">
                         <label class="form-label fw-semibold"><i class="bi bi-folder-plus me-1"></i>Output Path</label>
-                        <input type="text" id="inputOutputPath" class="form-control" placeholder="e.g. C:\sri\mywork\icu\src" />
+                        <input type="text" id="inputOutputPath" class="form-control" value="C:\sri\mywork\icu\src" placeholder="e.g. C:\sri\mywork\icu\src" />
                         <small class="text-muted">Target folder for generated solution code</small>
                     </div>
                     <div class="col-md-3">
                         <label class="form-label fw-semibold"><i class="bi bi-box me-1"></i>Docker Container Name</label>
-                        <input type="text" id="inputContainerName" class="form-control" value="hms-postgres" />
+                        <input type="text" id="inputContainerName" class="form-control" value="icu-postgres" />
                     </div>
                     <div class="col-md-3">
                         <label class="form-label fw-semibold"><i class="bi bi-server me-1"></i>DB Hostname</label>
@@ -55,15 +55,15 @@
                     </div>
                     <div class="col-md-2">
                         <label class="form-label fw-semibold"><i class="bi bi-person-badge me-1"></i>DB Username</label>
-                        <input type="text" id="inputDbUser" class="form-control" value="hms_admin" />
+                        <input type="text" id="inputDbUser" class="form-control" value="hms" />
                     </div>
                     <div class="col-md-2">
                         <label class="form-label fw-semibold"><i class="bi bi-database me-1"></i>Database Name</label>
-                        <input type="text" id="inputDbName" class="form-control" value="hms_db" />
+                        <input type="text" id="inputDbName" class="form-control" value="hms" />
                     </div>
                     <div class="col-md-3">
                         <label class="form-label fw-semibold"><i class="bi bi-shield-lock me-1"></i>DB Password</label>
-                        <input type="password" id="inputDbPassword" class="form-control" value="hms_secure_pwd_2026!" />
+                        <input type="password" id="inputDbPassword" class="form-control" value="hms_dev_pw" />
                     </div>
                     <div class="col-md-3">
                         <label class="form-label fw-semibold">Solution Namespace</label>
@@ -154,6 +154,138 @@
         </div>
     </div>
 
+    <!-- Orchestrator Instructions Panel -->
+    <div class="card mb-4 border-info">
+        <div class="card-header bg-info bg-opacity-10 d-flex justify-content-between align-items-center">
+            <span><i class="bi bi-chat-left-text text-info me-2"></i><strong>Orchestrator Instructions</strong> <small class="text-muted ms-2">Guide the pipeline with natural language directives</small></span>
+            <span id="instrQueueBadge" class="badge bg-info">0 queued</span>
+        </div>
+        <div class="card-body">
+            <div class="row g-2 mb-2">
+                <div class="col">
+                    <textarea id="inputInstructions" class="form-control" rows="3"
+                        placeholder="e.g. Focus on security hardening for patient data. Skip performance optimization. Ensure all services have HIPAA audit logging. Use async/await everywhere..."></textarea>
+                </div>
+            </div>
+            <div class="d-flex gap-2 align-items-center">
+                <button class="btn btn-info btn-sm text-white" onclick="sendInstruction()" title="Send instruction to live pipeline">
+                    <i class="bi bi-send-fill me-1"></i> Send to Pipeline
+                </button>
+                <button class="btn btn-outline-secondary btn-sm" onclick="clearInstructions()" title="Clear instruction history">
+                    <i class="bi bi-trash me-1"></i> Clear
+                </button>
+                <small class="text-muted ms-auto">Instructions are picked up by agents at the start of each stage</small>
+            </div>
+            <div id="instrHistory" class="mt-2" style="max-height: 150px; overflow-y: auto; font-size: 0.85rem;"></div>
+        </div>
+    </div>
+
+    <!-- Submit New Requirements Panel -->
+    <div class="card mb-4 border-success">
+        <div class="card-header bg-success bg-opacity-10 d-flex justify-content-between align-items-center">
+            <span><i class="bi bi-plus-circle text-success me-2"></i><strong>Submit New Requirements</strong> <small class="text-muted ms-2">Add requirements mid-pipeline — auto-saved to docs, expanded to backlog, agents re-dispatched</small></span>
+            <span id="reqSubmitBadge" class="badge bg-success">0 submitted</span>
+        </div>
+        <div class="card-body">
+            <div class="row g-2 mb-2">
+                <div class="col-md-5">
+                    <input id="newReqTitle" class="form-control form-control-sm" placeholder="Requirement Title (e.g. Patient Medication Reconciliation)" />
+                </div>
+                <div class="col-md-3">
+                    <select id="newReqModule" class="form-select form-select-sm">
+                        <option value="General">General</option>
+                        <option value="Patient">Patient</option>
+                        <option value="Encounter">Encounter</option>
+                        <option value="Inpatient">Inpatient</option>
+                        <option value="Emergency">Emergency</option>
+                        <option value="Diagnostics">Diagnostics</option>
+                        <option value="Revenue">Revenue</option>
+                        <option value="Pharmacy">Pharmacy</option>
+                        <option value="AI">AI</option>
+                        <option value="Integration">Integration</option>
+                        <option value="Security">Security</option>
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <input id="newReqTags" class="form-control form-control-sm" placeholder="Tags (comma-separated)" />
+                </div>
+            </div>
+            <div class="row g-2 mb-2">
+                <div class="col-md-8">
+                    <textarea id="newReqDescription" class="form-control form-control-sm" rows="2" placeholder="Description — what should this feature do?"></textarea>
+                </div>
+                <div class="col-md-4">
+                    <textarea id="newReqAC" class="form-control form-control-sm" rows="2" placeholder="Acceptance Criteria (one per line)"></textarea>
+                </div>
+            </div>
+            <div class="d-flex gap-2 align-items-center">
+                <button class="btn btn-success btn-sm" onclick="submitRequirement()" title="Submit requirement to orchestrator">
+                    <i class="bi bi-plus-lg me-1"></i> Submit Requirement
+                </button>
+                <button class="btn btn-outline-success btn-sm" onclick="submitBulkRequirements()" title="Submit all queued requirements at once">
+                    <i class="bi bi-collection me-1"></i> Submit Bulk (<span id="bulkCount">0</span>)
+                </button>
+                <button class="btn btn-outline-secondary btn-sm" onclick="clearReqForm()">
+                    <i class="bi bi-x-circle me-1"></i> Clear
+                </button>
+                <small class="text-muted ms-auto">Requirements are saved to docs/ folder, expanded to backlog, and dispatched to agents</small>
+            </div>
+            <div id="reqQueue" class="mt-2" style="max-height: 200px; overflow-y: auto; font-size: 0.85rem;"></div>
+        </div>
+    </div>
+
+    <!-- Backlog Tracker Panel -->
+    <div class="card mb-4 border-secondary">
+        <div class="card-header bg-secondary bg-opacity-10 d-flex justify-content-between align-items-center">
+            <span><i class="bi bi-kanban text-secondary me-2"></i><strong>Backlog Tracker</strong> <small class="text-muted ms-2">Work items expanded from requirements — managed by BacklogAgent</small></span>
+            <div>
+                <span class="badge bg-primary me-1" id="blStatNew">0 New</span>
+                <span class="badge bg-info me-1" id="blStatQueued">0 Queued</span>
+                <span class="badge bg-warning text-dark me-1" id="blStatDev">0 In Dev</span>
+                <span class="badge bg-success me-1" id="blStatDone">0 Done</span>
+                <span class="badge bg-danger me-1" id="blStatBlocked">0 Blocked</span>
+                <button class="btn btn-outline-secondary btn-sm ms-2" onclick="refreshBacklog()" title="Refresh backlog">
+                    <i class="bi bi-arrow-clockwise"></i>
+                </button>
+            </div>
+        </div>
+        <div class="card-body p-0">
+            <div class="row g-0">
+                <!-- Backlog progress bar -->
+                <div class="col-12 p-3 pb-0">
+                    <div class="progress" style="height: 22px;" id="backlogProgress">
+                        <div class="progress-bar bg-primary" id="blBarNew" role="progressbar" style="width: 0%"></div>
+                        <div class="progress-bar bg-info" id="blBarQueued" role="progressbar" style="width: 0%"></div>
+                        <div class="progress-bar bg-warning" id="blBarDev" role="progressbar" style="width: 0%"></div>
+                        <div class="progress-bar bg-success" id="blBarDone" role="progressbar" style="width: 0%"></div>
+                        <div class="progress-bar bg-danger" id="blBarBlocked" role="progressbar" style="width: 0%"></div>
+                    </div>
+                </div>
+                <!-- Backlog items table -->
+                <div class="col-12">
+                    <div style="max-height: 300px; overflow-y: auto;">
+                        <table class="table table-sm table-hover mb-0" id="backlogTable">
+                            <thead class="table-light sticky-top">
+                                <tr>
+                                    <th style="width:60px">Type</th>
+                                    <th>Title</th>
+                                    <th style="width:80px">Module</th>
+                                    <th style="width:80px">Status</th>
+                                    <th style="width:110px">Assigned Agent</th>
+                                    <th style="width:40px">P</th>
+                                    <th style="width:40px">Iter</th>
+                                </tr>
+                            </thead>
+                            <tbody id="backlogBody">
+                                <tr><td colspan="7" class="text-center text-muted py-3">No backlog items yet — submit requirements or run pipeline</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Stats Row -->
     <div class="row mb-4 g-3">
         <div class="col-md-3">
@@ -190,16 +322,29 @@
         </div>
     </div>
 
-    <!-- Agent Cards Grid -->
-    <div class="row mb-4 g-3">
+    <!-- Agent Cards: Core Pipeline -->
+    <h5 class="mb-2"><i class="bi bi-arrow-right-circle text-primary me-1"></i> Core Pipeline Agents</h5>
+    <div class="row mb-3 g-3">
+        <div class="col-md-4 col-lg-3" id="card-Orchestrator">
+            @await Html.PartialAsync("_AgentCard", new HmsAgents.Web.Pages.AgentCardModel { Name = "Orchestrator", Icon = "bi-diagram-3", AgentKey = "Orchestrator", Description = "Coordinates pipeline stages sequentially" })
+        </div>
         <div class="col-md-4 col-lg-3" id="card-RequirementsReader">
             @await Html.PartialAsync("_AgentCard", new HmsAgents.Web.Pages.AgentCardModel { Name = "Requirements Reader", Icon = "bi-file-earmark-text", AgentKey = "RequirementsReader", Description = "Scans icu/docs for structured requirements" })
+        </div>
+        <div class="col-md-4 col-lg-3" id="card-RequirementsExpander">
+            @await Html.PartialAsync("_AgentCard", new HmsAgents.Web.Pages.AgentCardModel { Name = "Reqs Expander", Icon = "bi-diagram-2", AgentKey = "RequirementsExpander", Description = "Expands requirements into epics, stories, tasks" })
+        </div>
+        <div class="col-md-4 col-lg-3" id="card-Backlog">
+            @await Html.PartialAsync("_AgentCard", new HmsAgents.Web.Pages.AgentCardModel { Name = "Backlog Manager", Icon = "bi-kanban", AgentKey = "Backlog", Description = "Tracks work item lifecycle and priorities" })
+        </div>
+        <div class="col-md-4 col-lg-3" id="card-RequirementAnalyzer">
+            @await Html.PartialAsync("_AgentCard", new HmsAgents.Web.Pages.AgentCardModel { Name = "Req Analyzer", Icon = "bi-search", AgentKey = "RequirementAnalyzer", Description = "Gap analysis — identifies missing coverage & generates stories" })
         </div>
         <div class="col-md-4 col-lg-3" id="card-Database">
             @await Html.PartialAsync("_AgentCard", new HmsAgents.Web.Pages.AgentCardModel { Name = "Database Agent", Icon = "bi-database", AgentKey = "Database", Description = "Generates EF Core entities, DbContext, repos" })
         </div>
         <div class="col-md-4 col-lg-3" id="card-ServiceLayer">
-            @await Html.PartialAsync("_AgentCard", new HmsAgents.Web.Pages.AgentCardModel { Name = "Service Layer Agent", Icon = "bi-layers", AgentKey = "ServiceLayer", Description = "Generates DTOs, service interfaces & impls" })
+            @await Html.PartialAsync("_AgentCard", new HmsAgents.Web.Pages.AgentCardModel { Name = "Service Layer", Icon = "bi-layers", AgentKey = "ServiceLayer", Description = "Generates DTOs, service interfaces & impls" })
         </div>
         <div class="col-md-4 col-lg-3" id="card-Application">
             @await Html.PartialAsync("_AgentCard", new HmsAgents.Web.Pages.AgentCardModel { Name = "Application Agent", Icon = "bi-window-stack", AgentKey = "Application", Description = "Generates Razor Pages, ViewModels, layouts" })
@@ -213,11 +358,75 @@
         <div class="col-md-4 col-lg-3" id="card-Review">
             @await Html.PartialAsync("_AgentCard", new HmsAgents.Web.Pages.AgentCardModel { Name = "Review Agent", Icon = "bi-shield-check", AgentKey = "Review", Description = "Reviews code against requirements & security" })
         </div>
+    </div>
+    <!-- Agent Cards: Remediation Agents -->
+    <h5 class="mb-2"><i class="bi bi-wrench text-warning me-1"></i> Remediation Agents</h5>
+    <div class="row mb-3 g-3">
+        <div class="col-md-4 col-lg-3" id="card-BugFix">
+            @await Html.PartialAsync("_AgentCard", new HmsAgents.Web.Pages.AgentCardModel { Name = "BugFix Agent", Icon = "bi-bug", AgentKey = "BugFix", Description = "AI-driven code repair from Review findings" })
+        </div>
+        <div class="col-md-4 col-lg-3" id="card-Performance">
+            @await Html.PartialAsync("_AgentCard", new HmsAgents.Web.Pages.AgentCardModel { Name = "Performance Agent", Icon = "bi-speedometer2", AgentKey = "Performance", Description = "Caching, query optimization, pagination" })
+        </div>
+        <div class="col-md-4 col-lg-3" id="card-Security">
+            @await Html.PartialAsync("_AgentCard", new HmsAgents.Web.Pages.AgentCardModel { Name = "Security Agent", Icon = "bi-shield-lock", AgentKey = "Security", Description = "OWASP Top-10, input validation, auth guards" })
+        </div>
         <div class="col-md-4 col-lg-3" id="card-Supervisor">
             @await Html.PartialAsync("_AgentCard", new HmsAgents.Web.Pages.AgentCardModel { Name = "Supervisor Agent", Icon = "bi-eye", AgentKey = "Supervisor", Description = "Monitors agents, diagnoses failures, remediates" })
         </div>
-        <div class="col-md-4 col-lg-3" id="card-Orchestrator">
-            @await Html.PartialAsync("_AgentCard", new HmsAgents.Web.Pages.AgentCardModel { Name = "Orchestrator", Icon = "bi-diagram-3", AgentKey = "Orchestrator", Description = "Coordinates pipeline stages sequentially" })
+    </div>
+    <!-- Agent Cards: Enrichment / Compliance Agents -->
+    <h5 class="mb-2"><i class="bi bi-shield-fill-check text-success me-1"></i> Enrichment &amp; Compliance Agents</h5>
+    <div class="row mb-4 g-3">
+        <div class="col-md-4 col-lg-3" id="card-HipaaCompliance">
+            @await Html.PartialAsync("_AgentCard", new HmsAgents.Web.Pages.AgentCardModel { Name = "HIPAA Compliance", Icon = "bi-heart-pulse", AgentKey = "HipaaCompliance", Description = "PHI encryption, audit trails, BAA compliance" })
+        </div>
+        <div class="col-md-4 col-lg-3" id="card-Soc2Compliance">
+            @await Html.PartialAsync("_AgentCard", new HmsAgents.Web.Pages.AgentCardModel { Name = "SOC2 Compliance", Icon = "bi-file-earmark-lock", AgentKey = "Soc2Compliance", Description = "SOC2 Type II controls & trust criteria" })
+        </div>
+        <div class="col-md-4 col-lg-3" id="card-AccessControl">
+            @await Html.PartialAsync("_AgentCard", new HmsAgents.Web.Pages.AgentCardModel { Name = "Access Control", Icon = "bi-key", AgentKey = "AccessControl", Description = "RBAC policies, JWT, claims-based auth" })
+        </div>
+        <div class="col-md-4 col-lg-3" id="card-Observability">
+            @await Html.PartialAsync("_AgentCard", new HmsAgents.Web.Pages.AgentCardModel { Name = "Observability", Icon = "bi-binoculars", AgentKey = "Observability", Description = "Health checks, metrics, distributed tracing" })
+        </div>
+        <div class="col-md-4 col-lg-3" id="card-Infrastructure">
+            @await Html.PartialAsync("_AgentCard", new HmsAgents.Web.Pages.AgentCardModel { Name = "Infrastructure", Icon = "bi-cloud-arrow-up", AgentKey = "Infrastructure", Description = "Docker, K8s, CI/CD, Terraform configs" })
+        </div>
+        <div class="col-md-4 col-lg-3" id="card-ApiDocumentation">
+            @await Html.PartialAsync("_AgentCard", new HmsAgents.Web.Pages.AgentCardModel { Name = "API Documentation", Icon = "bi-journal-code", AgentKey = "ApiDocumentation", Description = "OpenAPI specs, Swagger, endpoint docs" })
+        </div>
+    </div>
+    <!-- Agent Cards: Deployment -->
+    <h5 class="mb-2"><i class="bi bi-rocket-takeoff text-primary me-1"></i> Deployment</h5>
+    <div class="row mb-4 g-3">
+        <div class="col-md-4 col-lg-3" id="card-Deploy">
+            @await Html.PartialAsync("_AgentCard", new HmsAgents.Web.Pages.AgentCardModel { Name = "Deploy Agent", Icon = "bi-rocket-takeoff", AgentKey = "Deploy", Description = "Builds, publishes & deploys the generated HMS solution" })
+        </div>
+        <div class="col-md-8 col-lg-9">
+            <div class="card border-primary">
+                <div class="card-body">
+                    <h6 class="card-title"><i class="bi bi-rocket-takeoff me-1"></i> Deploy Project</h6>
+                    <div class="row g-2 align-items-end">
+                        <div class="col-md-6">
+                            <label class="form-label form-label-sm">Output Path</label>
+                            <input type="text" id="deployOutputPath" class="form-control form-control-sm" placeholder="e.g. C:\sri\mywork\icu\src" />
+                        </div>
+                        <div class="col-md-3">
+                            <div class="form-check form-switch mt-3">
+                                <input class="form-check-input" type="checkbox" id="deploySpinDocker" checked>
+                                <label class="form-check-label" for="deploySpinDocker">Docker Deploy</label>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <button class="btn btn-primary btn-sm w-100" onclick="triggerDeploy()">
+                                <i class="bi bi-rocket-takeoff me-1"></i> Deploy Now
+                            </button>
+                        </div>
+                    </div>
+                    <div id="deployStatus" class="mt-2 small text-muted" style="display:none;"></div>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -226,7 +435,7 @@
         <div class="col-lg-8">
             <div class="card">
                 <div class="card-header"><i class="bi bi-bar-chart-steps"></i> Agent Execution Timeline</div>
-                <div class="card-body" style="height:260px;">
+                <div class="card-body" style="height:420px;">
                     <canvas id="chartTimeline"></canvas>
                 </div>
             </div>
@@ -394,6 +603,121 @@
             </div>
         </div>
     </div>
+
+    <!-- Human-in-the-Loop Decisions Panel -->
+    <div class="card mb-4 border-warning">
+        <div class="card-header bg-warning bg-opacity-10 d-flex justify-content-between align-items-center">
+            <span><i class="bi bi-person-check text-warning me-2"></i><strong>Human-in-the-Loop Decisions</strong> <small class="text-muted ms-2">Approve or reject agent requests that need human oversight</small></span>
+            <div>
+                <span class="badge bg-warning text-dark" id="hitlPendingBadge">0 pending</span>
+                <button class="btn btn-outline-warning btn-sm ms-2" onclick="refreshDecisions()" title="Refresh decisions"><i class="bi bi-arrow-clockwise"></i></button>
+            </div>
+        </div>
+        <div class="card-body p-0">
+            <div style="max-height: 350px; overflow-y: auto;">
+                <table class="table table-sm table-hover mb-0">
+                    <thead class="table-light sticky-top">
+                        <tr>
+                            <th style="width:120px">Agent</th>
+                            <th style="width:100px">Category</th>
+                            <th>Title</th>
+                            <th style="width:80px">Status</th>
+                            <th style="width:160px">Actions</th>
+                            <th style="width:120px">Requested</th>
+                        </tr>
+                    </thead>
+                    <tbody id="hitlBody">
+                        <tr><td colspan="6" class="text-center text-muted py-3">No pending decisions</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Audit Log Panel -->
+    <div class="card mb-4 border-dark">
+        <div class="card-header bg-dark bg-opacity-10 d-flex justify-content-between align-items-center">
+            <span><i class="bi bi-shield-lock-fill me-2"></i><strong>Verifiable Audit Log</strong> <small class="text-muted ms-2">Hash-chained tamper-evident audit trail for all agent actions</small></span>
+            <div class="d-flex gap-2 align-items-center">
+                <span class="badge" id="auditVerifyBadge">—</span>
+                <button class="btn btn-outline-dark btn-sm" onclick="verifyAuditChain()" title="Verify chain integrity"><i class="bi bi-patch-check me-1"></i>Verify</button>
+                <button class="btn btn-outline-dark btn-sm" onclick="refreshAuditLog()" title="Refresh"><i class="bi bi-arrow-clockwise"></i></button>
+            </div>
+        </div>
+        <div class="card-body p-0">
+            <div style="max-height: 400px; overflow-y: auto;">
+                <table class="table table-sm table-hover mb-0" style="font-size: 0.82rem;">
+                    <thead class="table-light sticky-top">
+                        <tr>
+                            <th style="width:40px">#</th>
+                            <th style="width:100px">Agent</th>
+                            <th style="width:120px">Action</th>
+                            <th style="width:70px">Severity</th>
+                            <th>Description</th>
+                            <th style="width:120px">Hash</th>
+                            <th style="width:100px">Time</th>
+                        </tr>
+                    </thead>
+                    <tbody id="auditBody">
+                        <tr><td colspan="7" class="text-center text-muted py-3">Run pipeline to see audit log</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Agent Detail Modal (full-screen) -->
+<div class="modal fade" id="agentDetailModal" tabindex="-1" aria-labelledby="agentDetailTitle" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="agentDetailTitle"><i class="bi bi-cpu me-2"></i>Agent Details</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body p-0">
+                <!-- Summary strip -->
+                <div class="d-flex gap-3 p-3 bg-light border-bottom flex-wrap align-items-center" id="agentDetailSummary">
+                    <span class="badge bg-secondary fs-6" id="adStatus">Idle</span>
+                    <span><i class="bi bi-clock me-1"></i><span id="adElapsed">—</span></span>
+                    <span><i class="bi bi-file-earmark-code me-1"></i>Artifacts: <strong id="adArtifacts">0</strong></span>
+                    <span><i class="bi bi-exclamation-triangle me-1"></i>Findings: <strong id="adFindings">0</strong></span>
+                    <span><i class="bi bi-arrow-repeat me-1"></i>Retries: <strong id="adRetries">0</strong></span>
+                </div>
+                <!-- Tabs -->
+                <ul class="nav nav-tabs px-3 pt-2" id="agentDetailTabs" role="tablist">
+                    <li class="nav-item"><a class="nav-link active" data-bs-toggle="tab" href="#adTabTimeline">Activity Timeline</a></li>
+                    <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#adTabAudit">Audit Log</a></li>
+                    <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#adTabDecisions">Decisions</a></li>
+                </ul>
+                <div class="tab-content p-3">
+                    <!-- Activity Timeline tab -->
+                    <div class="tab-pane fade show active" id="adTabTimeline">
+                        <div style="max-height: 450px; overflow-y: auto;">
+                            <div id="adTimelineList" class="d-flex flex-column gap-1"></div>
+                        </div>
+                    </div>
+                    <!-- Audit Log tab -->
+                    <div class="tab-pane fade" id="adTabAudit">
+                        <div style="max-height: 450px; overflow-y: auto;">
+                            <table class="table table-sm table-hover mb-0" style="font-size:0.82rem;">
+                                <thead class="table-light sticky-top">
+                                    <tr><th>#</th><th>Action</th><th>Severity</th><th>Description</th><th>Hash</th><th>Time</th></tr>
+                                </thead>
+                                <tbody id="adAuditBody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <!-- HITL Decisions tab -->
+                    <div class="tab-pane fade" id="adTabDecisions">
+                        <div style="max-height: 450px; overflow-y: auto;">
+                            <div id="adDecisionList" class="d-flex flex-column gap-2"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
 </div>
 
 @section Scripts {
@@ -401,12 +725,40 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
     <script>
         // ─── NOC Chart State ─────────────────────────────────────────────
-        const AGENTS = ["RequirementsReader","Database","ServiceLayer","Application","Integration","Testing","Review","Supervisor","Orchestrator"];
-        const AGENT_LABELS = ["Reqs Reader","Database","Service","Application","Integration","Testing","Review","Supervisor","Orchestrator"];
+        // AgentType enum order: Orchestrator(0), RequirementsReader(1), Database(2), ServiceLayer(3), Application(4),
+        // Integration(5), Review(6), Testing(7), Supervisor(8), BugFix(9), Performance(10), Security(11),
+        // HipaaCompliance(12), Soc2Compliance(13), AccessControl(14), Observability(15), Infrastructure(16), ApiDocumentation(17), RequirementsExpander(18), Backlog(19)
+        const ALL_AGENTS = [
+            "Orchestrator","RequirementsReader","Database","ServiceLayer","Application","Integration",
+            "Review","Testing","Supervisor","BugFix","Performance","Security",
+            "HipaaCompliance","Soc2Compliance","AccessControl","Observability","Infrastructure","ApiDocumentation",
+            "RequirementsExpander","Backlog","Deploy","RequirementAnalyzer"
+        ];
+        const ALL_AGENT_LABELS = [
+            "Orchestrator","Reqs Reader","Database","Service","Application","Integration",
+            "Review","Testing","Supervisor","BugFix","Performance","Security",
+            "HIPAA","SOC2","AccessCtrl","Observability","Infra","API Docs",
+            "Reqs Expander","Backlog","Deploy","Req Analyzer"
+        ];
+        const ALL_AGENT_ICONS = [
+            "bi-diagram-3","bi-file-earmark-text","bi-database","bi-layers","bi-window-stack","bi-plug",
+            "bi-shield-check","bi-check2-circle","bi-eye","bi-bug","bi-speedometer2","bi-shield-lock",
+            "bi-heart-pulse","bi-file-earmark-lock","bi-key","bi-binoculars","bi-cloud-arrow-up","bi-journal-code",
+            "bi-diagram-2","bi-kanban","bi-rocket-takeoff","bi-search"
+        ];
+        const ALL_AGENT_COLORS = [
+            "#78909c","#42a5f5","#66bb6a","#ffa726","#ef5350","#ab47bc",
+            "#26c6da","#8d6e63","#e91e63","#ff7043","#29b6f6","#ec407a",
+            "#66bb6a","#5c6bc0","#ffca28","#26a69a","#7e57c2","#8d6e63",
+            "#7cb342","#9575cd","#1e88e5","#00897b"
+        ];
+        // Keep backward compat aliases
+        const AGENTS = ALL_AGENTS;
+        const AGENT_LABELS = ALL_AGENT_LABELS;
         const SERVICES = ["Patient","Encounter","Inpatient","Emergency","Diagnostics","Revenue","Audit","AI"];
-        const LAYERS = ["Database","Repository","Service","Dto","ViewModel","RazorPage","Integration","Test","Migration","Configuration"];
+        const LAYERS = ["Database","Repository","Service","Dto","ViewModel","RazorPage","Integration","Test","Migration","Configuration","Security","Compliance","Observability","Infrastructure","Documentation"];
         const SVC_COLORS = ["#42a5f5","#66bb6a","#ffa726","#ef5350","#ab47bc","#26c6da","#8d6e63","#78909c"];
-        const LAYER_COLORS = ["#1565c0","#2e7d32","#ef6c00","#c62828","#6a1b9a","#00838f","#4e342e","#37474f","#ad1457","#546e7a"];
+        const LAYER_COLORS = ["#1565c0","#2e7d32","#ef6c00","#c62828","#6a1b9a","#00838f","#4e342e","#37474f","#ad1457","#546e7a","#d81b60","#283593","#00695c","#4527a0","#bf360c"];
 
         const nocState = {
             agentTiming: {},       // agentKey → { start, end, elapsed }
@@ -424,11 +776,11 @@
         const chartTimeline = new Chart(ctxTimeline, {
             type: 'bar',
             data: {
-                labels: AGENT_LABELS,
+                labels: ALL_AGENT_LABELS,
                 datasets: [{
                     label: 'Duration (ms)',
-                    data: new Array(9).fill(0),
-                    backgroundColor: AGENTS.map((_, i) => ['#42a5f5','#66bb6a','#ffa726','#ef5350','#ab47bc','#26c6da','#8d6e63','#e91e63','#78909c'][i]),
+                    data: new Array(18).fill(0),
+                    backgroundColor: ALL_AGENT_COLORS,
                     borderRadius: 4
                 }]
             },
@@ -495,7 +847,7 @@
                 labels: LAYERS,
                 datasets: [{
                     label: 'Count',
-                    data: new Array(10).fill(0),
+                    data: new Array(15).fill(0),
                     backgroundColor: LAYER_COLORS,
                     borderRadius: 3
                 }]
@@ -532,11 +884,11 @@
         // ─── Agent Heatmap & Service Flow init ──────────────────────────
         function initHeatmap() {
             const hm = document.getElementById('agentHeatmap');
-            hm.innerHTML = AGENTS.map((a, i) => `
-                <div id="hm-${a}" class="text-center px-3 py-2 rounded-3" style="min-width:100px;background:#dee2e6;transition:all 0.3s;">
-                    <div style="font-size:1.4rem;"><i class="bi ${['bi-file-earmark-text','bi-database','bi-layers','bi-window-stack','bi-plug','bi-check2-circle','bi-shield-check','bi-eye','bi-diagram-3'][i]}"></i></div>
-                    <div style="font-size:0.7rem;font-weight:600;">${AGENT_LABELS[i]}</div>
-                    <div style="font-size:0.65rem;" id="hm-time-${a}">--</div>
+            hm.innerHTML = ALL_AGENTS.map((a, i) => `
+                <div id="hm-${a}" class="text-center px-2 py-2 rounded-3" style="min-width:80px;background:#dee2e6;transition:all 0.3s;">
+                    <div style="font-size:1.2rem;"><i class="bi ${ALL_AGENT_ICONS[i]}"></i></div>
+                    <div style="font-size:0.6rem;font-weight:600;">${ALL_AGENT_LABELS[i]}</div>
+                    <div style="font-size:0.55rem;" id="hm-time-${a}">--</div>
                 </div>
             `).join('');
         }
@@ -572,9 +924,9 @@
 
         // ─── NOC Update Functions ───────────────────────────────────────
         function nocUpdateAgentTiming(agentKey, status, elapsedMs) {
-            const idx = AGENTS.indexOf(getAgentName(agentKey));
-            if (idx < 0) return;
             const name = getAgentName(agentKey);
+            const idx = ALL_AGENTS.indexOf(name);
+            if (idx < 0) return;
 
             nocState.agentStatuses[name] = status;
 
@@ -923,7 +1275,7 @@
                 if (!cfg || Object.keys(cfg).length === 0) { appendLog('system', 'No saved configuration found.'); return; }
                 CONFIG_FIELDS.forEach(id => {
                     const el = document.getElementById(id);
-                    if (el && cfg[id] !== undefined) el.value = cfg[id];
+                    if (el && cfg[id] !== undefined && cfg[id] !== '') el.value = cfg[id];
                 });
                 CONFIG_CHECKS.forEach(id => {
                     const el = document.getElementById(id);
@@ -935,6 +1287,50 @@
 
         // Auto-load config on page start
         loadConfig();
+
+        // ─── Restore dashboard state from last run ──────────────────────
+        async function restoreDashboardState() {
+            try {
+                const res = await fetch('/api/pipeline/status');
+                if (!res.ok) return;
+                const data = await res.json();
+                if (!data || data.status === 'no_run') return;
+
+                const statusMap = { 'Idle': 0, 'Running': 1, 'Waiting': 2, 'Completed': 3, 'Failed': 4, 'ReviewPending': 5 };
+
+                // Restore agent cards
+                if (data.agentStatuses) {
+                    Object.entries(data.agentStatuses).forEach(([agent, statusStr]) => {
+                        const statusNum = typeof statusStr === 'string' ? (statusMap[statusStr] ?? 0) : statusStr;
+                        const msg = data.agentMessages ? (data.agentMessages[agent] || '') : '';
+                        const artifacts = data.agentArtifacts ? (data.agentArtifacts[agent] || 0) : 0;
+                        const findings = data.agentFindings ? (data.agentFindings[agent] || 0) : 0;
+                        const elapsed = data.agentElapsed ? (data.agentElapsed[agent] || 0) : 0;
+                        updateAgentCard(agent, statusNum, msg, artifacts, findings, elapsed);
+                    });
+                }
+
+                // Restore summary stats
+                if (data.requirements !== undefined)
+                    document.getElementById('statReqs').textContent = data.requirements;
+                if (data.artifacts !== undefined)
+                    document.getElementById('statArtifacts').textContent = data.artifacts;
+                if (data.findings !== undefined)
+                    document.getElementById('statFindings').textContent = data.findings;
+                if (data.durationMs)
+                    document.getElementById('statTime').textContent = Math.round(data.durationMs) + 'ms';
+
+                // Show run ID
+                if (data.runId)
+                    appendLog('system', `Restored state from previous run: ${data.runId} (${data.status})`);
+
+                // Restore backlog
+                refreshBacklog();
+            } catch (e) {
+                console.warn('Failed to restore dashboard state:', e);
+            }
+        }
+        restoreDashboardState();
 
         // ─── Pipeline + Card logic ──────────────────────────────────────
         async function runPipeline() {
@@ -955,14 +1351,15 @@
                 requirementsPath: reqsPath,
                 outputPath: outputPath,
                 solutionNamespace: document.getElementById('inputNamespace').value || 'Hms',
-                dockerContainerName: document.getElementById('inputContainerName').value || 'hms-postgres',
+                dockerContainerName: document.getElementById('inputContainerName').value || 'icu-postgres',
                 dbHost: document.getElementById('inputDbHost').value || 'localhost',
                 dbPort: parseInt(document.getElementById('inputDbPort').value) || 5432,
-                dbUser: document.getElementById('inputDbUser').value || 'hms_admin',
-                dbName: document.getElementById('inputDbName').value || 'hms_db',
-                dbPassword: document.getElementById('inputDbPassword').value || 'hms_secure_pwd_2026!',
+                dbUser: document.getElementById('inputDbUser').value || 'hms',
+                dbName: document.getElementById('inputDbName').value || 'hms',
+                dbPassword: document.getElementById('inputDbPassword').value || 'hms_dev_pw',
                 spinUpDocker: document.getElementById('chkSpinDocker').checked,
                 executeDdl: document.getElementById('chkExecDdl').checked,
+                orchestratorInstructions: document.getElementById('inputInstructions').value.trim(),
                 servicePorts: {
                     patient: parseInt(document.getElementById('portPatient').value) || 5101,
                     encounter: parseInt(document.getElementById('portEncounter').value) || 5102,
@@ -1015,14 +1412,171 @@
             ["statReqs","statArtifacts","statFindings"].forEach(id => document.getElementById(id).textContent = "0");
             document.getElementById("statTime").textContent = "--";
             document.getElementById("findingsPanel").innerHTML = '<p class="text-muted text-center mt-5">Running...</p>';
+            document.getElementById("instrHistory").innerHTML = '';
+            document.getElementById("instrQueueBadge").textContent = '0 queued';
         }
 
+        // ── Orchestrator Instruction Functions ──
+        async function sendInstruction() {
+            const input = document.getElementById('inputInstructions');
+            const text = input.value.trim();
+            if (!text) return;
+
+            try {
+                const res = await fetch('/api/pipeline/instruct', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ instruction: text })
+                });
+                const data = await res.json();
+                if (data.accepted) {
+                    addInstrHistoryEntry(text);
+                    document.getElementById('instrQueueBadge').textContent = data.queuedCount + ' queued';
+                    input.value = '';
+                    appendLog('system', 'Instruction sent: ' + text);
+                } else {
+                    appendLog('warning', 'Instruction not accepted: ' + (data.reason || 'Unknown'));
+                }
+            } catch (e) {
+                appendLog('error', 'Failed to send instruction: ' + e.message);
+            }
+        }
+
+        function addInstrHistoryEntry(text) {
+            const hist = document.getElementById('instrHistory');
+            const ts = new Date().toLocaleTimeString();
+            const entry = document.createElement('div');
+            entry.className = 'border-start border-info border-3 ps-2 py-1 mb-1 bg-light rounded-end';
+            entry.innerHTML = '<small class="text-muted">' + ts + '</small> <span>' + text.replace(/</g, '&lt;') + '</span>';
+            hist.prepend(entry);
+        }
+
+        function clearInstructions() {
+            document.getElementById('inputInstructions').value = '';
+            document.getElementById('instrHistory').innerHTML = '';
+        }
+
+        // ─── Requirement Submission ─────────────────────────────────
+        let reqQueue = [];
+        let reqSubmitCount = 0;
+
+        function submitRequirement() {
+            const title = document.getElementById('newReqTitle').value.trim();
+            if (!title) { appendLog('warning', 'Requirement title is required'); return; }
+
+            const req = {
+                title: title,
+                description: document.getElementById('newReqDescription').value.trim(),
+                module: document.getElementById('newReqModule').value,
+                tags: document.getElementById('newReqTags').value.split(',').map(t => t.trim()).filter(Boolean),
+                acceptanceCriteria: document.getElementById('newReqAC').value.split('\n').map(l => l.trim()).filter(Boolean)
+            };
+
+            // Submit single requirement immediately
+            doSubmitRequirements([req]);
+            clearReqForm();
+        }
+
+        function submitBulkRequirements() {
+            if (reqQueue.length === 0) { appendLog('warning', 'No requirements queued'); return; }
+            doSubmitRequirements(reqQueue);
+            reqQueue = [];
+            document.getElementById('bulkCount').textContent = '0';
+            document.getElementById('reqQueue').innerHTML = '';
+        }
+
+        async function doSubmitRequirements(reqs) {
+            try {
+                const res = await fetch('/api/pipeline/requirements', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ requirements: reqs })
+                });
+                const data = await res.json();
+                if (data.accepted) {
+                    reqSubmitCount += data.count;
+                    document.getElementById('reqSubmitBadge').textContent = reqSubmitCount + ' submitted';
+                    appendLog('system', `Submitted ${data.count} requirements → ${data.message}`);
+                    // Auto-refresh backlog after short delay
+                    setTimeout(refreshBacklog, 3000);
+                } else {
+                    appendLog('warning', 'Requirements not accepted: ' + (data.reason || 'Unknown'));
+                }
+            } catch (e) {
+                appendLog('error', 'Failed to submit requirements: ' + e.message);
+            }
+        }
+
+        function clearReqForm() {
+            document.getElementById('newReqTitle').value = '';
+            document.getElementById('newReqDescription').value = '';
+            document.getElementById('newReqTags').value = '';
+            document.getElementById('newReqAC').value = '';
+            document.getElementById('newReqModule').selectedIndex = 0;
+        }
+
+        // ─── Backlog Tracker ────────────────────────────────────────
+        async function refreshBacklog() {
+            try {
+                const res = await fetch('/api/pipeline/backlog');
+                const data = await res.json();
+                if (!data.items) return;
+
+                const s = data.stats;
+                const total = data.totalItems || 1;
+                document.getElementById('blStatNew').textContent = (s.newCount || 0) + ' New';
+                document.getElementById('blStatQueued').textContent = (s.inQueue || 0) + ' Queued';
+                document.getElementById('blStatDev').textContent = (s.underDev || 0) + ' In Dev';
+                document.getElementById('blStatDone').textContent = (s.completed || 0) + ' Done';
+                document.getElementById('blStatBlocked').textContent = (s.blocked || 0) + ' Blocked';
+
+                // Progress bar
+                document.getElementById('blBarNew').style.width = ((s.newCount || 0) / total * 100) + '%';
+                document.getElementById('blBarQueued').style.width = ((s.inQueue || 0) / total * 100) + '%';
+                document.getElementById('blBarDev').style.width = ((s.underDev || 0) / total * 100) + '%';
+                document.getElementById('blBarDone').style.width = ((s.completed || 0) / total * 100) + '%';
+                document.getElementById('blBarBlocked').style.width = ((s.blocked || 0) / total * 100) + '%';
+
+                // Table
+                const statusColors = { 'New': 'primary', 'InQueue': 'info', 'UnderDev': 'warning', 'Completed': 'success', 'Blocked': 'danger' };
+                const typeIcons = { 'Epic': 'bi-layers', 'UserStory': 'bi-person', 'UseCase': 'bi-lightning', 'Task': 'bi-check-square' };
+                const tbody = document.getElementById('backlogBody');
+                const items = Array.isArray(data.items) ? data.items : [];
+                if (items.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-3">No backlog items yet</td></tr>';
+                    return;
+                }
+                tbody.innerHTML = items.map(item => `
+                    <tr>
+                        <td><i class="bi ${typeIcons[item.itemType] || 'bi-circle'} me-1"></i><small>${item.itemType}</small></td>
+                        <td title="${(item.description||'').replace(/"/g,'&quot;')}">${item.title}</td>
+                        <td><small>${item.module}</small></td>
+                        <td><span class="badge bg-${statusColors[item.status] || 'secondary'}">${item.status}</span></td>
+                        <td><small class="text-muted">${item.assignedAgent || '—'}</small></td>
+                        <td>${item.priority}</td>
+                        <td>${item.iteration}</td>
+                    </tr>
+                `).join('');
+            } catch (e) {
+                console.warn('Backlog refresh failed:', e);
+            }
+        }
+
+        // Auto-refresh backlog every 5 seconds during pipeline run
+        setInterval(() => {
+            const ctx = nocState.agentStatuses;
+            const anyRunning = Object.values(ctx).some(s => s === 1);
+            if (anyRunning || document.getElementById('backlogBody').children.length <= 1) {
+                refreshBacklog();
+            }
+        }, 5000);
+
         function nocResetCharts() {
-            chartTimeline.data.datasets[0].data = new Array(9).fill(0);
+            chartTimeline.data.datasets[0].data = new Array(20).fill(0);
             chartTimeline.update('none');
             chartByService.data.datasets[0].data = new Array(8).fill(0);
             chartByService.update('none');
-            chartByLayer.data.datasets[0].data = new Array(10).fill(0);
+            chartByLayer.data.datasets[0].data = new Array(15).fill(0);
             chartByLayer.update('none');
             chartSeverity.data.datasets[0].data = [0,0,0,0,0,0];
             chartSeverity.update('none');
@@ -1054,16 +1608,24 @@
         }
 
         function updateLayerChartFromAgents() {
-            // Use agent-to-layer mapping heuristic
             const agentLayerMap = {
                 'Database': [0,1,8],       // Database, Repository, Migration
                 'ServiceLayer': [2,3,6],   // Service, Dto, Integration
-                'Application': [5,9],      // RazorPage, Configuration
+                'Application': [4,5,9],    // ViewModel, RazorPage, Configuration
                 'Integration': [6],        // Integration
                 'Testing': [7],            // Test
-                'Review': []
+                'Security': [10],          // Security
+                'HipaaCompliance': [11],   // Compliance
+                'Soc2Compliance': [11],
+                'AccessControl': [10],
+                'Observability': [12],     // Observability
+                'Infrastructure': [13],    // Infrastructure
+                'ApiDocumentation': [14],  // Documentation
+                'Performance': [9],        // Configuration
+                'Review': [],
+                'BugFix': [2,3]            // Service, Dto fixes
             };
-            const layerData = new Array(10).fill(0);
+            const layerData = new Array(15).fill(0);
             Object.entries(nocState.artifactsByService).forEach(([agent, count]) => {
                 const layers = agentLayerMap[agent] || [];
                 if (layers.length > 0) {
@@ -1093,10 +1655,160 @@
             }).join("");
         }
 
-        function getAgentName(k) { const n=["Orchestrator","RequirementsReader","Database","ServiceLayer","Application","Integration","Review","Testing","Supervisor"]; return typeof k==="number"?n[k]||k:k; }
+        function getAgentName(k) { return typeof k==="number" ? (ALL_AGENTS[k] || String(k)) : k; }
         function getStatusText(s) { return ["Idle","Running","Waiting","Completed","Failed","Review Pending"][s]||s; }
         function getStatusClass(s) { return ["system","warning","system","success","error","warning"][s]||"system"; }
         function getStatusBadgeClass(s) { return ["bg-secondary","bg-primary","bg-info","bg-success","bg-danger","bg-warning"][s]||"bg-secondary"; }
         function getProgressClass(s) { return ["","bg-primary progress-bar-striped progress-bar-animated","bg-info","bg-success","bg-danger","bg-warning"][s]||""; }
+
+        // ─── Per-Agent Activity Log (in-memory) ─────────────────────
+        const agentActivityLog = {};   // agentKey → [ { time, status, message, artifacts, findings, elapsed } ]
+
+        // Hook into PipelineEvent to record per-agent activity
+        connection.on("PipelineEvent", evt => {
+            const name = getAgentName(evt.agent);
+            if (!agentActivityLog[name]) agentActivityLog[name] = [];
+            agentActivityLog[name].push({
+                time: new Date().toLocaleTimeString(),
+                status: evt.status,
+                message: evt.message,
+                artifacts: evt.artifactCount,
+                findings: evt.findingCount,
+                elapsed: evt.elapsedMs,
+                retry: evt.retryAttempt || 0
+            });
+        });
+
+        // ─── Agent Detail Modal ─────────────────────────────────────
+        async function openAgentDetail(agentKey) {
+            const idx = ALL_AGENTS.indexOf(agentKey);
+            const label = idx >= 0 ? ALL_AGENT_LABELS[idx] : agentKey;
+            const icon = idx >= 0 ? ALL_AGENT_ICONS[idx] : 'bi-cpu';
+
+            // Set title
+            document.getElementById('agentDetailTitle').innerHTML =
+                `<i class="bi ${icon} me-2"></i>${label} — Agent Details`;
+
+            // Summary strip
+            const status = nocState.agentStatuses[agentKey];
+            const statusNum = status !== undefined ? status : 0;
+            document.getElementById('adStatus').className = `badge fs-6 ${getStatusBadgeClass(statusNum)}`;
+            document.getElementById('adStatus').textContent = getStatusText(statusNum);
+
+            const timing = nocState.agentTiming[agentKey];
+            document.getElementById('adElapsed').textContent = timing && timing.elapsed > 0
+                ? (timing.elapsed >= 1000 ? (timing.elapsed / 1000).toFixed(1) + 's' : timing.elapsed.toFixed(0) + 'ms')
+                : '—';
+
+            // Get artifact/finding counts from card
+            const card = document.querySelector(`#card-${agentKey}`);
+            const artifactCount = card ? (card.querySelector('.agent-artifacts')?.textContent || '0') : '0';
+            document.getElementById('adArtifacts').textContent = artifactCount;
+            document.getElementById('adFindings').textContent = '0';
+
+            // Retries
+            const activity = agentActivityLog[agentKey] || [];
+            const maxRetry = activity.reduce((m, e) => Math.max(m, e.retry || 0), 0);
+            document.getElementById('adRetries').textContent = maxRetry;
+
+            // ── Activity Timeline tab ──
+            const tlDiv = document.getElementById('adTimelineList');
+            if (activity.length === 0) {
+                tlDiv.innerHTML = '<p class="text-muted text-center py-4">No activity recorded yet for this agent.</p>';
+            } else {
+                tlDiv.innerHTML = activity.map((e, i) => {
+                    const statusBadge = getStatusBadgeClass(e.status);
+                    const statusLabel = getStatusText(e.status);
+                    const elapsedStr = e.elapsed > 0 ? (e.elapsed >= 1000 ? (e.elapsed / 1000).toFixed(1) + 's' : e.elapsed.toFixed(0) + 'ms') : '';
+                    return `<div class="d-flex align-items-start gap-2 py-2 px-3 ${i % 2 === 0 ? 'bg-light' : ''} rounded">
+                        <div class="text-muted" style="min-width:75px;font-size:0.78rem;">${e.time}</div>
+                        <span class="badge ${statusBadge}" style="min-width:70px;">${statusLabel}</span>
+                        <div class="flex-grow-1" style="font-size:0.85rem;">
+                            ${escapeHtml(e.message)}
+                            ${e.retry > 0 ? `<span class="badge bg-warning text-dark ms-1">retry #${e.retry}</span>` : ''}
+                        </div>
+                        <div class="text-end text-muted" style="min-width:100px;font-size:0.78rem;">
+                            ${e.artifacts > 0 ? `<span class="me-2"><i class="bi bi-file-earmark-code"></i> ${e.artifacts}</span>` : ''}
+                            ${elapsedStr ? `<i class="bi bi-clock"></i> ${elapsedStr}` : ''}
+                        </div>
+                    </div>`;
+                }).join('');
+            }
+
+            // ── Audit Log tab ──
+            const auditBody = document.getElementById('adAuditBody');
+            auditBody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-3">Loading...</td></tr>';
+            try {
+                const res = await fetch('/api/pipeline/audit?limit=200');
+                if (res.ok) {
+                    const data = await res.json();
+                    const allEntries = data.entries || [];
+                    const entries = allEntries.filter(e => e.agent === agentKey || e.agent === label);
+                    if (entries.length === 0) {
+                        auditBody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-3">No audit entries for this agent</td></tr>';
+                    } else {
+                        auditBody.innerHTML = entries.map((e, i) => {
+                            const sevClass = e.severity === 'Critical' ? 'text-danger fw-bold' : e.severity === 'Warning' ? 'text-warning' : '';
+                            return `<tr>
+                                <td>${i + 1}</td>
+                                <td>${escapeHtml(e.action)}</td>
+                                <td class="${sevClass}">${escapeHtml(e.severity)}</td>
+                                <td style="max-width:300px;" title="${escapeHtml(e.description)}">${escapeHtml(e.description)}</td>
+                                <td><code style="font-size:0.65rem;">${(e.outputHash || '').substring(0, 12)}</code></td>
+                                <td style="font-size:0.75rem;">${e.timestamp ? new Date(e.timestamp).toLocaleTimeString() : ''}</td>
+                            </tr>`;
+                        }).join('');
+                    }
+                } else {
+                    auditBody.innerHTML = '<tr><td colspan="6" class="text-muted">Audit API unavailable</td></tr>';
+                }
+            } catch {
+                auditBody.innerHTML = '<tr><td colspan="6" class="text-muted">Failed to load audit log</td></tr>';
+            }
+
+            // ── HITL Decisions tab ──
+            const decDiv = document.getElementById('adDecisionList');
+            decDiv.innerHTML = '<p class="text-muted text-center py-3">Loading...</p>';
+            try {
+                const res = await fetch('/api/pipeline/decisions/history');
+                if (res.ok) {
+                    const data = await res.json();
+                    const allItems = data.decisions || [];
+                    const items = allItems.filter(d => d.agent === agentKey || d.agent === label);
+                    if (items.length === 0) {
+                        decDiv.innerHTML = '<p class="text-muted text-center py-3">No HITL decisions for this agent</p>';
+                    } else {
+                        decDiv.innerHTML = items.map(d => {
+                            const statusBg = d.status === 'Approved' ? 'success' : d.status === 'Rejected' ? 'danger' : 'warning';
+                            return `<div class="border rounded p-2">
+                                <div class="d-flex justify-content-between">
+                                    <strong>${escapeHtml(d.title || d.category || 'Decision')}</strong>
+                                    <span class="badge bg-${statusBg}">${escapeHtml(d.status)}</span>
+                                </div>
+                                <div class="text-muted" style="font-size:0.8rem;">${escapeHtml(d.description || '')}</div>
+                            </div>`;
+                        }).join('');
+                    }
+                } else {
+                    decDiv.innerHTML = '<p class="text-muted text-center py-3">Decisions API unavailable</p>';
+                }
+            } catch {
+                decDiv.innerHTML = '<p class="text-muted text-center py-3">Failed to load decisions</p>';
+            }
+
+            // Show modal
+            new bootstrap.Modal(document.getElementById('agentDetailModal')).show();
+        }
     </script>
+
+    <style>
+        .agent-card-clickable:hover {
+            box-shadow: 0 4px 15px rgba(0,0,0,0.15);
+            transform: translateY(-2px);
+            transition: all 0.2s ease;
+        }
+        .agent-card-clickable {
+            transition: all 0.2s ease;
+        }
+    </style>
 }

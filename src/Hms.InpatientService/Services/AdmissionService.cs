@@ -1,4 +1,5 @@
 using Hms.InpatientService.Contracts;
+using Hms.InpatientService.Data.Entities;
 using Hms.InpatientService.Data.Repositories;
 using Hms.InpatientService.Kafka;
 using Microsoft.Extensions.Logging;
@@ -27,50 +28,67 @@ public sealed class AdmissionService : IAdmissionService
         if (entity is null) return null;
         return new AdmissionDto
         {
-            Id = entity.Id, TenantId = entity.TenantId,
-            CreatedAt = entity.CreatedAt
+
         };
     }
 
     public async Task<List<AdmissionDto>> ListAsync(int skip, int take, CancellationToken ct = default)
     {
         var items = await _repo.ListAsync(skip, take, ct);
-        return items.Select(e => new AdmissionDto
+        return items.Select(entity => new AdmissionDto
         {
-            Id = e.Id, TenantId = e.TenantId, CreatedAt = e.CreatedAt
+
         }).ToList();
     }
 
     public async Task<AdmissionDto> CreateAsync(CreateAdmissionRequest request, CancellationToken ct = default)
     {
         _logger.LogInformation("Creating Admission for tenant {Tenant}", request.TenantId);
-        // TODO: map request to entity and save via repository
-        var dto = new AdmissionDto
+
+        var entity = new Admission
         {
             Id = Guid.NewGuid().ToString("N"),
-            TenantId = request.TenantId,
-            FacilityId = request.FacilityId,
-            StatusCode = "active",
+
             CreatedAt = DateTimeOffset.UtcNow,
-            UpdatedAt = DateTimeOffset.UtcNow
+            UpdatedAt = DateTimeOffset.UtcNow,
         };
 
-        // Publish domain event to Kafka
+        var saved = await _repo.CreateAsync(entity, ct);
+
         await _events.PublishAsync(new AdmissionCreatedEvent
         {
-            EntityId = dto.Id, TenantId = dto.TenantId
+            EntityId = saved.Id, TenantId = saved.TenantId
         }, ct);
 
-        return dto;
+        _logger.LogInformation("Created Admission {Id} for tenant {Tenant}", saved.Id, saved.TenantId);
+
+        return new AdmissionDto
+        {
+
+        };
     }
 
     public async Task<AdmissionDto> UpdateAsync(UpdateAdmissionRequest request, CancellationToken ct = default)
     {
         _logger.LogInformation("Updating Admission {Id}", request.Id);
+
+        var entity = await _repo.GetByIdAsync(request.Id, ct)
+            ?? throw new KeyNotFoundException($"Admission {request.Id} not found");
+
+
+        entity.UpdatedAt = DateTimeOffset.UtcNow;
+        entity.UpdatedBy = "system";
+
+        await _repo.UpdateAsync(entity, ct);
+
         await _events.PublishAsync(new AdmissionUpdatedEvent
         {
-            EntityId = request.Id, TenantId = string.Empty
+            EntityId = entity.Id, TenantId = entity.TenantId
         }, ct);
-        return new AdmissionDto { Id = request.Id, StatusCode = request.StatusCode ?? "active" };
+
+        return new AdmissionDto
+        {
+
+        };
     }
 }

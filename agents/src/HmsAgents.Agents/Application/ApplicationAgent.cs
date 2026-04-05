@@ -31,6 +31,8 @@ public sealed class ApplicationAgent : IAgent
         try
         {
             // API Gateway
+            if (context.ReportProgress is not null)
+                await context.ReportProgress(Type, "Generating YARP API Gateway — Program.cs, routes, Dockerfile, csproj");
             artifacts.Add(GenerateGatewayProgram());
             artifacts.Add(GenerateGatewayAppSettingsRoutes());
             artifacts.Add(GenerateGatewayDockerfile());
@@ -40,6 +42,8 @@ public sealed class ApplicationAgent : IAgent
             foreach (var svc in MicroserviceCatalog.All)
             {
                 _logger.LogInformation("Generating minimal API for {Service} (port {Port})", svc.Name, svc.ApiPort);
+                if (context.ReportProgress is not null)
+                    await context.ReportProgress(Type, $"Generating minimal API for {svc.Name} (port {svc.ApiPort}) — {svc.Entities.Length} entity endpoints, health check, Dockerfile");
                 artifacts.Add(GenerateServiceProgram(svc));
                 artifacts.Add(GenerateServiceCsproj(svc));
                 artifacts.Add(GenerateServiceDockerfile(svc));
@@ -54,6 +58,8 @@ public sealed class ApplicationAgent : IAgent
             }
 
             // Shared middleware
+            if (context.ReportProgress is not null)
+                await context.ReportProgress(Type, "Generating shared middleware — TenantMiddleware, CorrelationId, GlobalException handler");
             artifacts.Add(GenerateTenantMiddleware());
             artifacts.Add(GenerateCorrelationMiddleware());
             artifacts.Add(GenerateExceptionMiddleware());

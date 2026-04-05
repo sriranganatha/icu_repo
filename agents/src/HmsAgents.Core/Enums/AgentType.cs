@@ -19,5 +19,17 @@ public enum AgentType
     AccessControl,
     Observability,
     Infrastructure,
-    ApiDocumentation
+    ApiDocumentation,
+    RequirementsExpander,
+    Backlog,
+    Deploy,
+    RequirementAnalyzer,
+    Build,
+    Migration,
+    CodeQuality,
+    DependencyAudit,
+    Refactoring,
+    Configuration,
+    UiUx,
+    LoadTest
 }

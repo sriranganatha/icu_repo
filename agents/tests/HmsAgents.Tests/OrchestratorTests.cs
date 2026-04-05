@@ -12,6 +12,8 @@ public class OrchestratorTests
 {
     private readonly Mock<IArtifactWriter> _writerMock = new();
     private readonly Mock<IPipelineEventSink> _sinkMock = new();
+    private readonly Mock<IAuditLogger> _auditMock = new();
+    private readonly Mock<IHumanGate> _humanGateMock = new();
     private readonly Mock<ILogger<AgentOrchestrator>> _loggerMock = new();
 
     private PipelineConfig CreateConfig() => new()
@@ -71,7 +73,7 @@ public class OrchestratorTests
             CreateAgentMock(AgentType.Supervisor, "Supervisor").Object,
         };
 
-        var orchestrator = new AgentOrchestrator(agents, _writerMock.Object, _sinkMock.Object, _loggerMock.Object);
+        var orchestrator = new AgentOrchestrator(agents, _writerMock.Object, _sinkMock.Object, _auditMock.Object, _humanGateMock.Object, _loggerMock.Object);
 
         // Act
         var result = await orchestrator.RunPipelineAsync(CreateConfig());
@@ -83,36 +85,80 @@ public class OrchestratorTests
     }
 
     [Fact]
-    public async Task RunPipeline_AgentFails_TriggersRetryBeforeStopping()
+    public async Task RunPipeline_AgentFails_RunsHealCycleAndRetries()
     {
         // Arrange
-        var callCount = 0;
+        var dbCallCount = 0;
+        var bugFixCalled = false;
+        var perfCalled = false;
+        var reviewCalled = false;
+
         var failingAgent = new Mock<IAgent>();
         failingAgent.Setup(a => a.Type).Returns(AgentType.Database);
         failingAgent.Setup(a => a.Name).Returns("Database");
         failingAgent.Setup(a => a.ExecuteAsync(It.IsAny<AgentContext>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((AgentContext ctx, CancellationToken _) =>
             {
-                callCount++;
+                dbCallCount++;
                 ctx.AgentStatuses[AgentType.Database] = AgentStatus.Failed;
                 return new AgentResult { Agent = AgentType.Database, Success = false, Summary = "DB failed", Errors = ["Connection refused"] };
+            });
+
+        var bugFixAgent = new Mock<IAgent>();
+        bugFixAgent.Setup(a => a.Type).Returns(AgentType.BugFix);
+        bugFixAgent.Setup(a => a.Name).Returns("BugFix");
+        bugFixAgent.Setup(a => a.ExecuteAsync(It.IsAny<AgentContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((AgentContext ctx, CancellationToken _) =>
+            {
+                bugFixCalled = true;
+                ctx.AgentStatuses[AgentType.BugFix] = AgentStatus.Completed;
+                return new AgentResult { Agent = AgentType.BugFix, Success = true, Summary = "BugFix applied" };
+            });
+
+        var perfAgent = new Mock<IAgent>();
+        perfAgent.Setup(a => a.Type).Returns(AgentType.Performance);
+        perfAgent.Setup(a => a.Name).Returns("Performance");
+        perfAgent.Setup(a => a.ExecuteAsync(It.IsAny<AgentContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((AgentContext ctx, CancellationToken _) =>
+            {
+                perfCalled = true;
+                ctx.AgentStatuses[AgentType.Performance] = AgentStatus.Completed;
+                return new AgentResult { Agent = AgentType.Performance, Success = true, Summary = "Perf ok" };
+            });
+
+        var reviewAgent = new Mock<IAgent>();
+        reviewAgent.Setup(a => a.Type).Returns(AgentType.Review);
+        reviewAgent.Setup(a => a.Name).Returns("Review");
+        reviewAgent.Setup(a => a.ExecuteAsync(It.IsAny<AgentContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((AgentContext ctx, CancellationToken _) =>
+            {
+                reviewCalled = true;
+                ctx.AgentStatuses[AgentType.Review] = AgentStatus.Completed;
+                return new AgentResult { Agent = AgentType.Review, Success = true, Summary = "Review ok" };
             });
 
         var agents = new List<IAgent>
         {
             CreateAgentMock(AgentType.RequirementsReader, "ReqReader").Object,
             failingAgent.Object,
+            bugFixAgent.Object,
+            perfAgent.Object,
+            reviewAgent.Object,
             CreateAgentMock(AgentType.Supervisor, "Supervisor").Object,
         };
 
-        var orchestrator = new AgentOrchestrator(agents, _writerMock.Object, _sinkMock.Object, _loggerMock.Object);
+        var orchestrator = new AgentOrchestrator(agents, _writerMock.Object, _sinkMock.Object, _auditMock.Object, _humanGateMock.Object, _loggerMock.Object);
 
         // Act
         var result = await orchestrator.RunPipelineAsync(CreateConfig());
 
-        // Assert — DB should have been called multiple times (initial + retries)
-        callCount.Should().BeGreaterThan(1, "orchestrator should retry failed agents");
-        result.AgentStatuses[AgentType.Database].Should().Be(AgentStatus.Failed);
+        // Assert — DB retried, heal cycle ran (BugFix→Performance→Review)
+        dbCallCount.Should().BeGreaterThan(1, "orchestrator should retry failed agents");
+        bugFixCalled.Should().BeTrue("BugFix should run in heal cycle to fix root cause");
+        perfCalled.Should().BeTrue("Performance should check the fix");
+        reviewCalled.Should().BeTrue("Review should validate the fix");
+        // Self-healing marks exhausted agents as Completed so pipeline continues
+        result.AgentStatuses[AgentType.Database].Should().Be(AgentStatus.Completed);
     }
 
     [Fact]
@@ -148,7 +194,7 @@ public class OrchestratorTests
             supervisorMock.Object
         };
 
-        var orchestrator = new AgentOrchestrator(agents, _writerMock.Object, _sinkMock.Object, _loggerMock.Object);
+        var orchestrator = new AgentOrchestrator(agents, _writerMock.Object, _sinkMock.Object, _auditMock.Object, _humanGateMock.Object, _loggerMock.Object);
 
         // Act
         await orchestrator.RunPipelineAsync(CreateConfig());
@@ -173,7 +219,7 @@ public class OrchestratorTests
             CreateAgentMock(AgentType.Supervisor, "Supervisor").Object,
         };
 
-        var orchestrator = new AgentOrchestrator(agents, _writerMock.Object, _sinkMock.Object, _loggerMock.Object);
+        var orchestrator = new AgentOrchestrator(agents, _writerMock.Object, _sinkMock.Object, _auditMock.Object, _humanGateMock.Object, _loggerMock.Object);
 
         // Act
         await orchestrator.RunPipelineAsync(CreateConfig());
@@ -193,7 +239,7 @@ public class OrchestratorTests
             CreateAgentMock(AgentType.Supervisor, "Supervisor").Object,
         };
 
-        var orchestrator = new AgentOrchestrator(agents, _writerMock.Object, _sinkMock.Object, _loggerMock.Object);
+        var orchestrator = new AgentOrchestrator(agents, _writerMock.Object, _sinkMock.Object, _auditMock.Object, _humanGateMock.Object, _loggerMock.Object);
         var config = CreateConfig();
 
         // Act
@@ -210,7 +256,7 @@ public class OrchestratorTests
     public void GetCurrentContext_ReturnsNull_BeforePipelineRun()
     {
         var agents = new List<IAgent>();
-        var orchestrator = new AgentOrchestrator(agents, _writerMock.Object, _sinkMock.Object, _loggerMock.Object);
+        var orchestrator = new AgentOrchestrator(agents, _writerMock.Object, _sinkMock.Object, _auditMock.Object, _humanGateMock.Object, _loggerMock.Object);
         orchestrator.GetCurrentContext().Should().BeNull();
     }
 }

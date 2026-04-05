@@ -3,15 +3,15 @@ services:
   postgres:
     image: postgres:16-alpine
     ports:
-      - "${DB_PORT:-5432}:5432"
+      - "5418:5432"
     environment:
-      POSTGRES_USER: hms_admin
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-hms_secure_pwd_2026!}
-      POSTGRES_DB: hms_db
+      POSTGRES_USER: icu_admin
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-ICU@1234}
+      POSTGRES_DB: icu_db
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U hms_admin"]
+      test: ["CMD-SHELL", "pg_isready -U icu_admin"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -43,7 +43,7 @@ services:
     ports:
       - "5101:8080"
     environment:
-      - ConnectionStrings__Default=Host=postgres;Port=5432;Database=hms_db;Username=hms_admin;Password=${DB_PASSWORD}
+      - ConnectionStrings__Default=Host=postgres;Port=5432;Database=icu_db;Username=icu_admin;Password=${DB_PASSWORD:-ICU@1234}
       - Kafka__BootstrapServers=kafka:9092
       - TenantId=default
     depends_on:
@@ -59,7 +59,7 @@ services:
     ports:
       - "5102:8080"
     environment:
-      - ConnectionStrings__Default=Host=postgres;Port=5432;Database=hms_db;Username=hms_admin;Password=${DB_PASSWORD}
+      - ConnectionStrings__Default=Host=postgres;Port=5432;Database=icu_db;Username=icu_admin;Password=${DB_PASSWORD:-ICU@1234}
       - Kafka__BootstrapServers=kafka:9092
       - TenantId=default
     depends_on:
@@ -75,7 +75,7 @@ services:
     ports:
       - "5103:8080"
     environment:
-      - ConnectionStrings__Default=Host=postgres;Port=5432;Database=hms_db;Username=hms_admin;Password=${DB_PASSWORD}
+      - ConnectionStrings__Default=Host=postgres;Port=5432;Database=icu_db;Username=icu_admin;Password=${DB_PASSWORD:-ICU@1234}
       - Kafka__BootstrapServers=kafka:9092
       - TenantId=default
     depends_on:
@@ -91,7 +91,7 @@ services:
     ports:
       - "5104:8080"
     environment:
-      - ConnectionStrings__Default=Host=postgres;Port=5432;Database=hms_db;Username=hms_admin;Password=${DB_PASSWORD}
+      - ConnectionStrings__Default=Host=postgres;Port=5432;Database=icu_db;Username=icu_admin;Password=${DB_PASSWORD:-ICU@1234}
       - Kafka__BootstrapServers=kafka:9092
       - TenantId=default
     depends_on:
@@ -107,7 +107,7 @@ services:
     ports:
       - "5105:8080"
     environment:
-      - ConnectionStrings__Default=Host=postgres;Port=5432;Database=hms_db;Username=hms_admin;Password=${DB_PASSWORD}
+      - ConnectionStrings__Default=Host=postgres;Port=5432;Database=icu_db;Username=icu_admin;Password=${DB_PASSWORD:-ICU@1234}
       - Kafka__BootstrapServers=kafka:9092
       - TenantId=default
     depends_on:
@@ -123,7 +123,7 @@ services:
     ports:
       - "5106:8080"
     environment:
-      - ConnectionStrings__Default=Host=postgres;Port=5432;Database=hms_db;Username=hms_admin;Password=${DB_PASSWORD}
+      - ConnectionStrings__Default=Host=postgres;Port=5432;Database=icu_db;Username=icu_admin;Password=${DB_PASSWORD:-ICU@1234}
       - Kafka__BootstrapServers=kafka:9092
       - TenantId=default
     depends_on:
@@ -139,7 +139,7 @@ services:
     ports:
       - "5107:8080"
     environment:
-      - ConnectionStrings__Default=Host=postgres;Port=5432;Database=hms_db;Username=hms_admin;Password=${DB_PASSWORD}
+      - ConnectionStrings__Default=Host=postgres;Port=5432;Database=icu_db;Username=icu_admin;Password=${DB_PASSWORD:-ICU@1234}
       - Kafka__BootstrapServers=kafka:9092
       - TenantId=default
     depends_on:
@@ -155,7 +155,7 @@ services:
     ports:
       - "5108:8080"
     environment:
-      - ConnectionStrings__Default=Host=postgres;Port=5432;Database=hms_db;Username=hms_admin;Password=${DB_PASSWORD}
+      - ConnectionStrings__Default=Host=postgres;Port=5432;Database=icu_db;Username=icu_admin;Password=${DB_PASSWORD:-ICU@1234}
       - Kafka__BootstrapServers=kafka:9092
       - TenantId=default
     depends_on:

@@ -1,4 +1,5 @@
 using Hms.EncounterService.Contracts;
+using Hms.EncounterService.Data.Entities;
 using Hms.EncounterService.Data.Repositories;
 using Hms.EncounterService.Kafka;
 using Microsoft.Extensions.Logging;
@@ -27,50 +28,67 @@ public sealed class EncounterService : IEncounterService
         if (entity is null) return null;
         return new EncounterDto
         {
-            Id = entity.Id, TenantId = entity.TenantId,
-            CreatedAt = entity.CreatedAt
+
         };
     }
 
     public async Task<List<EncounterDto>> ListAsync(int skip, int take, CancellationToken ct = default)
     {
         var items = await _repo.ListAsync(skip, take, ct);
-        return items.Select(e => new EncounterDto
+        return items.Select(entity => new EncounterDto
         {
-            Id = e.Id, TenantId = e.TenantId, CreatedAt = e.CreatedAt
+
         }).ToList();
     }
 
     public async Task<EncounterDto> CreateAsync(CreateEncounterRequest request, CancellationToken ct = default)
     {
         _logger.LogInformation("Creating Encounter for tenant {Tenant}", request.TenantId);
-        // TODO: map request to entity and save via repository
-        var dto = new EncounterDto
+
+        var entity = new Encounter
         {
             Id = Guid.NewGuid().ToString("N"),
-            TenantId = request.TenantId,
-            FacilityId = request.FacilityId,
-            StatusCode = "active",
+
             CreatedAt = DateTimeOffset.UtcNow,
-            UpdatedAt = DateTimeOffset.UtcNow
+            UpdatedAt = DateTimeOffset.UtcNow,
         };
 
-        // Publish domain event to Kafka
+        var saved = await _repo.CreateAsync(entity, ct);
+
         await _events.PublishAsync(new EncounterCreatedEvent
         {
-            EntityId = dto.Id, TenantId = dto.TenantId
+            EntityId = saved.Id, TenantId = saved.TenantId
         }, ct);
 
-        return dto;
+        _logger.LogInformation("Created Encounter {Id} for tenant {Tenant}", saved.Id, saved.TenantId);
+
+        return new EncounterDto
+        {
+
+        };
     }
 
     public async Task<EncounterDto> UpdateAsync(UpdateEncounterRequest request, CancellationToken ct = default)
     {
         _logger.LogInformation("Updating Encounter {Id}", request.Id);
+
+        var entity = await _repo.GetByIdAsync(request.Id, ct)
+            ?? throw new KeyNotFoundException($"Encounter {request.Id} not found");
+
+
+        entity.UpdatedAt = DateTimeOffset.UtcNow;
+        entity.UpdatedBy = "system";
+
+        await _repo.UpdateAsync(entity, ct);
+
         await _events.PublishAsync(new EncounterUpdatedEvent
         {
-            EntityId = request.Id, TenantId = string.Empty
+            EntityId = entity.Id, TenantId = entity.TenantId
         }, ct);
-        return new EncounterDto { Id = request.Id, StatusCode = request.StatusCode ?? "active" };
+
+        return new EncounterDto
+        {
+
+        };
     }
 }

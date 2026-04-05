@@ -37,6 +37,8 @@ public sealed class DatabaseAgent : IAgent
             foreach (var svc in MicroserviceCatalog.All)
             {
                 _logger.LogInformation("Generating DB layer for {Service} ({Schema})", svc.Name, svc.Schema);
+                if (context.ReportProgress is not null)
+                    await context.ReportProgress(Type, $"Generating DB layer for {svc.Name} — schema: {svc.Schema}, entities: {string.Join(", ", svc.Entities)}");
 
                 // Entities
                 foreach (var entity in svc.Entities)
@@ -55,13 +57,16 @@ public sealed class DatabaseAgent : IAgent
 
                 // Per-service migration script
                 artifacts.Add(GenerateMigrationScript(svc));
+
+                if (context.ReportProgress is not null)
+                    await context.ReportProgress(Type, $"{svc.Name}: Generated {svc.Entities.Length} entities, DbContext, {svc.Entities.Length} repositories, migration script");
             }
 
             // Shared: tenant RLS applied across all schemas
             artifacts.Add(GenerateRlsMigration());
 
             // Shared: docker-compose for all services
-            artifacts.Add(GenerateDockerCompose());
+            artifacts.Add(GenerateDockerCompose(context.PipelineConfig));
 
             context.Artifacts.AddRange(artifacts);
 
@@ -74,6 +79,8 @@ public sealed class DatabaseAgent : IAgent
                 if (config.SpinUpDocker)
                 {
                     _logger.LogInformation("Spinning up Docker PostgreSQL container...");
+                    if (context.ReportProgress is not null)
+                        await context.ReportProgress(Type, $"Spinning up Docker PostgreSQL — container: {config.DockerContainerName}, port: {config.DbPort}");
                     var containerOk = await provisioner.EnsureContainerAsync(config, ct);
                     messages.Add(new AgentMessage
                     {
@@ -87,7 +94,11 @@ public sealed class DatabaseAgent : IAgent
                     if (containerOk && config.ExecuteDdl)
                     {
                         _logger.LogInformation("Executing DDL — per-service schemas, tables, indexes, stored procedures, RLS...");
+                        if (context.ReportProgress is not null)
+                            await context.ReportProgress(Type, "Executing DDL — creating schemas, tables, indexes, stored procedures, RLS policies...");
                         var (ddlOk, objectsCreated, ddlErrors) = await provisioner.ExecuteDdlAsync(config, ct);
+                        if (context.ReportProgress is not null)
+                            await context.ReportProgress(Type, $"DDL execution: {objectsCreated} database objects created{(ddlErrors.Count > 0 ? $", {ddlErrors.Count} errors" : "")}");
                         messages.Add(new AgentMessage
                         {
                             From = Type, To = AgentType.Orchestrator,
@@ -310,8 +321,13 @@ public sealed class DatabaseAgent : IAgent
 
     // ─── Docker Compose ─────────────────────────────────────────────────────
 
-    private static CodeArtifact GenerateDockerCompose()
+    private static CodeArtifact GenerateDockerCompose(PipelineConfig? config)
     {
+        var dbUser = config?.DbUser ?? "hms";
+        var dbPassword = config?.DbPassword ?? "hms_dev_pw";
+        var dbName = config?.DbName ?? "hms";
+        var dbPort = config?.DbPort ?? 5432;
+
         var svcEntries = string.Join("\n\n", MicroserviceCatalog.All.Select(svc => $$"""
               {{svc.ShortName}}-api:
                 build:
@@ -320,7 +336,7 @@ public sealed class DatabaseAgent : IAgent
                 ports:
                   - "{{svc.ApiPort}}:8080"
                 environment:
-                  - ConnectionStrings__Default=Host=postgres;Port=5432;Database=hms_db;Username=hms_admin;Password=${DB_PASSWORD}
+                  - ConnectionStrings__Default=Host=postgres;Port=5432;Database={{dbName}};Username={{dbUser}};Password=${DB_PASSWORD:-{{dbPassword}}}
                   - Kafka__BootstrapServers=kafka:9092
                   - TenantId=default
                 depends_on:
@@ -343,15 +359,15 @@ public sealed class DatabaseAgent : IAgent
                   postgres:
                     image: postgres:16-alpine
                     ports:
-                      - "${DB_PORT:-5432}:5432"
+                      - "{{dbPort}}:5432"
                     environment:
-                      POSTGRES_USER: hms_admin
-                      POSTGRES_PASSWORD: ${DB_PASSWORD:-hms_secure_pwd_2026!}
-                      POSTGRES_DB: hms_db
+                      POSTGRES_USER: {{dbUser}}
+                      POSTGRES_PASSWORD: ${DB_PASSWORD:-{{dbPassword}}}
+                      POSTGRES_DB: {{dbName}}
                     volumes:
                       - pgdata:/var/lib/postgresql/data
                     healthcheck:
-                      test: ["CMD-SHELL", "pg_isready -U hms_admin"]
+                      test: ["CMD-SHELL", "pg_isready -U {{dbUser}}"]
                       interval: 5s
                       timeout: 5s
                       retries: 10

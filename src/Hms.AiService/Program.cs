@@ -3,7 +3,6 @@ using Hms.SharedKernel.Middleware;
 using Microsoft.EntityFrameworkCore;
 using Hms.AiService.Data;
 using Hms.AiService.Data.Repositories;
-using Hms.AiService.Endpoints;
 using Hms.AiService.Kafka;
 using Hms.AiService.Services;
 

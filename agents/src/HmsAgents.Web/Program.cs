@@ -1,7 +1,9 @@
 using HmsAgents.Agents.AccessControl;
+using HmsAgents.Agents.Backlog;
 using HmsAgents.Agents.BugFix;
 using HmsAgents.Agents.Compliance;
 using HmsAgents.Agents.Database;
+using HmsAgents.Agents.Deploy;
 using HmsAgents.Agents.Documentation;
 using HmsAgents.Agents.Infrastructure;
 using HmsAgents.Agents.Integration;
@@ -17,6 +19,7 @@ using HmsAgents.Agents.Supervisor;
 using HmsAgents.Agents.Testing;
 using HmsAgents.Core.Interfaces;
 using HmsAgents.Web.Hubs;
+using HmsAgents.Web.Services;
 using ApplicationAgent = HmsAgents.Agents.Application.ApplicationAgent;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -38,6 +41,10 @@ builder.Services.AddSingleton<ILlmProvider>(sp =>
 // ── Agent registrations ──
 builder.Services.AddSingleton<IRequirementsReader, RequirementParser>();
 builder.Services.AddSingleton<IArtifactWriter, FileArtifactWriter>();
+builder.Services.AddSingleton<PipelineStateStore>();
+builder.Services.AddSingleton<AgentPipelineDb>();
+builder.Services.AddSingleton<IAuditLogger, AuditLogger>();
+builder.Services.AddSingleton<IHumanGate, HumanGate>();
 builder.Services.AddSingleton<IPipelineEventSink, SignalRPipelineEventSink>();
 
 // Core pipeline agents
@@ -62,6 +69,14 @@ builder.Services.AddSingleton<IAgent, AccessControlAgent>();
 builder.Services.AddSingleton<IAgent, ObservabilityAgent>();
 builder.Services.AddSingleton<IAgent, InfrastructureAgent>();
 builder.Services.AddSingleton<IAgent, ApiDocumentationAgent>();
+
+// Iterative agents (requirements expansion, gap analysis, backlog management)
+builder.Services.AddSingleton<IAgent, RequirementsExpanderAgent>();
+builder.Services.AddSingleton<IAgent, RequirementAnalyzerAgent>();
+builder.Services.AddSingleton<IAgent, BacklogAgent>();
+
+// Deployment agent
+builder.Services.AddSingleton<IAgent, DeployAgent>();
 
 builder.Services.AddSingleton<IAgentOrchestrator, AgentOrchestrator>();
 

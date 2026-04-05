@@ -1,0 +1,343 @@
+```yaml
+openapi: 3.1.0
+info:
+  title: HMS RevenueService
+  description: >
+    Healthcare Management System (HMS) Revenue Service API. 
+    Manages billing, claims, and revenue cycle operations.
+  version: 1.0.0
+  contact:
+    name: API Support
+    email: support@hms-revenue.example.com
+
+servers:
+  - url: /api/v1
+    description: Main API server
+
+tags:
+  - name: Claims
+    description: Operations related to healthcare claims
+
+paths:
+  /claims:
+    parameters:
+      - $ref: '#/components/parameters/TenantIdHeader'
+    get:
+      tags:
+        - Claims
+      summary: List Claims
+      description: Retrieves a paginated list of claims for the specified tenant.
+      operationId: listClaims
+      parameters:
+        - $ref: '#/components/parameters/SkipQuery'
+        - $ref: '#/components/parameters/TakeQuery'
+      responses:
+        '200':
+          description: A paginated list of claims
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Claim'
+                  total:
+                    type: integer
+                    example: 150
+        '401':
+          $ref: '#/components/responses/401Unauthorized'
+        '403':
+          $ref: '#/components/responses/403Forbidden'
+        '422':
+          $ref: '#/components/responses/422UnprocessableEntity'
+
+    post:
+      tags:
+        - Claims
+      summary: Create Claim
+      description: Creates a new healthcare claim.
+      operationId: createClaim
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClaimCreateRequest'
+      responses:
+        '201':
+          description: Claim created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Claim'
+        '401':
+          $ref: '#/components/responses/401Unauthorized'
+        '403':
+          $ref: '#/components/responses/403Forbidden'
+        '422':
+          $ref: '#/components/responses/422UnprocessableEntity'
+
+  /claims/{id}:
+    parameters:
+      - $ref: '#/components/parameters/TenantIdHeader'
+      - $ref: '#/components/parameters/ClaimIdPath'
+    get:
+      tags:
+        - Claims
+      summary: Get Claim by ID
+      description: Retrieves a specific claim by its unique identifier.
+      operationId: getClaimById
+      responses:
+        '200':
+          description: Claim retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Claim'
+        '401':
+          $ref: '#/components/responses/401Unauthorized'
+        '403':
+          $ref: '#/components/responses/403Forbidden'
+        '404':
+          $ref: '#/components/responses/404NotFound'
+        '422':
+          $ref: '#/components/responses/422UnprocessableEntity'
+
+    put:
+      tags:
+        - Claims
+      summary: Update Claim
+      description: Updates an existing claim.
+      operationId: updateClaim
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClaimUpdateRequest'
+      responses:
+        '200':
+          description: Claim updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Claim'
+        '401':
+          $ref: '#/components/responses/401Unauthorized'
+        '403':
+          $ref: '#/components/responses/403Forbidden'
+        '404':
+          $ref: '#/components/responses/404NotFound'
+        '422':
+          $ref: '#/components/responses/422UnprocessableEntity'
+
+components:
+  parameters:
+    TenantIdHeader:
+      name: X-Tenant-Id
+      in: header
+      description: Unique identifier for the tenant (organization/facility).
+      required: true
+      schema:
+        type: string
+        format: uuid
+        
+    SkipQuery:
+      name: skip
+      in: query
+      description: Number of records to skip for pagination.
+      required: false
+      schema:
+        type: integer
+        minimum: 0
+        default: 0
+
+    TakeQuery:
+      name: take
+      in: query
+      description: Number of records to take for pagination.
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+
+    ClaimIdPath:
+      name: id
+      in: path
+      description: Unique identifier of the claim.
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  schemas:
+    Claim:
+      type: object
+      description: Represents a healthcare claim for services rendered.
+      x-fhir-resource: Claim
+      required:
+        - id
+        - patientId
+        - providerId
+        - dateOfService
+        - totalAmount
+        - status
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Unique identifier for the claim.
+        patientId:
+          type: string
+          format: uuid
+          description: Identifier of the patient receiving the service.
+          x-phi-classification: Restricted
+          x-fhir-mapping: Claim.patient
+        providerId:
+          type: string
+          format: uuid
+          description: Identifier of the rendering provider.
+          x-fhir-mapping: Claim.provider
+        dateOfService:
+          type: string
+          format: date
+          description: The date the medical service was provided.
+          x-phi-classification: Restricted
+          x-fhir-mapping: Claim.billablePeriod.start
+        totalAmount:
+          type: number
+          format: double
+          description: Total billed amount for the claim.
+          x-fhir-mapping: Claim.total.value
+        status:
+          type: string
+          enum: [draft, active, cancelled, entered-in-error]
+          description: Current status of the claim.
+          x-fhir-mapping: Claim.status
+        diagnosisCodes:
+          type: array
+          description: List of ICD-10 diagnosis codes.
+          x-phi-classification: Restricted
+          x-fhir-mapping: Claim.diagnosis.diagnosisCodeableConcept
+          items:
+            type: string
+            example: "J01.90"
+        procedureCodes:
+          type: array
+          description: List of CPT/HCPCS procedure codes.
+          x-phi-classification: Restricted
+          x-fhir-mapping: Claim.item.productOrService
+          items:
+            type: string
+            example: "99213"
+
+    ClaimCreateRequest:
+      type: object
+      description: DTO for creating a new claim.
+      required:
+        - patientId
+        - providerId
+        - dateOfService
+        - totalAmount
+      properties:
+        patientId:
+          type: string
+          format: uuid
+          x-phi-classification: Restricted
+        providerId:
+          type: string
+          format: uuid
+        dateOfService:
+          type: string
+          format: date
+          x-phi-classification: Restricted
+        totalAmount:
+          type: number
+          format: double
+        diagnosisCodes:
+          type: array
+          x-phi-classification: Restricted
+          items:
+            type: string
+        procedureCodes:
+          type: array
+          x-phi-classification: Restricted
+          items:
+            type: string
+
+    ClaimUpdateRequest:
+      type: object
+      description: DTO for updating an existing claim. All fields are optional.
+      properties:
+        providerId:
+          type: string
+          format: uuid
+        dateOfService:
+          type: string
+          format: date
+          x-phi-classification: Restricted
+        totalAmount:
+          type: number
+          format: double
+        status:
+          type: string
+          enum: [draft, active, cancelled, entered-in-error]
+        diagnosisCodes:
+          type: array
+          x-phi-classification: Restricted
+          items:
+            type: string
+        procedureCodes:
+          type: array
+          x-phi-classification: Restricted
+          items:
+            type: string
+
+    ErrorResponse:
+      type: object
+      required:
+        - code
+        - message
+      properties:
+        code:
+          type: string
+          description: Application-specific error code.
+        message:
+          type: string
+          description: Human-readable error message.
+        details:
+          type: array
+          description: Additional error details or validation failures.
+          items:
+            type: string
+
+  responses:
+    '401Unauthorized':
+      description: Unauthorized. Authentication token is missing or invalid.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    '403Forbidden':
+      description: Forbidden. The user does not have permission to access this resource or tenant.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    '404NotFound':
+      description: Not Found. The requested resource could not be found.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    '422UnprocessableEntity':
+      description: Unprocessable Entity. The request body failed business validation.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+```

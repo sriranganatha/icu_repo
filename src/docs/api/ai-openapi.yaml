@@ -1,0 +1,152 @@
+```yaml
+openapi: 3.1.0
+info:
+  title: HMS AiService API
+  version: 1.0.0
+  description: >
+    Healthcare Management System (HMS) API for managing AI interactions. 
+    This service handles prompts, responses, and metadata for AI-assisted clinical workflows.
+servers:
+  - url: /api/v1
+    description: Main API Server
+
+tags:
+  - name: AiInteraction
+    description: Operations related to AI Interactions
+
+paths:
+  /ai-interactions:
+    get:
+      tags:
+        - AiInteraction
+      summary: List AI Interactions
+      description: Retrieves a paginated list of AI interactions for the specified tenant.
+      operationId: listAiInteractions
+      parameters:
+        - $ref: '#/components/parameters/TenantIdHeader'
+        - $ref: '#/components/parameters/SkipQuery'
+        - $ref: '#/components/parameters/TakeQuery'
+      responses:
+        '200':
+          description: A paginated list of AI interactions.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AiInteraction'
+                  total:
+                    type: integer
+                    description: Total number of records available.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+    post:
+      tags:
+        - AiInteraction
+      summary: Create an AI Interaction
+      description: Initiates a new AI interaction (e.g., submitting a clinical prompt).
+      operationId: createAiInteraction
+      parameters:
+        - $ref: '#/components/parameters/TenantIdHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAiInteractionRequest'
+      responses:
+        '201':
+          description: AI interaction successfully created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiInteraction'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /ai-interactions/{id}:
+    get:
+      tags:
+        - AiInteraction
+      summary: Get AI Interaction by ID
+      description: Retrieves the details of a specific AI interaction.
+      operationId: getAiInteractionById
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - $ref: '#/components/parameters/TenantIdHeader'
+      responses:
+        '200':
+          description: AI interaction details.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiInteraction'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    put:
+      tags:
+        - AiInteraction
+      summary: Update an AI Interaction
+      description: Updates an existing AI interaction (e.g., appending the AI response or provider feedback).
+      operationId: updateAiInteraction
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - $ref: '#/components/parameters/TenantIdHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateAiInteractionRequest'
+      responses:
+        '200':
+          description: AI interaction successfully updated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiInteraction'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+components:
+  parameters:
+    TenantIdHeader:
+      name: X-Tenant-Id
+      in: header
+      required: true
+      description: Unique identifier for the tenant (clinic/hospital/organization).
+      schema:
+        type: string
+        format: uuid
+    SkipQuery:
+      name: skip
+      in: query
+      required: false
+      description: Number of records to skip for pagination.
+      schema:
+        type: integer
+        minimum: 0
+        default: 

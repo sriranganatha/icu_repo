@@ -1,4 +1,5 @@
 using Hms.AiService.Contracts;
+using Hms.AiService.Data.Entities;
 using Hms.AiService.Data.Repositories;
 using Hms.AiService.Kafka;
 using Microsoft.Extensions.Logging;
@@ -27,50 +28,67 @@ public sealed class AiInteractionService : IAiInteractionService
         if (entity is null) return null;
         return new AiInteractionDto
         {
-            Id = entity.Id, TenantId = entity.TenantId,
-            CreatedAt = entity.CreatedAt
+
         };
     }
 
     public async Task<List<AiInteractionDto>> ListAsync(int skip, int take, CancellationToken ct = default)
     {
         var items = await _repo.ListAsync(skip, take, ct);
-        return items.Select(e => new AiInteractionDto
+        return items.Select(entity => new AiInteractionDto
         {
-            Id = e.Id, TenantId = e.TenantId, CreatedAt = e.CreatedAt
+
         }).ToList();
     }
 
     public async Task<AiInteractionDto> CreateAsync(CreateAiInteractionRequest request, CancellationToken ct = default)
     {
         _logger.LogInformation("Creating AiInteraction for tenant {Tenant}", request.TenantId);
-        // TODO: map request to entity and save via repository
-        var dto = new AiInteractionDto
+
+        var entity = new AiInteraction
         {
             Id = Guid.NewGuid().ToString("N"),
-            TenantId = request.TenantId,
-            FacilityId = request.FacilityId,
-            StatusCode = "active",
+
             CreatedAt = DateTimeOffset.UtcNow,
-            UpdatedAt = DateTimeOffset.UtcNow
+            UpdatedAt = DateTimeOffset.UtcNow,
         };
 
-        // Publish domain event to Kafka
+        var saved = await _repo.CreateAsync(entity, ct);
+
         await _events.PublishAsync(new AiInteractionCreatedEvent
         {
-            EntityId = dto.Id, TenantId = dto.TenantId
+            EntityId = saved.Id, TenantId = saved.TenantId
         }, ct);
 
-        return dto;
+        _logger.LogInformation("Created AiInteraction {Id} for tenant {Tenant}", saved.Id, saved.TenantId);
+
+        return new AiInteractionDto
+        {
+
+        };
     }
 
     public async Task<AiInteractionDto> UpdateAsync(UpdateAiInteractionRequest request, CancellationToken ct = default)
     {
         _logger.LogInformation("Updating AiInteraction {Id}", request.Id);
+
+        var entity = await _repo.GetByIdAsync(request.Id, ct)
+            ?? throw new KeyNotFoundException($"AiInteraction {request.Id} not found");
+
+
+        entity.UpdatedAt = DateTimeOffset.UtcNow;
+        entity.UpdatedBy = "system";
+
+        await _repo.UpdateAsync(entity, ct);
+
         await _events.PublishAsync(new AiInteractionUpdatedEvent
         {
-            EntityId = request.Id, TenantId = string.Empty
+            EntityId = entity.Id, TenantId = entity.TenantId
         }, ct);
-        return new AiInteractionDto { Id = request.Id, StatusCode = request.StatusCode ?? "active" };
+
+        return new AiInteractionDto
+        {
+
+        };
     }
 }

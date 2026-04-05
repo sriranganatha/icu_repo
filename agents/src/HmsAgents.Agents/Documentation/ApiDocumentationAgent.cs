@@ -42,12 +42,19 @@ public sealed class ApiDocumentationAgent : IAgent
             // Group entities by service
             var serviceGroups = entities.GroupBy(e => e.ServiceName).ToList();
 
+            if (context.ReportProgress is not null)
+                await context.ReportProgress(Type, $"Generating OpenAPI 3.1 specs for {serviceGroups.Count} services with {entities.Count} entities");
+
             foreach (var group in serviceGroups)
             {
                 ct.ThrowIfCancellationRequested();
+                if (context.ReportProgress is not null)
+                    await context.ReportProgress(Type, $"AI-generating OpenAPI spec for {group.Key} — {group.Count()} entities, FHIR annotations, PHI fields");
                 artifacts.Add(await GenerateOpenApiSpec(group.Key, group.ToList(), ct));
             }
 
+            if (context.ReportProgress is not null)
+                await context.ReportProgress(Type, "Generating FHIR mapping guide, Swagger UI config, API changelog template");
             artifacts.Add(await GenerateFhirMappingGuide(entities, ct));
             artifacts.Add(GenerateSwaggerUiConfig());
             artifacts.Add(GenerateApiChangelogTemplate());

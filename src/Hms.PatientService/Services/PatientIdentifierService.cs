@@ -1,4 +1,5 @@
 using Hms.PatientService.Contracts;
+using Hms.PatientService.Data.Entities;
 using Hms.PatientService.Data.Repositories;
 using Hms.PatientService.Kafka;
 using Microsoft.Extensions.Logging;
@@ -27,50 +28,67 @@ public sealed class PatientIdentifierService : IPatientIdentifierService
         if (entity is null) return null;
         return new PatientIdentifierDto
         {
-            Id = entity.Id, TenantId = entity.TenantId,
-            CreatedAt = entity.CreatedAt
+
         };
     }
 
     public async Task<List<PatientIdentifierDto>> ListAsync(int skip, int take, CancellationToken ct = default)
     {
         var items = await _repo.ListAsync(skip, take, ct);
-        return items.Select(e => new PatientIdentifierDto
+        return items.Select(entity => new PatientIdentifierDto
         {
-            Id = e.Id, TenantId = e.TenantId, CreatedAt = e.CreatedAt
+
         }).ToList();
     }
 
     public async Task<PatientIdentifierDto> CreateAsync(CreatePatientIdentifierRequest request, CancellationToken ct = default)
     {
         _logger.LogInformation("Creating PatientIdentifier for tenant {Tenant}", request.TenantId);
-        // TODO: map request to entity and save via repository
-        var dto = new PatientIdentifierDto
+
+        var entity = new PatientIdentifier
         {
             Id = Guid.NewGuid().ToString("N"),
-            TenantId = request.TenantId,
-            FacilityId = request.FacilityId,
-            StatusCode = "active",
+
             CreatedAt = DateTimeOffset.UtcNow,
-            UpdatedAt = DateTimeOffset.UtcNow
+            UpdatedAt = DateTimeOffset.UtcNow,
         };
 
-        // Publish domain event to Kafka
+        var saved = await _repo.CreateAsync(entity, ct);
+
         await _events.PublishAsync(new PatientIdentifierCreatedEvent
         {
-            EntityId = dto.Id, TenantId = dto.TenantId
+            EntityId = saved.Id, TenantId = saved.TenantId
         }, ct);
 
-        return dto;
+        _logger.LogInformation("Created PatientIdentifier {Id} for tenant {Tenant}", saved.Id, saved.TenantId);
+
+        return new PatientIdentifierDto
+        {
+
+        };
     }
 
     public async Task<PatientIdentifierDto> UpdateAsync(UpdatePatientIdentifierRequest request, CancellationToken ct = default)
     {
         _logger.LogInformation("Updating PatientIdentifier {Id}", request.Id);
+
+        var entity = await _repo.GetByIdAsync(request.Id, ct)
+            ?? throw new KeyNotFoundException($"PatientIdentifier {request.Id} not found");
+
+
+        entity.UpdatedAt = DateTimeOffset.UtcNow;
+        entity.UpdatedBy = "system";
+
+        await _repo.UpdateAsync(entity, ct);
+
         await _events.PublishAsync(new PatientIdentifierUpdatedEvent
         {
-            EntityId = request.Id, TenantId = string.Empty
+            EntityId = entity.Id, TenantId = entity.TenantId
         }, ct);
-        return new PatientIdentifierDto { Id = request.Id, StatusCode = request.StatusCode ?? "active" };
+
+        return new PatientIdentifierDto
+        {
+
+        };
     }
 }

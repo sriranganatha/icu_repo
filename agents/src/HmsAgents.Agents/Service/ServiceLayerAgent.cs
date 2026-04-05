@@ -33,15 +33,20 @@ public sealed class ServiceLayerAgent : IAgent
         try
         {
             // Re-build domain model now that DatabaseAgent has produced entity artifacts
-            context.DomainModel = EntityFieldExtractor.BuildDomainModel(context.Artifacts);
+            context.DomainModel = EntityFieldExtractor.BuildDomainModel(context.Artifacts.ToList());
             var model = context.DomainModel;
 
             _logger.LogInformation("Domain model loaded: {Count} entities with field definitions",
                 model.Entities.Count(e => e.Fields.Count > 0));
 
+            if (context.ReportProgress is not null)
+                await context.ReportProgress(Type, $"Domain model loaded: {model.Entities.Count} entities ({model.Entities.Count(e => e.Fields.Count > 0)} with field definitions)");
+
             foreach (var svc in MicroserviceCatalog.All)
             {
                 _logger.LogInformation("Generating service layer for {Service}", svc.Name);
+                if (context.ReportProgress is not null)
+                    await context.ReportProgress(Type, $"Generating DTOs, interfaces & implementations for {svc.Name} — entities: {string.Join(", ", svc.Entities)}");
 
                 foreach (var entityName in svc.Entities)
                 {
@@ -57,6 +62,9 @@ public sealed class ServiceLayerAgent : IAgent
 
                 artifacts.Add(GenerateKafkaEvents(svc));
                 artifacts.Add(GenerateKafkaProducer(svc));
+
+                if (context.ReportProgress is not null)
+                    await context.ReportProgress(Type, $"{svc.Name}: {svc.Entities.Length} DTOs, {svc.Entities.Length} service interfaces, {svc.Entities.Length} implementations, Kafka events & producer");
             }
 
             artifacts.Add(GenerateKafkaConsumerBase());

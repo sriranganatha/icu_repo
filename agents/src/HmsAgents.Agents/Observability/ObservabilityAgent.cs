@@ -42,11 +42,28 @@ public sealed class ObservabilityAgent : IAgent
 
         try
         {
+            if (context.ReportProgress is not null)
+                await context.ReportProgress(Type, "Generating OpenTelemetry bootstrap — ActivitySource, Meter, counters, histograms for all 9 services");
             artifacts.Add(GenerateOpenTelemetryBootstrap());
+
+            if (context.ReportProgress is not null)
+                await context.ReportProgress(Type, "Generating HMS metrics — request counters, duration histograms, PHI access tracking, Kafka latency");
             artifacts.Add(GenerateHmsMetrics());
+
+            if (context.ReportProgress is not null)
+                await context.ReportProgress(Type, "AI-generating request tracing middleware — distributed trace propagation with Gemini LLM");
             artifacts.Add(await GenerateRequestTracingMiddleware(ct));
+
+            if (context.ReportProgress is not null)
+                await context.ReportProgress(Type, "Generating composite health check — DB, Kafka, Redis, downstream service liveness/readiness probes");
             artifacts.Add(GenerateHealthCheckComposite());
+
+            if (context.ReportProgress is not null)
+                await context.ReportProgress(Type, "AI-generating Grafana dashboard JSON — service overview, latency heatmap, error rate panels");
             artifacts.Add(await GenerateGrafanaDashboard(ct));
+
+            if (context.ReportProgress is not null)
+                await context.ReportProgress(Type, "Generating Prometheus alerting rules — SLA violation, error spike, PHI breach attempt alerts");
             artifacts.Add(GenerateAlertingRules());
 
             context.Artifacts.AddRange(artifacts);

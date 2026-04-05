@@ -12,14 +12,17 @@ public sealed class PipelineConfig
     public List<string> TargetModules { get; init; } = [];
 
     // Docker & database provisioning
-    public string DockerContainerName { get; init; } = "hms-postgres";
+    public string DockerContainerName { get; init; } = "icu-postgres";
     public string DbHost { get; init; } = "localhost";
     public int DbPort { get; init; } = 5432;
-    public string DbName { get; init; } = "hms_db";
-    public string DbPassword { get; init; } = "hms_secure_pwd_2026!";
-    public string DbUser { get; init; } = "hms_admin";
+    public string DbName { get; init; } = "hms";
+    public string DbPassword { get; init; } = "hms_dev_pw";
+    public string DbUser { get; init; } = "hms";
     public bool SpinUpDocker { get; init; } = true;
-    public bool ExecuteDdl { get; init; } = true;
+    public bool ExecuteDdl { get; set; } = true;
+
+    // Orchestrator instructions — user-provided directives to guide the pipeline
+    public string OrchestratorInstructions { get; init; } = string.Empty;
 
     // Service port mapping
     public ServicePortMap ServicePorts { get; init; } = new();

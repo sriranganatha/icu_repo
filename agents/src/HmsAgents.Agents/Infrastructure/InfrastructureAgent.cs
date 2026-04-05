@@ -47,16 +47,32 @@ public sealed class InfrastructureAgent : IAgent
         try
         {
             // Per-service Dockerfiles
+            if (context.ReportProgress is not null)
+                await context.ReportProgress(Type, $"Generating multi-stage Dockerfiles for {Services.Length} services");
             foreach (var (name, port) in Services)
             {
                 ct.ThrowIfCancellationRequested();
                 artifacts.Add(GenerateDockerfile(name, port));
             }
 
+            if (context.ReportProgress is not null)
+                await context.ReportProgress(Type, "Generating docker-compose.yml — all services, PostgreSQL, Kafka, Redis, networking");
             artifacts.Add(GenerateDockerCompose());
+
+            if (context.ReportProgress is not null)
+                await context.ReportProgress(Type, "AI-generating Kubernetes manifests — Deployment, Service, HPA, PDB, NetworkPolicy");
             artifacts.Add(await GenerateKubernetesManifests(ct));
+
+            if (context.ReportProgress is not null)
+                await context.ReportProgress(Type, "AI-generating Helm values.yaml — configurable replicas, resource limits, secrets, ingress");
             artifacts.Add(await GenerateHelmValues(ct));
+
+            if (context.ReportProgress is not null)
+                await context.ReportProgress(Type, "Generating CI/CD pipeline — GitHub Actions with build, test, security scan, deploy stages");
             artifacts.Add(GenerateCiCdPipeline());
+
+            if (context.ReportProgress is not null)
+                await context.ReportProgress(Type, "Generating database migration runner — FluentMigrator host with rollback support");
             artifacts.Add(GenerateDatabaseMigrationRunner());
 
             context.Artifacts.AddRange(artifacts);

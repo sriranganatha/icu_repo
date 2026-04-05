@@ -41,6 +41,8 @@ public sealed class BugFixAgent : IAgent
             .ToList();
 
         _logger.LogInformation("BugFixAgent starting — {Count} actionable findings to address", findings.Count);
+        if (context.ReportProgress is not null)
+            await context.ReportProgress(Type, $"Analyzing {findings.Count} fixable findings: {string.Join(", ", findings.GroupBy(f => f.Category).Select(g => $"{g.Key}({g.Count()})").Take(6))}");
 
         var fixedCount = 0;
         var resolvedFindings = new List<string>();
@@ -77,6 +79,8 @@ public sealed class BugFixAgent : IAgent
                     fixedCount++;
                     resolvedFindings.Add(finding.Id);
                     _logger.LogInformation("Fixed [{Category}] in {File}", finding.Category, artifact.FileName);
+                    if (context.ReportProgress is not null)
+                        await context.ReportProgress(Type, $"Fixed [{finding.Category}] in {artifact.FileName}: {finding.Message[..Math.Min(finding.Message.Length, 80)]}");
                 }
             }
 

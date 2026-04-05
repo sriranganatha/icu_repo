@@ -1,0 +1,337 @@
+```yaml
+openapi: 3.1.0
+info:
+  title: HMS EncounterService API
+  description: >
+    Healthcare Management System (HMS) API for managing patient encounters and clinical notes.
+    Includes PHI classification and FHIR resource mappings.
+  version: 1.0.0
+  contact:
+    name: API Support
+    email: support@hms-healthcare.com
+
+servers:
+  - url: /api/v1
+    description: Main API server
+
+paths:
+  /encounters:
+    get:
+      summary: List Encounters
+      description: Retrieves a paginated list of patient encounters.
+      operationId: listEncounters
+      tags:
+        - Encounter
+      parameters:
+        - $ref: '#/components/parameters/TenantIdHeader'
+        - $ref: '#/components/parameters/SkipParam'
+        - $ref: '#/components/parameters/TakeParam'
+      responses:
+        '200':
+          description: A paginated list of encounters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EncounterPaginatedList'
+        '401':
+          $ref: '#/components/responses/401Unauthorized'
+        '403':
+          $ref: '#/components/responses/403Forbidden'
+        '422':
+          $ref: '#/components/responses/422UnprocessableEntity'
+
+    post:
+      summary: Create Encounter
+      description: Creates a new patient encounter.
+      operationId: createEncounter
+      tags:
+        - Encounter
+      parameters:
+        - $ref: '#/components/parameters/TenantIdHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateEncounterRequest'
+      responses:
+        '201':
+          description: Encounter created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Encounter'
+        '401':
+          $ref: '#/components/responses/401Unauthorized'
+        '403':
+          $ref: '#/components/responses/403Forbidden'
+        '422':
+          $ref: '#/components/responses/422UnprocessableEntity'
+
+  /encounters/{id}:
+    get:
+      summary: Get Encounter by ID
+      description: Retrieves a specific encounter by its unique identifier.
+      operationId: getEncounterById
+      tags:
+        - Encounter
+      parameters:
+        - $ref: '#/components/parameters/TenantIdHeader'
+        - $ref: '#/components/parameters/IdParam'
+      responses:
+        '200':
+          description: Encounter details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Encounter'
+        '401':
+          $ref: '#/components/responses/401Unauthorized'
+        '403':
+          $ref: '#/components/responses/403Forbidden'
+        '404':
+          $ref: '#/components/responses/404NotFound'
+
+    put:
+      summary: Update Encounter
+      description: Updates an existing patient encounter.
+      operationId: updateEncounter
+      tags:
+        - Encounter
+      parameters:
+        - $ref: '#/components/parameters/TenantIdHeader'
+        - $ref: '#/components/parameters/IdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateEncounterRequest'
+      responses:
+        '200':
+          description: Encounter updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Encounter'
+        '401':
+          $ref: '#/components/responses/401Unauthorized'
+        '403':
+          $ref: '#/components/responses/403Forbidden'
+        '404':
+          $ref: '#/components/responses/404NotFound'
+        '422':
+          $ref: '#/components/responses/422UnprocessableEntity'
+
+  /clinical-notes:
+    get:
+      summary: List Clinical Notes
+      description: Retrieves a paginated list of clinical notes.
+      operationId: listClinicalNotes
+      tags:
+        - ClinicalNote
+      parameters:
+        - $ref: '#/components/parameters/TenantIdHeader'
+        - $ref: '#/components/parameters/SkipParam'
+        - $ref: '#/components/parameters/TakeParam'
+      responses:
+        '200':
+          description: A paginated list of clinical notes
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClinicalNotePaginatedList'
+        '401':
+          $ref: '#/components/responses/401Unauthorized'
+        '403':
+          $ref: '#/components/responses/403Forbidden'
+        '422':
+          $ref: '#/components/responses/422UnprocessableEntity'
+
+    post:
+      summary: Create Clinical Note
+      description: Creates a new clinical note for an encounter.
+      operationId: createClinicalNote
+      tags:
+        - ClinicalNote
+      parameters:
+        - $ref: '#/components/parameters/TenantIdHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateClinicalNoteRequest'
+      responses:
+        '201':
+          description: Clinical note created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClinicalNote'
+        '401':
+          $ref: '#/components/responses/401Unauthorized'
+        '403':
+          $ref: '#/components/responses/403Forbidden'
+        '422':
+          $ref: '#/components/responses/422UnprocessableEntity'
+
+  /clinical-notes/{id}:
+    get:
+      summary: Get Clinical Note by ID
+      description: Retrieves a specific clinical note by its unique identifier.
+      operationId: getClinicalNoteById
+      tags:
+        - ClinicalNote
+      parameters:
+        - $ref: '#/components/parameters/TenantIdHeader'
+        - $ref: '#/components/parameters/IdParam'
+      responses:
+        '200':
+          description: Clinical note details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClinicalNote'
+        '401':
+          $ref: '#/components/responses/401Unauthorized'
+        '403':
+          $ref: '#/components/responses/403Forbidden'
+        '404':
+          $ref: '#/components/responses/404NotFound'
+
+    put:
+      summary: Update Clinical Note
+      description: Updates an existing clinical note.
+      operationId: updateClinicalNote
+      tags:
+        - ClinicalNote
+      parameters:
+        - $ref: '#/components/parameters/TenantIdHeader'
+        - $ref: '#/components/parameters/IdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateClinicalNoteRequest'
+      responses:
+        '200':
+          description: Clinical note updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClinicalNote'
+        '401':
+          $ref: '#/components/responses/401Unauthorized'
+        '403':
+          $ref: '#/components/responses/403Forbidden'
+        '404':
+          $ref: '#/components/responses/404NotFound'
+        '422':
+          $ref: '#/components/responses/422UnprocessableEntity'
+
+components:
+  parameters:
+    TenantIdHeader:
+      name: X-Tenant-Id
+      in: header
+      description: The unique identifier of the tenant (e.g., hospital or clinic).
+      required: true
+      schema:
+        type: string
+        format: uuid
+    SkipParam:
+      name: skip
+      in: query
+      description: Number of records to skip for pagination.
+      required: false
+      schema:
+        type: integer
+        minimum: 0
+        default: 0
+    TakeParam:
+      name: take
+      in: query
+      description: Maximum number of records to return.
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+    IdParam:
+      name: id
+      in: path
+      description: The unique identifier of the entity.
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  responses:
+    401Unauthorized:
+      description: Unauthorized. Missing or invalid authentication token.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    403Forbidden:
+      description: Forbidden. User lacks required permissions or tenant access.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    404NotFound:
+      description: Not Found. The requested resource does not exist.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    422UnprocessableEntity:
+      description: Unprocessable Entity. Validation failed for the request payload.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+  schemas:
+    # --- Encounter Schemas ---
+    Encounter:
+      type: object
+      x-fhir-resource: Encounter
+      description: Represents an interaction between a patient and healthcare provider(s).
+      properties:
+        id:
+          type: string
+          format: uuid
+        patientId:
+          type: string
+          format: uuid
+          x-phi-classification: ePHI
+          description: Reference to the Patient.
+        providerId:
+          type: string
+          format: uuid
+          x-phi-classification: ePHI
+          description: Reference to the Practitioner.
+        status:
+          type: string
+          enum: [planned, arrived, triaged, in-progress, onleave, finished, cancelled]
+        encounterClass:
+          type: string
+          enum: [ambulatory, emergency, inpatient, virtual]
+        periodStart:
+          type: string
+          format: date-time
+        periodEnd:
+          type: string
+          format: date-time
+        reasonCode:
+          type: string
+          x-phi-classification: ePHI
+          description: SNOMED CT or ICD-10 code representing the reason for the encounter.
+      required:
+        - id
+        - patientId
+        -

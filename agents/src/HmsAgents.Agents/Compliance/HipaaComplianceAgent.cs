@@ -44,6 +44,9 @@ public sealed class HipaaComplianceAgent : IAgent
                 "PreferredName", "PrimaryLanguage", "SexAtBirth", "Diagnosis", "TreatmentPlan",
                 "LabResult", "Prescription", "Allergy", "Immunization", "VitalSign" };
 
+            if (context.ReportProgress is not null)
+                await context.ReportProgress(Type, $"Scanning {context.Artifacts.Count} artifacts for {phiFields.Length} PHI field types (45 CFR §164.312)");
+
             foreach (var artifact in context.Artifacts)
             {
                 ct.ThrowIfCancellationRequested();
@@ -88,10 +91,21 @@ public sealed class HipaaComplianceAgent : IAgent
             // 2. AI-generate HIPAA compliance artifacts
             var domainSummary = BuildDomainSummary(context);
 
+            if (context.ReportProgress is not null)
+                await context.ReportProgress(Type, $"PHI scan done: {findings.Count} compliance findings. AI-generating HIPAA artifacts — inventory, audit service, breach notification...");
+
             artifacts.Add(await GeneratePhiInventory(domainSummary, ct));
+            if (context.ReportProgress is not null)
+                await context.ReportProgress(Type, "Generated PHI inventory — cataloging all protected health information across services");
             artifacts.Add(await GenerateAccessAuditService(domainSummary, ct));
+            if (context.ReportProgress is not null)
+                await context.ReportProgress(Type, "Generated access audit service — logging all PHI access with user, timestamp, entity, action");
             artifacts.Add(await GenerateBreachNotificationPolicy(ct));
+            if (context.ReportProgress is not null)
+                await context.ReportProgress(Type, "Generated breach notification policy — 60-day notification workflow per HHS requirements");
             artifacts.Add(await GenerateMinimumNecessaryPolicy(context, ct));
+            if (context.ReportProgress is not null)
+                await context.ReportProgress(Type, "Generated minimum necessary access policy — role-based PHI field restriction");
             artifacts.Add(GeneratePhiClassificationEnum());
 
             context.Artifacts.AddRange(artifacts);

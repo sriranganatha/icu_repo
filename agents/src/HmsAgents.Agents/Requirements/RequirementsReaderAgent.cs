@@ -29,12 +29,24 @@ public sealed class RequirementsReaderAgent : IAgent
 
         try
         {
+            if (context.ReportProgress is not null)
+                await context.ReportProgress(Type, $"Scanning docs folder: {context.RequirementsBasePath}");
+
             var requirements = await _reader.ReadAllAsync(context.RequirementsBasePath, ct);
             context.Requirements = requirements;
 
+            if (context.ReportProgress is not null)
+            {
+                var modules = requirements.Select(r => r.Module).Where(m => !string.IsNullOrEmpty(m)).Distinct().ToList();
+                await context.ReportProgress(Type, $"Parsed {requirements.Count} requirements across {modules.Count} modules: {string.Join(", ", modules.Take(8))}");
+            }
+
             // Build initial domain model from MicroserviceCatalog (entity artifacts not yet available)
             // This will be enriched after DatabaseAgent runs by calling EnrichDomainModel()
-            context.DomainModel = EntityFieldExtractor.BuildDomainModel(context.Artifacts);
+            context.DomainModel = EntityFieldExtractor.BuildDomainModel(context.Artifacts.ToList());
+
+            if (context.ReportProgress is not null)
+                await context.ReportProgress(Type, $"Built domain model: {context.DomainModel.Entities.Count} entities, {context.DomainModel.ApiEndpoints.Count} endpoints, {context.DomainModel.DomainEvents.Count} events");
 
             context.AgentStatuses[Type] = AgentStatus.Completed;
 

@@ -1,0 +1,295 @@
+```yaml
+openapi: 3.1.0
+info:
+  title: HMS PatientService API
+  description: API for managing Patient Profiles and Identifiers within the Healthcare Management System (HMS).
+  version: 1.0.0
+  contact:
+    name: API Support
+    email: support@hms-healthcare.com
+
+servers:
+  - url: /api/v1
+    description: Base path for the HMS PatientService
+
+tags:
+  - name: PatientProfile
+    description: Operations related to patient demographics and profiles.
+  - name: PatientIdentifier
+    description: Operations related to patient identification documents and numbers (e.g., MRN, SSN).
+
+paths:
+  # ---------------------------------------------------------
+  # PatientProfile Endpoints
+  # ---------------------------------------------------------
+  /patient-profiles:
+    parameters:
+      - $ref: '#/components/parameters/TenantIdHeader'
+    get:
+      tags:
+        - PatientProfile
+      summary: List Patient Profiles
+      description: Retrieves a paginated list of patient profiles.
+      parameters:
+        - $ref: '#/components/parameters/SkipParam'
+        - $ref: '#/components/parameters/TakeParam'
+      responses:
+        '200':
+          description: A paginated list of patient profiles.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PatientProfileList'
+        '401':
+          $ref: '#/components/responses/401Unauthorized'
+        '403':
+          $ref: '#/components/responses/403Forbidden'
+        '422':
+          $ref: '#/components/responses/422UnprocessableEntity'
+    post:
+      tags:
+        - PatientProfile
+      summary: Create Patient Profile
+      description: Creates a new patient profile.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePatientProfileRequest'
+      responses:
+        '201':
+          description: Patient profile created successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PatientProfile'
+        '401':
+          $ref: '#/components/responses/401Unauthorized'
+        '403':
+          $ref: '#/components/responses/403Forbidden'
+        '422':
+          $ref: '#/components/responses/422UnprocessableEntity'
+
+  /patient-profiles/{id}:
+    parameters:
+      - $ref: '#/components/parameters/TenantIdHeader'
+      - $ref: '#/components/parameters/IdPathParam'
+    get:
+      tags:
+        - PatientProfile
+      summary: Get Patient Profile by ID
+      description: Retrieves a specific patient profile by its unique identifier.
+      responses:
+        '200':
+          description: Patient profile retrieved successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PatientProfile'
+        '401':
+          $ref: '#/components/responses/401Unauthorized'
+        '403':
+          $ref: '#/components/responses/403Forbidden'
+        '404':
+          $ref: '#/components/responses/404NotFound'
+        '422':
+          $ref: '#/components/responses/422UnprocessableEntity'
+    put:
+      tags:
+        - PatientProfile
+      summary: Update Patient Profile
+      description: Updates an existing patient profile.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdatePatientProfileRequest'
+      responses:
+        '200':
+          description: Patient profile updated successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PatientProfile'
+        '401':
+          $ref: '#/components/responses/401Unauthorized'
+        '403':
+          $ref: '#/components/responses/403Forbidden'
+        '404':
+          $ref: '#/components/responses/404NotFound'
+        '422':
+          $ref: '#/components/responses/422UnprocessableEntity'
+
+  # ---------------------------------------------------------
+  # PatientIdentifier Endpoints
+  # ---------------------------------------------------------
+  /patient-identifiers:
+    parameters:
+      - $ref: '#/components/parameters/TenantIdHeader'
+    get:
+      tags:
+        - PatientIdentifier
+      summary: List Patient Identifiers
+      description: Retrieves a paginated list of patient identifiers.
+      parameters:
+        - $ref: '#/components/parameters/SkipParam'
+        - $ref: '#/components/parameters/TakeParam'
+      responses:
+        '200':
+          description: A paginated list of patient identifiers.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PatientIdentifierList'
+        '401':
+          $ref: '#/components/responses/401Unauthorized'
+        '403':
+          $ref: '#/components/responses/403Forbidden'
+        '422':
+          $ref: '#/components/responses/422UnprocessableEntity'
+    post:
+      tags:
+        - PatientIdentifier
+      summary: Create Patient Identifier
+      description: Creates a new patient identifier.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePatientIdentifierRequest'
+      responses:
+        '201':
+          description: Patient identifier created successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PatientIdentifier'
+        '401':
+          $ref: '#/components/responses/401Unauthorized'
+        '403':
+          $ref: '#/components/responses/403Forbidden'
+        '422':
+          $ref: '#/components/responses/422UnprocessableEntity'
+
+  /patient-identifiers/{id}:
+    parameters:
+      - $ref: '#/components/parameters/TenantIdHeader'
+      - $ref: '#/components/parameters/IdPathParam'
+    get:
+      tags:
+        - PatientIdentifier
+      summary: Get Patient Identifier by ID
+      description: Retrieves a specific patient identifier by its unique ID.
+      responses:
+        '200':
+          description: Patient identifier retrieved successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PatientIdentifier'
+        '401':
+          $ref: '#/components/responses/401Unauthorized'
+        '403':
+          $ref: '#/components/responses/403Forbidden'
+        '404':
+          $ref: '#/components/responses/404NotFound'
+        '422':
+          $ref: '#/components/responses/422UnprocessableEntity'
+    put:
+      tags:
+        - PatientIdentifier
+      summary: Update Patient Identifier
+      description: Updates an existing patient identifier.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdatePatientIdentifierRequest'
+      responses:
+        '200':
+          description: Patient identifier updated successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PatientIdentifier'
+        '401':
+          $ref: '#/components/responses/401Unauthorized'
+        '403':
+          $ref: '#/components/responses/403Forbidden'
+        '404':
+          $ref: '#/components/responses/404NotFound'
+        '422':
+          $ref: '#/components/responses/422UnprocessableEntity'
+
+components:
+  parameters:
+    TenantIdHeader:
+      name: X-Tenant-Id
+      in: header
+      description: The unique identifier for the tenant/organization.
+      required: true
+      schema:
+        type: string
+        format: uuid
+    SkipParam:
+      name: skip
+      in: query
+      description: Number of records to skip for pagination.
+      required: false
+      schema:
+        type: integer
+        minimum: 0
+        default: 0
+    TakeParam:
+      name: take
+      in: query
+      description: Number of records to retrieve for pagination.
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+    IdPathParam:
+      name: id
+      in: path
+      description: The unique identifier of the entity.
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  responses:
+    401Unauthorized:
+      description: Unauthorized. Authentication is required and has failed or has not yet been provided.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    403Forbidden:
+      description: Forbidden. The user does not have the necessary permissions for the resource.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    404NotFound:
+      description: Not Found. The requested resource could not be found.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    422UnprocessableEntity:
+      description: Unprocessable Entity. The request was well-formed but was unable to be followed due to semantic errors.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+  schemas:
+    # ---------------------------------------------------------
+    # PatientProfile Schemas
+    # ----------------

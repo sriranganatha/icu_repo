@@ -38,15 +38,30 @@ public sealed class Soc2ComplianceAgent : IAgent
         try
         {
             // Scan for SOC 2 gaps
+            if (context.ReportProgress is not null)
+                await context.ReportProgress(Type, "Scanning for SOC 2 Type II control gaps — change management (CC8), access controls (CC6), system operations (CC7)");
             findings.AddRange(ScanChangeManagement(context));
             findings.AddRange(ScanAccessControls(context));
             findings.AddRange(ScanSystemOperations(context));
 
+            if (context.ReportProgress is not null)
+                await context.ReportProgress(Type, $"Found {findings.Count} SOC 2 control gaps. AI-generating compliance artifacts...");
+
             // Generate SOC 2 compliance artifacts
+            if (context.ReportProgress is not null)
+                await context.ReportProgress(Type, "AI-generating change management gate — PR approval workflow, test gate enforcement");
             artifacts.Add(await GenerateChangeManagementGate(ct));
+            if (context.ReportProgress is not null)
+                await context.ReportProgress(Type, "AI-generating access review service — quarterly access certifications, orphan account detection");
             artifacts.Add(await GenerateAccessReviewService(ct));
+            if (context.ReportProgress is not null)
+                await context.ReportProgress(Type, "AI-generating incident response plan — severity classification, escalation, post-mortem template");
             artifacts.Add(await GenerateIncidentResponsePlan(ct));
+            if (context.ReportProgress is not null)
+                await context.ReportProgress(Type, "AI-generating backup & DR policy — RPO/RTO targets, failover procedures, restore testing");
             artifacts.Add(await GenerateBackupDrPolicy(ct));
+            if (context.ReportProgress is not null)
+                await context.ReportProgress(Type, "Generating SOC 2 control matrix — mapping CC1-CC9 criteria to implemented controls");
             artifacts.Add(GenerateSoc2ControlMatrix());
 
             context.Artifacts.AddRange(artifacts);

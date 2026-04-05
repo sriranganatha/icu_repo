@@ -1,6 +1,6 @@
 @model HmsAgents.Web.Pages.AgentCardModel
 
-<div class="card h-100 border-start border-3">
+<div class="card h-100 border-start border-3 agent-card-clickable" style="cursor:pointer;" onclick="openAgentDetail('@Model.AgentKey')">
     <div class="card-body pb-2">
         <div class="d-flex justify-content-between align-items-start mb-2">
             <h6 class="card-title mb-0">

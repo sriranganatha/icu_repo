@@ -1,4 +1,5 @@
 using Hms.RevenueService.Contracts;
+using Hms.RevenueService.Data.Entities;
 using Hms.RevenueService.Data.Repositories;
 using Hms.RevenueService.Kafka;
 using Microsoft.Extensions.Logging;
@@ -27,50 +28,67 @@ public sealed class ClaimService : IClaimService
         if (entity is null) return null;
         return new ClaimDto
         {
-            Id = entity.Id, TenantId = entity.TenantId,
-            CreatedAt = entity.CreatedAt
+
         };
     }
 
     public async Task<List<ClaimDto>> ListAsync(int skip, int take, CancellationToken ct = default)
     {
         var items = await _repo.ListAsync(skip, take, ct);
-        return items.Select(e => new ClaimDto
+        return items.Select(entity => new ClaimDto
         {
-            Id = e.Id, TenantId = e.TenantId, CreatedAt = e.CreatedAt
+
         }).ToList();
     }
 
     public async Task<ClaimDto> CreateAsync(CreateClaimRequest request, CancellationToken ct = default)
     {
         _logger.LogInformation("Creating Claim for tenant {Tenant}", request.TenantId);
-        // TODO: map request to entity and save via repository
-        var dto = new ClaimDto
+
+        var entity = new Claim
         {
             Id = Guid.NewGuid().ToString("N"),
-            TenantId = request.TenantId,
-            FacilityId = request.FacilityId,
-            StatusCode = "active",
+
             CreatedAt = DateTimeOffset.UtcNow,
-            UpdatedAt = DateTimeOffset.UtcNow
+            UpdatedAt = DateTimeOffset.UtcNow,
         };
 
-        // Publish domain event to Kafka
+        var saved = await _repo.CreateAsync(entity, ct);
+
         await _events.PublishAsync(new ClaimCreatedEvent
         {
-            EntityId = dto.Id, TenantId = dto.TenantId
+            EntityId = saved.Id, TenantId = saved.TenantId
         }, ct);
 
-        return dto;
+        _logger.LogInformation("Created Claim {Id} for tenant {Tenant}", saved.Id, saved.TenantId);
+
+        return new ClaimDto
+        {
+
+        };
     }
 
     public async Task<ClaimDto> UpdateAsync(UpdateClaimRequest request, CancellationToken ct = default)
     {
         _logger.LogInformation("Updating Claim {Id}", request.Id);
+
+        var entity = await _repo.GetByIdAsync(request.Id, ct)
+            ?? throw new KeyNotFoundException($"Claim {request.Id} not found");
+
+
+        entity.UpdatedAt = DateTimeOffset.UtcNow;
+        entity.UpdatedBy = "system";
+
+        await _repo.UpdateAsync(entity, ct);
+
         await _events.PublishAsync(new ClaimUpdatedEvent
         {
-            EntityId = request.Id, TenantId = string.Empty
+            EntityId = entity.Id, TenantId = entity.TenantId
         }, ct);
-        return new ClaimDto { Id = request.Id, StatusCode = request.StatusCode ?? "active" };
+
+        return new ClaimDto
+        {
+
+        };
     }
 }

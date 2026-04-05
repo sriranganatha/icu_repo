@@ -44,6 +44,8 @@ public sealed class PerformanceAgent : IAgent
 
         try
         {
+            if (context.ReportProgress is not null)
+                await context.ReportProgress(Type, $"Scanning {context.Artifacts.Count} artifacts for async patterns, N+1 queries, pagination, caching...");
             foreach (var artifact in context.Artifacts)
             {
                 ct.ThrowIfCancellationRequested();
@@ -61,11 +63,16 @@ public sealed class PerformanceAgent : IAgent
                 findings.AddRange(optimizations.Item2);
             }
 
+            if (context.ReportProgress is not null)
+                await context.ReportProgress(Type, $"Applied {optimizedCount} in-place optimizations, found {findings.Count} advisory items");
+
             // Cross-cutting: generate caching middleware artifact if services exist
             CodeArtifact? cacheArtifact = null;
             var serviceCount = context.Artifacts.Count(a => a.Layer == ArtifactLayer.Service);
             if (serviceCount > 0)
             {
+                if (context.ReportProgress is not null)
+                    await context.ReportProgress(Type, $"Generating response cache profile for {serviceCount} service artifacts");
                 cacheArtifact = GenerateResponseCacheProfile();
                 context.Artifacts.Add(cacheArtifact);
                 optimizedCount++;

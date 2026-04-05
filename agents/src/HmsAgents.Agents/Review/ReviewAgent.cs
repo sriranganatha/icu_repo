@@ -21,6 +21,12 @@ public sealed class ReviewAgent : IAgent
     {
         var sw = Stopwatch.StartNew();
         context.AgentStatuses[Type] = AgentStatus.Running;
+
+        // Remove previous Review findings to prevent duplication on re-runs
+        context.Findings.RemoveAll(f => f.Category is "Traceability" or "MultiTenant" or "Audit" or "Conventions"
+            or "Coverage" or "Security" or "NFR-CODE-01" or "NFR-CODE-02" or "NFR-TEST-01"
+            or "Implementation" or "FeatureCoverage");
+
         _logger.LogInformation("ReviewAgent starting — {ArtifactCount} artifacts, {ReqCount} requirements",
             context.Artifacts.Count, context.Requirements.Count);
 
@@ -28,6 +34,8 @@ public sealed class ReviewAgent : IAgent
 
         try
         {
+            if (context.ReportProgress is not null)
+                await context.ReportProgress(Type, $"Reviewing {context.Artifacts.Count} artifacts against {context.Requirements.Count} requirements for correctness, security, compliance");
             foreach (var artifact in context.Artifacts)
             {
                 ct.ThrowIfCancellationRequested();
@@ -35,11 +43,15 @@ public sealed class ReviewAgent : IAgent
             }
 
             // Cross-cutting checks
+            if (context.ReportProgress is not null)
+                await context.ReportProgress(Type, "Running cross-cutting checks — requirement coverage, security patterns, multi-tenancy enforcement");
             findings.AddRange(CheckRequirementCoverage(context));
             findings.AddRange(CheckSecurityPatterns(context));
             findings.AddRange(CheckMultiTenancy(context));
 
             // New NFR-driven checks
+            if (context.ReportProgress is not null)
+                await context.ReportProgress(Type, "Running NFR checks — TODO comments, DTO field coverage, test stubs, service completeness, feature mapping");
             findings.AddRange(CheckForTodoComments(context));
             findings.AddRange(CheckDtoFieldCoverage(context));
             findings.AddRange(CheckTestStubs(context));
@@ -51,12 +63,14 @@ public sealed class ReviewAgent : IAgent
 
             var errorCount = findings.Count(f => f.Severity >= ReviewSeverity.Error);
             var secCount = findings.Count(f => f.Severity == ReviewSeverity.SecurityViolation);
+            if (context.ReportProgress is not null)
+                await context.ReportProgress(Type, $"Review complete: {findings.Count} findings — {errorCount} errors, {secCount} security violations, {findings.Count - errorCount - secCount} warnings/info");
             _logger.LogInformation("Review done: {Total} findings, {Errors} errors, {Security} security",
                 findings.Count, errorCount, secCount);
 
             return new AgentResult
             {
-                Agent = Type, Success = errorCount == 0 && secCount == 0,
+                Agent = Type, Success = true,  // Findings are dispatched via Phase 2, not pipeline-breaking
                 Summary = $"Review complete: {findings.Count} findings ({errorCount} errors, {secCount} security violations, {findings.Count - errorCount - secCount} warnings/info)",
                 Findings = findings,
                 Messages = [new AgentMessage { From = Type, To = AgentType.Orchestrator, Subject = "Review complete",

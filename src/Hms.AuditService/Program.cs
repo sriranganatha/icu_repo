@@ -3,7 +3,6 @@ using Hms.SharedKernel.Middleware;
 using Microsoft.EntityFrameworkCore;
 using Hms.AuditService.Data;
 using Hms.AuditService.Data.Repositories;
-using Hms.AuditService.Endpoints;
 using Hms.AuditService.Kafka;
 using Hms.AuditService.Services;
 

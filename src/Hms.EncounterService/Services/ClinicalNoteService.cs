@@ -1,4 +1,5 @@
 using Hms.EncounterService.Contracts;
+using Hms.EncounterService.Data.Entities;
 using Hms.EncounterService.Data.Repositories;
 using Hms.EncounterService.Kafka;
 using Microsoft.Extensions.Logging;
@@ -27,50 +28,67 @@ public sealed class ClinicalNoteService : IClinicalNoteService
         if (entity is null) return null;
         return new ClinicalNoteDto
         {
-            Id = entity.Id, TenantId = entity.TenantId,
-            CreatedAt = entity.CreatedAt
+
         };
     }
 
     public async Task<List<ClinicalNoteDto>> ListAsync(int skip, int take, CancellationToken ct = default)
     {
         var items = await _repo.ListAsync(skip, take, ct);
-        return items.Select(e => new ClinicalNoteDto
+        return items.Select(entity => new ClinicalNoteDto
         {
-            Id = e.Id, TenantId = e.TenantId, CreatedAt = e.CreatedAt
+
         }).ToList();
     }
 
     public async Task<ClinicalNoteDto> CreateAsync(CreateClinicalNoteRequest request, CancellationToken ct = default)
     {
         _logger.LogInformation("Creating ClinicalNote for tenant {Tenant}", request.TenantId);
-        // TODO: map request to entity and save via repository
-        var dto = new ClinicalNoteDto
+
+        var entity = new ClinicalNote
         {
             Id = Guid.NewGuid().ToString("N"),
-            TenantId = request.TenantId,
-            FacilityId = request.FacilityId,
-            StatusCode = "active",
+
             CreatedAt = DateTimeOffset.UtcNow,
-            UpdatedAt = DateTimeOffset.UtcNow
+            UpdatedAt = DateTimeOffset.UtcNow,
         };
 
-        // Publish domain event to Kafka
+        var saved = await _repo.CreateAsync(entity, ct);
+
         await _events.PublishAsync(new ClinicalNoteCreatedEvent
         {
-            EntityId = dto.Id, TenantId = dto.TenantId
+            EntityId = saved.Id, TenantId = saved.TenantId
         }, ct);
 
-        return dto;
+        _logger.LogInformation("Created ClinicalNote {Id} for tenant {Tenant}", saved.Id, saved.TenantId);
+
+        return new ClinicalNoteDto
+        {
+
+        };
     }
 
     public async Task<ClinicalNoteDto> UpdateAsync(UpdateClinicalNoteRequest request, CancellationToken ct = default)
     {
         _logger.LogInformation("Updating ClinicalNote {Id}", request.Id);
+
+        var entity = await _repo.GetByIdAsync(request.Id, ct)
+            ?? throw new KeyNotFoundException($"ClinicalNote {request.Id} not found");
+
+
+        entity.UpdatedAt = DateTimeOffset.UtcNow;
+        entity.UpdatedBy = "system";
+
+        await _repo.UpdateAsync(entity, ct);
+
         await _events.PublishAsync(new ClinicalNoteUpdatedEvent
         {
-            EntityId = request.Id, TenantId = string.Empty
+            EntityId = entity.Id, TenantId = entity.TenantId
         }, ct);
-        return new ClinicalNoteDto { Id = request.Id, StatusCode = request.StatusCode ?? "active" };
+
+        return new ClinicalNoteDto
+        {
+
+        };
     }
 }
