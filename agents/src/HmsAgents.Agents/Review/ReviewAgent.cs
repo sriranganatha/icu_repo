@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using HmsAgents.Agents.Requirements;
 using HmsAgents.Core.Enums;
 using HmsAgents.Core.Interfaces;
 using HmsAgents.Core.Models;
@@ -12,7 +13,7 @@ public sealed class ReviewAgent : IAgent
 
     public AgentType Type => AgentType.Review;
     public string Name => "Review Agent";
-    public string Description => "Reviews generated code against requirements for correctness, security, compliance, and traceability.";
+    public string Description => "Reviews generated code against requirements for correctness, security, compliance, feature coverage, and NFR conformance.";
 
     public ReviewAgent(ILogger<ReviewAgent> logger) => _logger = logger;
 
@@ -38,17 +39,28 @@ public sealed class ReviewAgent : IAgent
             findings.AddRange(CheckSecurityPatterns(context));
             findings.AddRange(CheckMultiTenancy(context));
 
+            // New NFR-driven checks
+            findings.AddRange(CheckForTodoComments(context));
+            findings.AddRange(CheckDtoFieldCoverage(context));
+            findings.AddRange(CheckTestStubs(context));
+            findings.AddRange(CheckServiceImplementationCompleteness(context));
+            findings.AddRange(CheckFeatureMappingCoverage(context));
+
             context.Findings.AddRange(findings);
             context.AgentStatuses[Type] = AgentStatus.Completed;
 
             var errorCount = findings.Count(f => f.Severity >= ReviewSeverity.Error);
+            var secCount = findings.Count(f => f.Severity == ReviewSeverity.SecurityViolation);
+            _logger.LogInformation("Review done: {Total} findings, {Errors} errors, {Security} security",
+                findings.Count, errorCount, secCount);
+
             return new AgentResult
             {
-                Agent = Type, Success = errorCount == 0,
-                Summary = $"Review complete: {findings.Count} findings ({errorCount} errors, {findings.Count - errorCount} warnings/info)",
+                Agent = Type, Success = errorCount == 0 && secCount == 0,
+                Summary = $"Review complete: {findings.Count} findings ({errorCount} errors, {secCount} security violations, {findings.Count - errorCount - secCount} warnings/info)",
                 Findings = findings,
                 Messages = [new AgentMessage { From = Type, To = AgentType.Orchestrator, Subject = "Review complete",
-                    Body = $"{findings.Count} findings. {errorCount} blocking errors." }],
+                    Body = $"{findings.Count} findings. {errorCount} blocking errors, {secCount} security violations. Iteration: {context.ReviewIteration}" }],
                 Duration = sw.Elapsed
             };
         }
@@ -206,6 +218,212 @@ public sealed class ReviewAgent : IAgent
                 Message = "No EF Core global query filter for tenant isolation found.",
                 Suggestion = "DbContext.OnModelCreating should set HasQueryFilter(e => e.TenantId == _tenantId) on all entities."
             });
+        }
+
+        return findings;
+    }
+
+    // ─── NFR-CODE-01: No TODO comments in generated code ────────────────────
+
+    private static List<ReviewFinding> CheckForTodoComments(AgentContext context)
+    {
+        var findings = new List<ReviewFinding>();
+
+        foreach (var artifact in context.Artifacts.Where(a =>
+            a.Layer is ArtifactLayer.Service or ArtifactLayer.Repository or ArtifactLayer.Dto))
+        {
+            var content = artifact.Content;
+            var todoIdx = content.IndexOf("// TODO", StringComparison.OrdinalIgnoreCase);
+            if (todoIdx >= 0)
+            {
+                var line = content[..todoIdx].Count(c => c == '\n') + 1;
+                findings.Add(new ReviewFinding
+                {
+                    ArtifactId = artifact.Id,
+                    FilePath = artifact.RelativePath,
+                    Severity = ReviewSeverity.Error,
+                    Category = "NFR-CODE-01",
+                    Message = $"TODO comment found at line ~{line} in '{artifact.FileName}'. Generated code must be complete.",
+                    Suggestion = "ServiceLayerAgent must generate complete implementation using ParsedDomainModel entity fields."
+                });
+            }
+        }
+
+        return findings;
+    }
+
+    // ─── NFR-CODE-02: DTO field coverage against entity fields ──────────────
+
+    private static List<ReviewFinding> CheckDtoFieldCoverage(AgentContext context)
+    {
+        var findings = new List<ReviewFinding>();
+        var model = context.DomainModel;
+        if (model is null) return findings;
+
+        foreach (var entity in model.Entities.Where(e => e.Fields.Count > 0))
+        {
+            var dtoArtifact = context.Artifacts.FirstOrDefault(a =>
+                a.Layer == ArtifactLayer.Dto &&
+                a.FileName == $"{entity.Name}Dto.cs");
+
+            if (dtoArtifact is null)
+            {
+                findings.Add(new ReviewFinding
+                {
+                    Severity = ReviewSeverity.Error,
+                    Category = "NFR-CODE-02",
+                    Message = $"No DTO artifact found for entity '{entity.Name}'.",
+                    Suggestion = $"ServiceLayerAgent must generate {entity.Name}Dto.cs"
+                });
+                continue;
+            }
+
+            // Check that non-navigation fields are present in the DTO
+            var nonNavFields = entity.Fields.Where(f => !f.IsNavigation).ToList();
+            var missingFields = nonNavFields
+                .Where(f => !dtoArtifact.Content.Contains(f.Name))
+                .Select(f => f.Name)
+                .ToList();
+
+            if (missingFields.Count > 0)
+            {
+                findings.Add(new ReviewFinding
+                {
+                    ArtifactId = dtoArtifact.Id,
+                    FilePath = dtoArtifact.RelativePath,
+                    Severity = missingFields.Count > nonNavFields.Count / 2
+                        ? ReviewSeverity.Error : ReviewSeverity.Warning,
+                    Category = "NFR-CODE-02",
+                    Message = $"DTO '{entity.Name}Dto' is missing {missingFields.Count}/{nonNavFields.Count} fields: {string.Join(", ", missingFields.Take(5))}",
+                    Suggestion = "DTO must map all entity fields. Use ParsedDomainModel fields to generate complete DTOs."
+                });
+            }
+        }
+
+        return findings;
+    }
+
+    // ─── NFR-TEST-01: No stub tests ─────────────────────────────────────────
+
+    private static List<ReviewFinding> CheckTestStubs(AgentContext context)
+    {
+        var findings = new List<ReviewFinding>();
+
+        foreach (var artifact in context.Artifacts.Where(a => a.Layer == ArtifactLayer.Test))
+        {
+            if (artifact.Content.Contains("Assert.True(true,", StringComparison.Ordinal))
+            {
+                findings.Add(new ReviewFinding
+                {
+                    ArtifactId = artifact.Id,
+                    FilePath = artifact.RelativePath,
+                    Severity = ReviewSeverity.Error,
+                    Category = "NFR-TEST-01",
+                    Message = $"Stub assertion 'Assert.True(true, ...)' found in '{artifact.FileName}'. Tests must have real logic.",
+                    Suggestion = "TestingAgent must generate Moq-based tests with real assertions against service behavior."
+                });
+            }
+
+            if (artifact.Content.Contains("// TODO", StringComparison.OrdinalIgnoreCase))
+            {
+                findings.Add(new ReviewFinding
+                {
+                    ArtifactId = artifact.Id,
+                    FilePath = artifact.RelativePath,
+                    Severity = ReviewSeverity.Error,
+                    Category = "NFR-TEST-01",
+                    Message = $"TODO found in test '{artifact.FileName}'. Tests must be fully implemented.",
+                    Suggestion = "Remove TODO comments and implement the test logic."
+                });
+            }
+        }
+
+        return findings;
+    }
+
+    // ─── Service implementation completeness ────────────────────────────────
+
+    private static List<ReviewFinding> CheckServiceImplementationCompleteness(AgentContext context)
+    {
+        var findings = new List<ReviewFinding>();
+
+        foreach (var artifact in context.Artifacts.Where(a =>
+            a.Layer == ArtifactLayer.Service && !a.FileName.StartsWith("I")))
+        {
+            // Check CreateAsync actually calls repository
+            if (artifact.Content.Contains("CreateAsync") &&
+                !artifact.Content.Contains("_repo.CreateAsync"))
+            {
+                findings.Add(new ReviewFinding
+                {
+                    ArtifactId = artifact.Id,
+                    FilePath = artifact.RelativePath,
+                    Severity = ReviewSeverity.Error,
+                    Category = "Implementation",
+                    Message = $"Service '{artifact.FileName}' CreateAsync does not persist via repository.",
+                    Suggestion = "CreateAsync must call _repo.CreateAsync(entity, ct) and return mapped DTO."
+                });
+            }
+
+            // Check UpdateAsync loads entity before modifying
+            if (artifact.Content.Contains("UpdateAsync") &&
+                !artifact.Content.Contains("_repo.GetByIdAsync"))
+            {
+                findings.Add(new ReviewFinding
+                {
+                    ArtifactId = artifact.Id,
+                    FilePath = artifact.RelativePath,
+                    Severity = ReviewSeverity.Error,
+                    Category = "Implementation",
+                    Message = $"Service '{artifact.FileName}' UpdateAsync does not load entity from repository before modifying.",
+                    Suggestion = "UpdateAsync must load entity via _repo.GetByIdAsync, apply changes, then save."
+                });
+            }
+        }
+
+        return findings;
+    }
+
+    // ─── Feature mapping coverage ───────────────────────────────────────────
+
+    private static List<ReviewFinding> CheckFeatureMappingCoverage(AgentContext context)
+    {
+        var findings = new List<ReviewFinding>();
+        var model = context.DomainModel;
+        if (model is null) return findings;
+
+        var allTracedFeatures = context.Artifacts
+            .SelectMany(a => a.TracedRequirementIds)
+            .ToHashSet();
+
+        foreach (var feature in model.FeatureMappings)
+        {
+            if (!allTracedFeatures.Contains(feature.FeatureId))
+            {
+                findings.Add(new ReviewFinding
+                {
+                    Severity = ReviewSeverity.Warning,
+                    Category = "FeatureCoverage",
+                    Message = $"Feature '{feature.FeatureId}' ({feature.FeatureName}) has no traced artifacts.",
+                    Suggestion = $"Services: {string.Join(", ", feature.ServiceNames)}; Entities: {string.Join(", ", feature.EntityNames)}"
+                });
+            }
+
+            // Check that test artifacts also trace the feature
+            var testArtifacts = context.Artifacts.Where(a =>
+                a.Layer == ArtifactLayer.Test &&
+                a.TracedRequirementIds.Contains(feature.FeatureId)).ToList();
+
+            if (testArtifacts.Count == 0)
+            {
+                findings.Add(new ReviewFinding
+                {
+                    Severity = ReviewSeverity.Warning,
+                    Category = "TestCoverage",
+                    Message = $"Feature '{feature.FeatureId}' ({feature.FeatureName}) has no traced test artifacts.",
+                    Suggestion = "TestingAgent should generate tests tagged with this feature ID."
+                });
+            }
         }
 
         return findings;

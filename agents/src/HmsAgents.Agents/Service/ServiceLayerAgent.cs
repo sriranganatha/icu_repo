@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using HmsAgents.Agents.Requirements;
 using HmsAgents.Core.Enums;
 using HmsAgents.Core.Interfaces;
 using HmsAgents.Core.Models;
@@ -8,7 +9,8 @@ namespace HmsAgents.Agents.Service;
 
 /// <summary>
 /// Generates per-microservice DTOs, service interfaces, implementations, and
-/// Kafka integration events — each service owns its own contract surface.
+/// Kafka integration events. Reads entity field definitions from DatabaseAgent
+/// artifacts via ParsedDomainModel to produce COMPLETE implementations.
 /// </summary>
 public sealed class ServiceLayerAgent : IAgent
 {
@@ -16,7 +18,7 @@ public sealed class ServiceLayerAgent : IAgent
 
     public AgentType Type => AgentType.ServiceLayer;
     public string Name => "Service Layer Agent";
-    public string Description => "Generates per-microservice DTOs, service interfaces, implementations, and Kafka integration events.";
+    public string Description => "Generates per-microservice DTOs, service interfaces, implementations, and Kafka integration events — driven by parsed domain model.";
 
     public ServiceLayerAgent(ILogger<ServiceLayerAgent> logger) => _logger = logger;
 
@@ -24,34 +26,40 @@ public sealed class ServiceLayerAgent : IAgent
     {
         var sw = Stopwatch.StartNew();
         context.AgentStatuses[Type] = AgentStatus.Running;
-        _logger.LogInformation("ServiceLayerAgent starting — microservice-aligned generation");
+        _logger.LogInformation("ServiceLayerAgent starting — domain-model-driven generation");
 
         var artifacts = new List<CodeArtifact>();
 
         try
         {
+            // Re-build domain model now that DatabaseAgent has produced entity artifacts
+            context.DomainModel = EntityFieldExtractor.BuildDomainModel(context.Artifacts);
+            var model = context.DomainModel;
+
+            _logger.LogInformation("Domain model loaded: {Count} entities with field definitions",
+                model.Entities.Count(e => e.Fields.Count > 0));
+
             foreach (var svc in MicroserviceCatalog.All)
             {
                 _logger.LogInformation("Generating service layer for {Service}", svc.Name);
 
-                foreach (var entity in svc.Entities)
+                foreach (var entityName in svc.Entities)
                 {
-                    artifacts.Add(GenerateDto(svc, entity));
-                    artifacts.Add(GenerateServiceInterface(svc, entity));
-                    artifacts.Add(GenerateServiceImpl(svc, entity));
+                    var parsed = model.Entities.FirstOrDefault(e =>
+                        e.Name == entityName && e.ServiceName == svc.Name);
+                    var fields = parsed?.Fields ?? [];
+                    var featureTags = parsed?.FeatureTags ?? [];
+
+                    artifacts.Add(GenerateDto(svc, entityName, fields, featureTags));
+                    artifacts.Add(GenerateServiceInterface(svc, entityName, featureTags));
+                    artifacts.Add(GenerateServiceImpl(svc, entityName, fields, featureTags));
                 }
 
-                // Per-service Kafka integration events
                 artifacts.Add(GenerateKafkaEvents(svc));
-
-                // Per-service Kafka producer
                 artifacts.Add(GenerateKafkaProducer(svc));
             }
 
-            // Shared Kafka consumer base
             artifacts.Add(GenerateKafkaConsumerBase());
-
-            // Shared: Kafka topic catalog
             artifacts.Add(GenerateKafkaTopicCatalog());
 
             context.Artifacts.AddRange(artifacts);
@@ -61,11 +69,11 @@ public sealed class ServiceLayerAgent : IAgent
             return new AgentResult
             {
                 Agent = Type, Success = true,
-                Summary = $"Generated {artifacts.Count} service-layer artifacts across {MicroserviceCatalog.All.Length} microservices",
+                Summary = $"Generated {artifacts.Count} service-layer artifacts across {MicroserviceCatalog.All.Length} microservices (domain-model-driven, complete implementations)",
                 Artifacts = artifacts,
                 Messages = [new AgentMessage { From = Type, To = AgentType.Orchestrator,
                     Subject = "Service layer ready",
-                    Body = $"{artifacts.Count} artifacts: per-service DTOs, interfaces, impls, Kafka producers/events." }],
+                    Body = $"{artifacts.Count} artifacts: complete DTOs with full field mapping, service implementations with repo persistence, Kafka event publishing." }],
                 Duration = sw.Elapsed
             };
         }
@@ -77,51 +85,75 @@ public sealed class ServiceLayerAgent : IAgent
         }
     }
 
-    // ─── DTO ────────────────────────────────────────────────────────────────
+    // ─── DTO (domain-model-driven — maps ALL entity fields) ────────────────
 
-    private static CodeArtifact GenerateDto(MicroserviceDefinition svc, string entity) => new()
+    private static CodeArtifact GenerateDto(MicroserviceDefinition svc, string entity,
+        List<EntityField> fields, List<string> featureTags)
     {
-        Layer = ArtifactLayer.Dto,
-        RelativePath = $"{svc.ProjectName}/Contracts/{entity}Dto.cs",
-        FileName = $"{entity}Dto.cs",
-        Namespace = $"{svc.Namespace}.Contracts",
-        ProducedBy = AgentType.ServiceLayer,
-        Content = $$"""
-            namespace {{svc.Namespace}}.Contracts;
+        // DTO fields: all non-navigation, non-audit-write fields
+        var dtoFields = fields
+            .Where(f => !f.IsNavigation)
+            .Select(f => $"    public {f.Type} {f.Name} {{ get; init; }}{DefaultInitializer(f)}")
+            .ToList();
 
-            public sealed record {{entity}}Dto
-            {
-                public string Id { get; init; } = string.Empty;
-                public string TenantId { get; init; } = string.Empty;
-                public string FacilityId { get; init; } = string.Empty;
-                public string StatusCode { get; init; } = string.Empty;
-                public DateTimeOffset CreatedAt { get; init; }
-                public DateTimeOffset UpdatedAt { get; init; }
-            }
+        // Create request: required fields minus auto-generated ones (Id, audit timestamps)
+        var autoFields = new HashSet<string> { "Id", "CreatedAt", "UpdatedAt", "CreatedBy", "UpdatedBy", "VersionNo", "StatusCode", "ClassificationCode" };
+        var createFields = fields
+            .Where(f => !f.IsNavigation && !autoFields.Contains(f.Name) && (f.IsRequired || !f.IsNullable))
+            .Select(f => $"    public required {f.Type.TrimEnd('?')} {f.Name} {{ get; init; }}")
+            .ToList();
+        // Always need TenantId in create
+        if (!createFields.Any(f => f.Contains("TenantId")))
+            createFields.Insert(0, "    public required string TenantId { get; init; }");
 
-            public sealed record Create{{entity}}Request
-            {
-                public required string TenantId { get; init; }
-                public required string FacilityId { get; init; }
-            }
+        // Update request: Id + all mutable fields as nullable
+        var immutableFields = new HashSet<string> { "Id", "TenantId", "CreatedAt", "CreatedBy", "RegionId" };
+        var updateFields = fields
+            .Where(f => !f.IsNavigation && !f.IsAuditField && !immutableFields.Contains(f.Name) && !f.IsKey)
+            .Select(f => $"    public {MakeNullable(f.Type)} {f.Name} {{ get; init; }}")
+            .ToList();
 
-            public sealed record Update{{entity}}Request
-            {
-                public required string Id { get; init; }
-                public string? StatusCode { get; init; }
-            }
-            """
-    };
+        return new CodeArtifact
+        {
+            Layer = ArtifactLayer.Dto,
+            RelativePath = $"{svc.ProjectName}/Contracts/{entity}Dto.cs",
+            FileName = $"{entity}Dto.cs",
+            Namespace = $"{svc.Namespace}.Contracts",
+            ProducedBy = AgentType.ServiceLayer,
+            TracedRequirementIds = featureTags,
+            Content = $$"""
+                namespace {{svc.Namespace}}.Contracts;
+
+                public sealed record {{entity}}Dto
+                {
+                {{string.Join("\n", dtoFields)}}
+                }
+
+                public sealed record Create{{entity}}Request
+                {
+                {{string.Join("\n", createFields)}}
+                }
+
+                public sealed record Update{{entity}}Request
+                {
+                    public required string Id { get; init; }
+                {{string.Join("\n", updateFields)}}
+                }
+                """
+        };
+    }
 
     // ─── Service Interface ──────────────────────────────────────────────────
 
-    private static CodeArtifact GenerateServiceInterface(MicroserviceDefinition svc, string entity) => new()
+    private static CodeArtifact GenerateServiceInterface(MicroserviceDefinition svc, string entity,
+        List<string> featureTags) => new()
     {
         Layer = ArtifactLayer.Service,
         RelativePath = $"{svc.ProjectName}/Services/I{entity}Service.cs",
         FileName = $"I{entity}Service.cs",
         Namespace = $"{svc.Namespace}.Services",
         ProducedBy = AgentType.ServiceLayer,
+        TracedRequirementIds = featureTags,
         Content = $$"""
             using {{svc.Namespace}}.Contracts;
 
@@ -137,93 +169,155 @@ public sealed class ServiceLayerAgent : IAgent
             """
     };
 
-    // ─── Service Implementation ─────────────────────────────────────────────
+    // ─── Service Implementation (COMPLETE — no TODOs) ───────────────────────
 
-    private static CodeArtifact GenerateServiceImpl(MicroserviceDefinition svc, string entity) => new()
+    private static CodeArtifact GenerateServiceImpl(MicroserviceDefinition svc, string entity,
+        List<EntityField> fields, List<string> featureTags)
     {
-        Layer = ArtifactLayer.Service,
-        RelativePath = $"{svc.ProjectName}/Services/{entity}Service.cs",
-        FileName = $"{entity}Service.cs",
-        Namespace = $"{svc.Namespace}.Services",
-        ProducedBy = AgentType.ServiceLayer,
-        Content = $$"""
-            using {{svc.Namespace}}.Contracts;
-            using {{svc.Namespace}}.Data.Repositories;
-            using {{svc.Namespace}}.Kafka;
-            using Microsoft.Extensions.Logging;
+        // Build entity→DTO mapping (all non-navigation fields)
+        var toDtoMap = fields
+            .Where(f => !f.IsNavigation)
+            .Select(f => $"            {f.Name} = entity.{f.Name},")
+            .ToList();
 
-            namespace {{svc.Namespace}}.Services;
-
-            public sealed class {{entity}}Service : I{{entity}}Service
+        // Build request→entity mapping for Create (required + defaulted fields)
+        var autoFields = new HashSet<string> { "Id", "CreatedAt", "UpdatedAt", "VersionNo" };
+        var createMap = fields
+            .Where(f => !f.IsNavigation && !autoFields.Contains(f.Name))
+            .Select(f =>
             {
-                private readonly I{{entity}}Repository _repo;
-                private readonly {{svc.Name}}EventProducer _events;
-                private readonly ILogger<{{entity}}Service> _logger;
+                if (f.Name == "StatusCode") return $"            {f.Name} = \"active\",";
+                if (f.Name == "ClassificationCode") return $"            {f.Name} = \"{DefaultClassification(svc)}\",";
+                if (f.Name == "CreatedBy") return $"            {f.Name} = \"system\",";
+                if (f.Name == "UpdatedBy") return $"            {f.Name} = \"system\",";
+                if (f.IsRequired || !f.IsNullable)
+                    return $"            {f.Name} = request.{f.Name},";
+                return $"            {f.Name} = request.{f.Name},";
+            })
+            .Where(m => !string.IsNullOrEmpty(m))
+            .ToList();
 
-                public {{entity}}Service(
-                    I{{entity}}Repository repo,
-                    {{svc.Name}}EventProducer events,
-                    ILogger<{{entity}}Service> logger)
+        // Build update mapping (nullable fields applied if non-null)
+        var immutableFields = new HashSet<string> { "Id", "TenantId", "CreatedAt", "CreatedBy", "RegionId" };
+        var updateApply = fields
+            .Where(f => !f.IsNavigation && !f.IsAuditField && !immutableFields.Contains(f.Name) && !f.IsKey)
+            .Select(f => $"            if (request.{f.Name} is not null) entity.{f.Name} = request.{f.Name}{(f.IsNullable ? "" : "!")};" +
+                         (f.Type.Contains("?") ? "" : ""))
+            .ToList();
+
+        return new CodeArtifact
+        {
+            Layer = ArtifactLayer.Service,
+            RelativePath = $"{svc.ProjectName}/Services/{entity}Service.cs",
+            FileName = $"{entity}Service.cs",
+            Namespace = $"{svc.Namespace}.Services",
+            ProducedBy = AgentType.ServiceLayer,
+            TracedRequirementIds = featureTags,
+            Content = $$"""
+                using {{svc.Namespace}}.Contracts;
+                using {{svc.Namespace}}.Data.Entities;
+                using {{svc.Namespace}}.Data.Repositories;
+                using {{svc.Namespace}}.Kafka;
+                using Microsoft.Extensions.Logging;
+
+                namespace {{svc.Namespace}}.Services;
+
+                public sealed class {{entity}}Service : I{{entity}}Service
                 {
-                    _repo = repo;
-                    _events = events;
-                    _logger = logger;
-                }
+                    private readonly I{{entity}}Repository _repo;
+                    private readonly {{svc.Name}}EventProducer _events;
+                    private readonly ILogger<{{entity}}Service> _logger;
 
-                public async Task<{{entity}}Dto?> GetByIdAsync(string id, CancellationToken ct = default)
-                {
-                    var entity = await _repo.GetByIdAsync(id, ct);
-                    if (entity is null) return null;
-                    return new {{entity}}Dto
+                    public {{entity}}Service(
+                        I{{entity}}Repository repo,
+                        {{svc.Name}}EventProducer events,
+                        ILogger<{{entity}}Service> logger)
                     {
-                        Id = entity.Id, TenantId = entity.TenantId,
-                        CreatedAt = entity.CreatedAt
-                    };
-                }
+                        _repo = repo;
+                        _events = events;
+                        _logger = logger;
+                    }
 
-                public async Task<List<{{entity}}Dto>> ListAsync(int skip, int take, CancellationToken ct = default)
-                {
-                    var items = await _repo.ListAsync(skip, take, ct);
-                    return items.Select(e => new {{entity}}Dto
+                    public async Task<{{entity}}Dto?> GetByIdAsync(string id, CancellationToken ct = default)
                     {
-                        Id = e.Id, TenantId = e.TenantId, CreatedAt = e.CreatedAt
-                    }).ToList();
-                }
+                        var entity = await _repo.GetByIdAsync(id, ct);
+                        if (entity is null) return null;
+                        return new {{entity}}Dto
+                        {
+                {{string.Join("\n", toDtoMap)}}
+                        };
+                    }
 
-                public async Task<{{entity}}Dto> CreateAsync(Create{{entity}}Request request, CancellationToken ct = default)
-                {
-                    _logger.LogInformation("Creating {{entity}} for tenant {Tenant}", request.TenantId);
-                    // TODO: map request to entity and save via repository
-                    var dto = new {{entity}}Dto
+                    public async Task<List<{{entity}}Dto>> ListAsync(int skip, int take, CancellationToken ct = default)
                     {
-                        Id = Guid.NewGuid().ToString("N"),
-                        TenantId = request.TenantId,
-                        FacilityId = request.FacilityId,
-                        StatusCode = "active",
-                        CreatedAt = DateTimeOffset.UtcNow,
-                        UpdatedAt = DateTimeOffset.UtcNow
-                    };
+                        var items = await _repo.ListAsync(skip, take, ct);
+                        return items.Select(entity => new {{entity}}Dto
+                        {
+                {{string.Join("\n", toDtoMap)}}
+                        }).ToList();
+                    }
 
-                    // Publish domain event to Kafka
-                    await _events.PublishAsync(new {{entity}}CreatedEvent
+                    public async Task<{{entity}}Dto> CreateAsync(Create{{entity}}Request request, CancellationToken ct = default)
                     {
-                        EntityId = dto.Id, TenantId = dto.TenantId
-                    }, ct);
+                        _logger.LogInformation("Creating {{entity}} for tenant {Tenant}", request.TenantId);
 
-                    return dto;
-                }
+                        var entity = new {{entity}}
+                        {
+                            Id = Guid.NewGuid().ToString("N"),
+                {{string.Join("\n", createMap)}}
+                            CreatedAt = DateTimeOffset.UtcNow,
+                            UpdatedAt = DateTimeOffset.UtcNow,
+                        };
 
-                public async Task<{{entity}}Dto> UpdateAsync(Update{{entity}}Request request, CancellationToken ct = default)
-                {
-                    _logger.LogInformation("Updating {{entity}} {Id}", request.Id);
-                    await _events.PublishAsync(new {{entity}}UpdatedEvent
+                        var saved = await _repo.CreateAsync(entity, ct);
+
+                        await _events.PublishAsync(new {{entity}}CreatedEvent
+                        {
+                            EntityId = saved.Id, TenantId = saved.TenantId
+                        }, ct);
+
+                        _logger.LogInformation("Created {{entity}} {Id} for tenant {Tenant}", saved.Id, saved.TenantId);
+
+                        return new {{entity}}Dto
+                        {
+                {{string.Join("\n", toDtoMap.Select(m => m.Replace("entity.", "saved.")))}}
+                        };
+                    }
+
+                    public async Task<{{entity}}Dto> UpdateAsync(Update{{entity}}Request request, CancellationToken ct = default)
                     {
-                        EntityId = request.Id, TenantId = string.Empty
-                    }, ct);
-                    return new {{entity}}Dto { Id = request.Id, StatusCode = request.StatusCode ?? "active" };
+                        _logger.LogInformation("Updating {{entity}} {Id}", request.Id);
+
+                        var entity = await _repo.GetByIdAsync(request.Id, ct)
+                            ?? throw new KeyNotFoundException($"{{entity}} {request.Id} not found");
+
+                {{string.Join("\n", updateApply)}}
+                        entity.UpdatedAt = DateTimeOffset.UtcNow;
+                        entity.UpdatedBy = "system";
+
+                        await _repo.UpdateAsync(entity, ct);
+
+                        await _events.PublishAsync(new {{entity}}UpdatedEvent
+                        {
+                            EntityId = entity.Id, TenantId = entity.TenantId
+                        }, ct);
+
+                        return new {{entity}}Dto
+                        {
+                {{string.Join("\n", toDtoMap)}}
+                        };
+                    }
                 }
-            }
-            """
+                """
+        };
+    }
+
+    private static string DefaultClassification(MicroserviceDefinition svc) => svc.ShortName switch
+    {
+        "revenue" => "financial_sensitive",
+        "audit" => "audit_immutable",
+        "ai" => "ai_evidence",
+        _ => "clinical_restricted"
     };
 
     // ─── Kafka Integration Events ───────────────────────────────────────────
@@ -411,5 +505,18 @@ public sealed class ServiceLayerAgent : IAgent
             sb.Append(char.ToLowerInvariant(s[i]));
         }
         return sb.ToString();
+    }
+
+    private static string DefaultInitializer(EntityField f)
+    {
+        if (f.DefaultValue is not null) return $" = {f.DefaultValue};";
+        if (f.Type == "string" || f.Type == "string?") return " = string.Empty;";
+        return "";
+    }
+
+    private static string MakeNullable(string type)
+    {
+        if (type.EndsWith('?')) return type;
+        return type + "?";
     }
 }

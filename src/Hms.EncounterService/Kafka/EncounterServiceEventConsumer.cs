@@ -21,7 +21,7 @@ public sealed class EncounterServiceEventConsumer : IEventDispatcher
 
         return topic switch
         {
-            KafkaTopics.For("patientservice") => HandlePatientServiceEvent(eventType, key, value),
+            KafkaTopics.Patient => HandlePatientServiceEvent(eventType, key, value),
             _ => Task.CompletedTask
         };
     }

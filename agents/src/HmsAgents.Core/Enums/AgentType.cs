@@ -10,5 +10,14 @@ public enum AgentType
     Integration,
     Review,
     Testing,
-    Supervisor
+    Supervisor,
+    BugFix,
+    Performance,
+    Security,
+    HipaaCompliance,
+    Soc2Compliance,
+    AccessControl,
+    Observability,
+    Infrastructure,
+    ApiDocumentation
 }

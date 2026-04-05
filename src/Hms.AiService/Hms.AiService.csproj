@@ -9,4 +9,7 @@
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="8.0.4" />
     <PackageReference Include="Confluent.Kafka" Version="2.4.0" />
   </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Hms.SharedKernel\Hms.SharedKernel.csproj" />
+  </ItemGroup>
 </Project>

@@ -8,7 +8,7 @@ public sealed class CodeArtifact
     public ArtifactLayer Layer { get; init; }
     public string RelativePath { get; init; } = string.Empty;
     public string FileName { get; init; } = string.Empty;
-    public string Content { get; init; } = string.Empty;
+    public string Content { get; set; } = string.Empty;
     public string Namespace { get; init; } = string.Empty;
     public AgentType ProducedBy { get; init; }
     public List<string> TracedRequirementIds { get; init; } = [];

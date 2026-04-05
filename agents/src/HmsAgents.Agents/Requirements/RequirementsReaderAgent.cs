@@ -31,15 +31,21 @@ public sealed class RequirementsReaderAgent : IAgent
         {
             var requirements = await _reader.ReadAllAsync(context.RequirementsBasePath, ct);
             context.Requirements = requirements;
+
+            // Build initial domain model from MicroserviceCatalog (entity artifacts not yet available)
+            // This will be enriched after DatabaseAgent runs by calling EnrichDomainModel()
+            context.DomainModel = EntityFieldExtractor.BuildDomainModel(context.Artifacts);
+
             context.AgentStatuses[Type] = AgentStatus.Completed;
 
-            _logger.LogInformation("RequirementsReaderAgent completed — {Count} requirements extracted", requirements.Count);
+            _logger.LogInformation("RequirementsReaderAgent completed — {Count} requirements, {Ent} entities in domain model",
+                requirements.Count, context.DomainModel.Entities.Count);
 
             return new AgentResult
             {
                 Agent = Type,
                 Success = true,
-                Summary = $"Extracted {requirements.Count} requirements from {context.RequirementsBasePath}",
+                Summary = $"Extracted {requirements.Count} requirements, built domain model with {context.DomainModel.Entities.Count} entities",
                 Messages =
                 [
                     new AgentMessage
@@ -47,7 +53,7 @@ public sealed class RequirementsReaderAgent : IAgent
                         From = Type,
                         To = AgentType.Orchestrator,
                         Subject = "Requirements ready",
-                        Body = $"{requirements.Count} structured requirements available for downstream agents."
+                        Body = $"{requirements.Count} structured requirements + domain model with {context.DomainModel.Entities.Count} entities, {context.DomainModel.ApiEndpoints.Count} endpoints, {context.DomainModel.DomainEvents.Count} events."
                     }
                 ],
                 Duration = sw.Elapsed

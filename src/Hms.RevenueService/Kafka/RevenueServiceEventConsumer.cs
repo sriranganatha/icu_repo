@@ -21,8 +21,8 @@ public sealed class RevenueServiceEventConsumer : IEventDispatcher
 
         return topic switch
         {
-            KafkaTopics.For("patientservice") => HandlePatientServiceEvent(eventType, key, value),
-            KafkaTopics.For("encounterservice") => HandleEncounterServiceEvent(eventType, key, value),
+            KafkaTopics.Patient => HandlePatientServiceEvent(eventType, key, value),
+            KafkaTopics.Encounter => HandleEncounterServiceEvent(eventType, key, value),
             _ => Task.CompletedTask
         };
     }

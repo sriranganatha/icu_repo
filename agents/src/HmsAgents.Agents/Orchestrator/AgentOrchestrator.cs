@@ -16,11 +16,11 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
     private AgentContext? _current;
 
     private const int MaxStageRetries = 2;
+    private const int MaxReviewIterations = 2;
     private static readonly TimeSpan RetryDelay = TimeSpan.FromMilliseconds(500);
 
-    // Pipeline execution order — each group runs sequentially; within a group agents could be parallel.
-    // Supervisor runs last to validate everything.
-    private static readonly AgentType[][] s_pipeline =
+    // Core pipeline — runs in order. Review acts as the decision gate.
+    private static readonly AgentType[][] s_corePipeline =
     [
         [AgentType.RequirementsReader],
         [AgentType.Database],
@@ -28,7 +28,41 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
         [AgentType.Application, AgentType.Integration],
         [AgentType.Testing],
         [AgentType.Review],
-        [AgentType.Supervisor],
+    ];
+
+    // Category → agent mapping: Review findings drive which agents get invoked
+    private static readonly Dictionary<string, AgentType[]> s_findingDispatch = new()
+    {
+        ["NFR-CODE-01"]        = [AgentType.BugFix],
+        ["NFR-CODE-02"]        = [AgentType.BugFix],
+        ["NFR-TEST-01"]        = [AgentType.BugFix],
+        ["Implementation"]     = [AgentType.BugFix, AgentType.ServiceLayer],
+        ["MultiTenant"]        = [AgentType.BugFix, AgentType.Database],
+        ["Audit"]              = [AgentType.BugFix],
+        ["Performance"]        = [AgentType.Performance],
+        ["Performance-N+1"]    = [AgentType.Performance],
+        ["Performance-EF"]     = [AgentType.Performance],
+        ["OWASP-A01"]          = [AgentType.Security],
+        ["OWASP-A02"]          = [AgentType.Security],
+        ["OWASP-A03"]          = [AgentType.Security],
+        ["HIPAA-164.312(a)"]   = [AgentType.HipaaCompliance],
+        ["HIPAA-164.312(b)"]   = [AgentType.HipaaCompliance],
+        ["SOC2-CC6"]           = [AgentType.Soc2Compliance],
+        ["SOC2-CC7"]           = [AgentType.Soc2Compliance],
+        ["SOC2-CC8"]           = [AgentType.Soc2Compliance],
+    };
+
+    // Enrichment agents — always run after Review+BugFix to add compliance/infra artifacts
+    private static readonly AgentType[] s_enrichmentAgents =
+    [
+        AgentType.Security,
+        AgentType.HipaaCompliance,
+        AgentType.Soc2Compliance,
+        AgentType.AccessControl,
+        AgentType.Observability,
+        AgentType.Infrastructure,
+        AgentType.ApiDocumentation,
+        AgentType.Performance,
     ];
 
     public AgentOrchestrator(
@@ -60,160 +94,56 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
 
         _logger.LogInformation("Pipeline {RunId} starting", context.RunId);
 
-        foreach (var stage in s_pipeline)
+        // ── Phase 1: Core pipeline (Requirements → Review) ───────────────
+        foreach (var stage in s_corePipeline)
         {
-            var stageAgents = stage
-                .Select(t => _agents.FirstOrDefault(a => a.Type == t))
-                .Where(a => a is not null)
-                .ToList();
-
-            if (stageAgents.Count == 0) continue;
-
-            var stageSuccess = false;
-
-            for (var attempt = 0; attempt <= MaxStageRetries; attempt++)
-            {
-                if (attempt > 0)
-                {
-                    _logger.LogWarning("Retrying stage [{Agents}] — attempt {Attempt}/{Max}",
-                        string.Join(", ", stage), attempt, MaxStageRetries);
-                    await Task.Delay(RetryDelay * attempt, ct);
-                }
-
-                // Run agents in this stage concurrently
-                var tasks = stageAgents.Select(async agent =>
-                {
-                    var sw = Stopwatch.StartNew();
-                    var retryAttempt = context.RetryAttempts.GetValueOrDefault(agent!.Type, 0) + (attempt > 0 ? 1 : 0);
-
-                    await _eventSink.OnEventAsync(new PipelineEvent
-                    {
-                        RunId = context.RunId, Agent = agent.Type,
-                        Status = AgentStatus.Running,
-                        Message = attempt > 0
-                            ? $"{agent.Name} retrying (attempt {attempt + 1})..."
-                            : $"{agent.Name} starting...",
-                        RetryAttempt = attempt
-                    }, ct);
-
-                    AgentResult result;
-                    try
-                    {
-                        result = await agent.ExecuteAsync(context, ct);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogError(ex, "Agent {Agent} threw unhandled exception", agent.Name);
-                        result = new AgentResult
-                        {
-                            Agent = agent.Type,
-                            Success = false,
-                            Errors = [ex.Message],
-                            Summary = $"{agent.Name} crashed: {ex.Message}",
-                            Duration = sw.Elapsed
-                        };
-                        context.AgentStatuses[agent.Type] = AgentStatus.Failed;
-                    }
-
-                    // Convert test diagnostics for the event
-                    List<TestDiagnosticDto>? diagDtos = null;
-                    if (result.TestDiagnostics.Count > 0)
-                    {
-                        diagDtos = result.TestDiagnostics.Select(d => new TestDiagnosticDto
-                        {
-                            TestName = d.TestName,
-                            AgentUnderTest = d.AgentUnderTest,
-                            Outcome = (int)d.Outcome,
-                            Diagnostic = d.Diagnostic,
-                            Remediation = d.Remediation,
-                            Category = d.Category,
-                            DurationMs = d.DurationMs,
-                            AttemptNumber = d.AttemptNumber
-                        }).ToList();
-                    }
-
-                    await _eventSink.OnEventAsync(new PipelineEvent
-                    {
-                        RunId = context.RunId, Agent = agent.Type,
-                        Status = result.Success ? AgentStatus.Completed : AgentStatus.Failed,
-                        Message = result.Summary,
-                        ArtifactCount = result.Artifacts.Count,
-                        FindingCount = result.Findings.Count,
-                        ElapsedMs = sw.Elapsed.TotalMilliseconds,
-                        RetryAttempt = attempt,
-                        TestDiagnostics = diagDtos
-                    }, ct);
-
-                    return result;
-                });
-
-                var results = await Task.WhenAll(tasks);
-
-                if (results.All(r => r.Success))
-                {
-                    stageSuccess = true;
-                    break;
-                }
-
-                // Track retry attempts for failed agents
-                foreach (var r in results.Where(r => !r.Success))
-                    context.RetryAttempts[r.Agent] = context.RetryAttempts.GetValueOrDefault(r.Agent, 0) + 1;
-
-                // Don't retry the Supervisor stage — it reports findings, not failures
-                if (stage.Contains(AgentType.Supervisor))
-                {
-                    stageSuccess = true; // Supervisor "failure" means it found issues, not that it broke
-                    break;
-                }
-            }
-
+            var stageSuccess = await RunStageAsync(context, stage, ct);
             if (!stageSuccess)
             {
                 _logger.LogWarning("Pipeline stopped — stage failure after {Max} retries", MaxStageRetries + 1);
-
-                // Still run Supervisor to report diagnostics even on failure
-                var supervisor = _agents.FirstOrDefault(a => a.Type == AgentType.Supervisor);
-                if (supervisor is not null && !stage.Contains(AgentType.Supervisor))
-                {
-                    _logger.LogInformation("Running Supervisor to diagnose failure...");
-                    var sw = Stopwatch.StartNew();
-                    await _eventSink.OnEventAsync(new PipelineEvent
-                    {
-                        RunId = context.RunId, Agent = AgentType.Supervisor,
-                        Status = AgentStatus.Running, Message = "Supervisor diagnosing pipeline failure..."
-                    }, ct);
-
-                    var supResult = await supervisor.ExecuteAsync(context, ct);
-
-                    List<TestDiagnosticDto>? supDiagDtos = null;
-                    if (supResult.TestDiagnostics.Count > 0)
-                    {
-                        supDiagDtos = supResult.TestDiagnostics.Select(d => new TestDiagnosticDto
-                        {
-                            TestName = d.TestName,
-                            AgentUnderTest = d.AgentUnderTest,
-                            Outcome = (int)d.Outcome,
-                            Diagnostic = d.Diagnostic,
-                            Remediation = d.Remediation,
-                            Category = d.Category,
-                            DurationMs = d.DurationMs,
-                            AttemptNumber = d.AttemptNumber
-                        }).ToList();
-                    }
-
-                    await _eventSink.OnEventAsync(new PipelineEvent
-                    {
-                        RunId = context.RunId, Agent = AgentType.Supervisor,
-                        Status = supResult.Success ? AgentStatus.Completed : AgentStatus.Failed,
-                        Message = supResult.Summary,
-                        ElapsedMs = sw.Elapsed.TotalMilliseconds,
-                        TestDiagnostics = supDiagDtos
-                    }, ct);
-                }
-
+                await RunSupervisorOnFailure(context, stage, ct);
                 break;
             }
         }
+
+        // ── Phase 2: Dynamic dispatch — process Review findings ──────────
+        for (var reviewIter = 0; reviewIter < MaxReviewIterations; reviewIter++)
+        {
+            context.ReviewIteration = reviewIter + 1;
+            var dispatchedTypes = new HashSet<AgentType>();
+
+            foreach (var finding in context.Findings.ToList())
+            {
+                if (s_findingDispatch.TryGetValue(finding.Category, out var agents))
+                {
+                    foreach (var agentType in agents)
+                        dispatchedTypes.Add(agentType);
+                }
+            }
+
+            if (dispatchedTypes.Count == 0) break;
+
+            _logger.LogInformation("Review iteration {Iter}: dispatching {Agents}",
+                reviewIter + 1, string.Join(", ", dispatchedTypes));
+
+            await RunStageAsync(context, [.. dispatchedTypes], ct);
+
+            // Re-run Review to check fixes
+            await RunStageAsync(context, [AgentType.Review], ct);
+        }
+
+        // ── Phase 3: Enrichment agents (Security/Compliance/Infra/Docs) ──
+        _logger.LogInformation("Running enrichment agents...");
+        foreach (var enrichAgent in s_enrichmentAgents)
+        {
+            ct.ThrowIfCancellationRequested();
+            var agent = _agents.FirstOrDefault(a => a.Type == enrichAgent);
+            if (agent is not null)
+                await RunStageAsync(context, [enrichAgent], ct);
+        }
+
+        // ── Phase 4: Supervisor final report ─────────────────────────────
+        await RunStageAsync(context, [AgentType.Supervisor], ct);
 
         // Write all artifacts to disk
         if (context.Artifacts.Count > 0 && !string.IsNullOrEmpty(config.OutputPath))
@@ -243,5 +173,134 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
 
         await agent.ExecuteAsync(context, ct);
         return context;
+    }
+
+    // ─── Private helpers ──────────────────────────────────────────
+
+    private async Task<bool> RunStageAsync(AgentContext context, AgentType[] stage, CancellationToken ct)
+    {
+        var stageAgents = stage
+            .Select(t => _agents.FirstOrDefault(a => a.Type == t))
+            .Where(a => a is not null)
+            .ToList();
+
+        if (stageAgents.Count == 0) return true;
+
+        for (var attempt = 0; attempt <= MaxStageRetries; attempt++)
+        {
+            if (attempt > 0)
+            {
+                _logger.LogWarning("Retrying stage [{Agents}] — attempt {Attempt}/{Max}",
+                    string.Join(", ", stage), attempt, MaxStageRetries);
+                await Task.Delay(RetryDelay * attempt, ct);
+            }
+
+            var tasks = stageAgents.Select(async agent =>
+            {
+                var sw = Stopwatch.StartNew();
+
+                await _eventSink.OnEventAsync(new PipelineEvent
+                {
+                    RunId = context.RunId, Agent = agent!.Type,
+                    Status = AgentStatus.Running,
+                    Message = attempt > 0
+                        ? $"{agent.Name} retrying (attempt {attempt + 1})..."
+                        : $"{agent.Name} starting...",
+                    RetryAttempt = attempt
+                }, ct);
+
+                AgentResult result;
+                try
+                {
+                    result = await agent.ExecuteAsync(context, ct);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Agent {Agent} threw unhandled exception", agent.Name);
+                    result = new AgentResult
+                    {
+                        Agent = agent.Type, Success = false,
+                        Errors = [ex.Message],
+                        Summary = $"{agent.Name} crashed: {ex.Message}",
+                        Duration = sw.Elapsed
+                    };
+                    context.AgentStatuses[agent.Type] = AgentStatus.Failed;
+                }
+
+                List<TestDiagnosticDto>? diagDtos = null;
+                if (result.TestDiagnostics.Count > 0)
+                {
+                    diagDtos = result.TestDiagnostics.Select(d => new TestDiagnosticDto
+                    {
+                        TestName = d.TestName, AgentUnderTest = d.AgentUnderTest,
+                        Outcome = (int)d.Outcome, Diagnostic = d.Diagnostic,
+                        Remediation = d.Remediation, Category = d.Category,
+                        DurationMs = d.DurationMs, AttemptNumber = d.AttemptNumber
+                    }).ToList();
+                }
+
+                await _eventSink.OnEventAsync(new PipelineEvent
+                {
+                    RunId = context.RunId, Agent = agent.Type,
+                    Status = result.Success ? AgentStatus.Completed : AgentStatus.Failed,
+                    Message = result.Summary,
+                    ArtifactCount = result.Artifacts.Count,
+                    FindingCount = result.Findings.Count,
+                    ElapsedMs = sw.Elapsed.TotalMilliseconds,
+                    RetryAttempt = attempt,
+                    TestDiagnostics = diagDtos
+                }, ct);
+
+                return result;
+            });
+
+            var results = await Task.WhenAll(tasks);
+
+            if (results.All(r => r.Success)) return true;
+
+            foreach (var r in results.Where(r => !r.Success))
+                context.RetryAttempts[r.Agent] = context.RetryAttempts.GetValueOrDefault(r.Agent, 0) + 1;
+
+            if (stage.Contains(AgentType.Supervisor)) return true;
+        }
+
+        return false;
+    }
+
+    private async Task RunSupervisorOnFailure(AgentContext context, AgentType[] failedStage, CancellationToken ct)
+    {
+        var supervisor = _agents.FirstOrDefault(a => a.Type == AgentType.Supervisor);
+        if (supervisor is null || failedStage.Contains(AgentType.Supervisor)) return;
+
+        _logger.LogInformation("Running Supervisor to diagnose failure...");
+        var sw = Stopwatch.StartNew();
+        await _eventSink.OnEventAsync(new PipelineEvent
+        {
+            RunId = context.RunId, Agent = AgentType.Supervisor,
+            Status = AgentStatus.Running, Message = "Supervisor diagnosing pipeline failure..."
+        }, ct);
+
+        var supResult = await supervisor.ExecuteAsync(context, ct);
+
+        List<TestDiagnosticDto>? supDiagDtos = null;
+        if (supResult.TestDiagnostics.Count > 0)
+        {
+            supDiagDtos = supResult.TestDiagnostics.Select(d => new TestDiagnosticDto
+            {
+                TestName = d.TestName, AgentUnderTest = d.AgentUnderTest,
+                Outcome = (int)d.Outcome, Diagnostic = d.Diagnostic,
+                Remediation = d.Remediation, Category = d.Category,
+                DurationMs = d.DurationMs, AttemptNumber = d.AttemptNumber
+            }).ToList();
+        }
+
+        await _eventSink.OnEventAsync(new PipelineEvent
+        {
+            RunId = context.RunId, Agent = AgentType.Supervisor,
+            Status = supResult.Success ? AgentStatus.Completed : AgentStatus.Failed,
+            Message = supResult.Summary,
+            ElapsedMs = sw.Elapsed.TotalMilliseconds,
+            TestDiagnostics = supDiagDtos
+        }, ct);
     }
 }

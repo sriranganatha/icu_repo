@@ -3,6 +3,7 @@ using Hms.SharedKernel.Middleware;
 using Microsoft.EntityFrameworkCore;
 using Hms.DiagnosticsService.Data;
 using Hms.DiagnosticsService.Data.Repositories;
+using Hms.DiagnosticsService.Endpoints;
 using Hms.DiagnosticsService.Kafka;
 using Hms.DiagnosticsService.Services;
 

@@ -15,6 +15,8 @@ public sealed class AgentContext
     public Dictionary<AgentType, AgentStatus> AgentStatuses { get; set; } = [];
     public Dictionary<AgentType, int> RetryAttempts { get; set; } = [];
     public PipelineConfig? PipelineConfig { get; set; }
+    public ParsedDomainModel? DomainModel { get; set; }
+    public int ReviewIteration { get; set; }
     public DateTimeOffset StartedAt { get; init; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? CompletedAt { get; set; }
 }

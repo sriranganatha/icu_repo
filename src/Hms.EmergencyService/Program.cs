@@ -3,6 +3,7 @@ using Hms.SharedKernel.Middleware;
 using Microsoft.EntityFrameworkCore;
 using Hms.EmergencyService.Data;
 using Hms.EmergencyService.Data.Repositories;
+using Hms.EmergencyService.Endpoints;
 using Hms.EmergencyService.Kafka;
 using Hms.EmergencyService.Services;
 

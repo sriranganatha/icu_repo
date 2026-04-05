@@ -3,6 +3,7 @@ using Hms.SharedKernel.Middleware;
 using Microsoft.EntityFrameworkCore;
 using Hms.InpatientService.Data;
 using Hms.InpatientService.Data.Repositories;
+using Hms.InpatientService.Endpoints;
 using Hms.InpatientService.Kafka;
 using Hms.InpatientService.Services;
 

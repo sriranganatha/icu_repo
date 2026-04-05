@@ -3,6 +3,7 @@ using Hms.SharedKernel.Middleware;
 using Microsoft.EntityFrameworkCore;
 using Hms.RevenueService.Data;
 using Hms.RevenueService.Data.Repositories;
+using Hms.RevenueService.Endpoints;
 using Hms.RevenueService.Kafka;
 using Hms.RevenueService.Services;
 

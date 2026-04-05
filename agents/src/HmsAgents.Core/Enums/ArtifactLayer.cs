@@ -11,5 +11,10 @@ public enum ArtifactLayer
     Integration,
     Test,
     Migration,
-    Configuration
+    Configuration,
+    Security,
+    Compliance,
+    Observability,
+    Infrastructure,
+    Documentation
 }
