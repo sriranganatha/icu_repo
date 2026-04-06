@@ -16,6 +16,9 @@
             <button id="btnRunPipeline" class="btn btn-primary" onclick="runPipeline()">
                 <i class="bi bi-play-fill"></i> Run Full Pipeline
             </button>
+            <button id="btnStopPipeline" class="btn btn-outline-danger" onclick="stopPipeline()" disabled>
+                <i class="bi bi-stop-fill"></i> Stop All Agents
+            </button>
             <button class="btn btn-outline-danger btn-sm" onclick="resetProject()" title="Reset everything and start from scratch">
                 <i class="bi bi-arrow-counterclockwise"></i> Reset Project
             </button>
@@ -152,6 +155,61 @@
                         </div>
                     </div>
                 </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Work Item Templates Panel -->
+    <div class="card mb-4 border-secondary">
+        <div class="card-header d-flex justify-content-between align-items-center" data-bs-toggle="collapse" data-bs-target="#templatePanel" role="button">
+            <span><i class="bi bi-card-list me-1"></i> Work Item Templates <small class="text-muted ms-2">View / edit canonical formats stored in DB</small></span>
+            <span class="d-flex gap-2" onclick="event.stopPropagation()">
+                <button class="btn btn-sm btn-outline-secondary" onclick="loadTemplates()"><i class="bi bi-arrow-clockwise"></i> Refresh</button>
+                <button class="btn btn-sm btn-outline-success" onclick="saveTemplate()"><i class="bi bi-save"></i> Save Template</button>
+            </span>
+        </div>
+        <div class="collapse" id="templatePanel">
+            <div class="card-body">
+                <div class="row g-2 mb-2">
+                    <div class="col-md-4">
+                        <label class="form-label fw-semibold">Template Key</label>
+                        <select id="tmplKey" class="form-select" onchange="onTemplateSelect(this.value)">
+                            <option value="">-- Select Template --</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label fw-semibold">Item Type</label>
+                        <input id="tmplItemType" class="form-control" />
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label fw-semibold">Template Name</label>
+                        <input id="tmplName" class="form-control" />
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label fw-semibold">Version</label>
+                        <input id="tmplVersion" type="number" min="1" class="form-control" value="1" />
+                    </div>
+                </div>
+                <div class="row g-2 mb-2">
+                    <div class="col-md-10">
+                        <label class="form-label fw-semibold">Purpose</label>
+                        <input id="tmplPurpose" class="form-control" />
+                    </div>
+                    <div class="col-md-2 d-flex align-items-end">
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" id="tmplIsActive" checked />
+                            <label class="form-check-label" for="tmplIsActive">Active</label>
+                        </div>
+                    </div>
+                </div>
+                <div class="mb-2">
+                    <label class="form-label fw-semibold">Template Format</label>
+                    <textarea id="tmplFormat" class="form-control" rows="3"></textarea>
+                </div>
+                <div class="mb-0">
+                    <label class="form-label fw-semibold">Example Content</label>
+                    <textarea id="tmplExample" class="form-control" rows="2"></textarea>
                 </div>
             </div>
         </div>
@@ -324,6 +382,7 @@
                             <option value="UserStory">UserStory</option>
                             <option value="UseCase">UseCase</option>
                             <option value="Task">Task</option>
+                            <option value="Bug">Bug</option>
                         </select>
                         <select class="form-select form-select-sm" id="blFilterModule" style="max-width:140px" onchange="_blPage=1;applyBacklogFilters()">
                             <option value="">All Modules</option>
@@ -432,6 +491,12 @@
         </div>
         <div class="col-md-4 col-lg-3" id="card-RequirementsReader">
             @await Html.PartialAsync("_AgentCard", new HmsAgents.Web.Pages.AgentCardModel { Name = "Requirements Reader", Icon = "bi-file-earmark-text", AgentKey = "RequirementsReader", Description = "Scans icu/docs for structured requirements" })
+        </div>
+        <div class="col-md-4 col-lg-3" id="card-Architect">
+            @await Html.PartialAsync("_AgentCard", new HmsAgents.Web.Pages.AgentCardModel { Name = "Architect Agent", Icon = "bi-diagram-3-fill", AgentKey = "Architect", Description = "Derives architecture guidance and scoped service boundaries" })
+        </div>
+        <div class="col-md-4 col-lg-3" id="card-PlatformBuilder">
+            @await Html.PartialAsync("_AgentCard", new HmsAgents.Web.Pages.AgentCardModel { Name = "Platform Builder", Icon = "bi-hdd-stack", AgentKey = "PlatformBuilder", Description = "Defines platform constraints, runtime profile, and quality gates" })
         </div>
         <div class="col-md-4 col-lg-3" id="card-RequirementsExpander">
             @await Html.PartialAsync("_AgentCard", new HmsAgents.Web.Pages.AgentCardModel { Name = "Reqs Expander", Icon = "bi-diagram-2", AgentKey = "RequirementsExpander", Description = "Expands requirements into epics, stories, tasks" })
@@ -752,13 +817,14 @@
                 <div class="d-flex gap-3 p-3 bg-light border-bottom flex-wrap align-items-center" id="agentDetailSummary">
                     <span class="badge bg-secondary fs-6" id="adStatus">Idle</span>
                     <span><i class="bi bi-clock me-1"></i><span id="adElapsed">—</span></span>
-                    <span><i class="bi bi-file-earmark-code me-1"></i>Artifacts: <strong id="adArtifacts">0</strong></span>
+                    <span><a href="#" id="adArtifactsLink" onclick="showAgentArtifactsTab(); return false;" class="text-decoration-none"><i class="bi bi-file-earmark-code me-1"></i>Artifacts: <strong id="adArtifacts">0</strong></a></span>
                     <span><i class="bi bi-exclamation-triangle me-1"></i>Findings: <strong id="adFindings">0</strong></span>
                     <span><i class="bi bi-arrow-repeat me-1"></i>Retries: <strong id="adRetries">0</strong></span>
                 </div>
                 <!-- Tabs -->
                 <ul class="nav nav-tabs px-3 pt-2" id="agentDetailTabs" role="tablist">
                     <li class="nav-item"><a class="nav-link active" data-bs-toggle="tab" href="#adTabTimeline">Activity Timeline</a></li>
+                    <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#adTabArtifacts">Artifacts</a></li>
                     <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#adTabAudit">Audit Log</a></li>
                     <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#adTabDecisions">Decisions</a></li>
                     <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#adTabAsk"><i class="bi bi-chat-dots me-1"></i>Ask Agent</a></li>
@@ -768,6 +834,12 @@
                     <div class="tab-pane fade show active" id="adTabTimeline">
                         <div style="max-height: 450px; overflow-y: auto;">
                             <div id="adTimelineList" class="d-flex flex-column gap-1"></div>
+                        </div>
+                    </div>
+                    <!-- Artifacts tab -->
+                    <div class="tab-pane fade" id="adTabArtifacts">
+                        <div style="max-height: 450px; overflow-y: auto;">
+                            <div id="adArtifactsList" class="d-flex flex-column gap-2"></div>
                         </div>
                     </div>
                     <!-- Audit Log tab -->
@@ -811,32 +883,34 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
     <script>
         // ─── NOC Chart State ─────────────────────────────────────────────
-        // AgentType enum order: Orchestrator(0), RequirementsReader(1), Database(2), ServiceLayer(3), Application(4),
-        // Integration(5), Review(6), Testing(7), Supervisor(8), BugFix(9), Performance(10), Security(11),
-        // HipaaCompliance(12), Soc2Compliance(13), AccessControl(14), Observability(15), Infrastructure(16), ApiDocumentation(17), RequirementsExpander(18), Backlog(19)
+        // AgentType enum order is sourced from HmsAgents.Core.Enums.AgentType.
         const ALL_AGENTS = [
-            "Orchestrator","RequirementsReader","Database","ServiceLayer","Application","Integration",
-            "Review","Testing","Supervisor","BugFix","Performance","Security",
-            "HipaaCompliance","Soc2Compliance","AccessControl","Observability","Infrastructure","ApiDocumentation",
-            "RequirementsExpander","Backlog","Deploy","RequirementAnalyzer"
+            "Orchestrator","RequirementsReader","Architect","PlatformBuilder","Database","ServiceLayer","Application","Integration",
+            "Review","Testing","Supervisor","BugFix","Performance","Security","HipaaCompliance","Soc2Compliance",
+            "AccessControl","Observability","Infrastructure","ApiDocumentation","RequirementsExpander","Backlog","Deploy",
+            "RequirementAnalyzer","Build","Monitor","Migration","CodeQuality","DependencyAudit","Refactoring",
+            "Configuration","UiUx","LoadTest"
         ];
         const ALL_AGENT_LABELS = [
-            "Orchestrator","Reqs Reader","Database","Service","Application","Integration",
-            "Review","Testing","Supervisor","BugFix","Performance","Security",
-            "HIPAA","SOC2","AccessCtrl","Observability","Infra","API Docs",
-            "Reqs Expander","Backlog","Deploy","Req Analyzer"
+            "Orchestrator","Reqs Reader","Architect","Platform Builder","Database","Service","Application","Integration",
+            "Review","Testing","Supervisor","BugFix","Performance","Security","HIPAA","SOC2",
+            "AccessCtrl","Observability","Infra","API Docs","Reqs Expander","Backlog","Deploy",
+            "Req Analyzer","Build","Monitor","Migration","Code Quality","Dependency Audit","Refactoring",
+            "Configuration","UI/UX","Load Test"
         ];
         const ALL_AGENT_ICONS = [
-            "bi-diagram-3","bi-file-earmark-text","bi-database","bi-layers","bi-window-stack","bi-plug",
-            "bi-shield-check","bi-check2-circle","bi-eye","bi-bug","bi-speedometer2","bi-shield-lock",
-            "bi-heart-pulse","bi-file-earmark-lock","bi-key","bi-binoculars","bi-cloud-arrow-up","bi-journal-code",
-            "bi-diagram-2","bi-kanban","bi-rocket-takeoff","bi-search"
+            "bi-diagram-3","bi-file-earmark-text","bi-diagram-3-fill","bi-hdd-stack","bi-database","bi-layers","bi-window-stack","bi-plug",
+            "bi-shield-check","bi-check2-circle","bi-eye","bi-bug","bi-speedometer2","bi-shield-lock","bi-heart-pulse","bi-file-earmark-lock",
+            "bi-key","bi-binoculars","bi-cloud-arrow-up","bi-journal-code","bi-diagram-2","bi-kanban","bi-rocket-takeoff",
+            "bi-search","bi-hammer","bi-activity","bi-arrow-left-right","bi-stars","bi-shield-exclamation","bi-bezier2",
+            "bi-sliders","bi-palette","bi-graph-up"
         ];
         const ALL_AGENT_COLORS = [
-            "#78909c","#42a5f5","#66bb6a","#ffa726","#ef5350","#ab47bc",
-            "#26c6da","#8d6e63","#e91e63","#ff7043","#29b6f6","#ec407a",
-            "#66bb6a","#5c6bc0","#ffca28","#26a69a","#7e57c2","#8d6e63",
-            "#7cb342","#9575cd","#1e88e5","#00897b"
+            "#78909c","#42a5f5","#1e88e5","#3949ab","#66bb6a","#ffa726","#ef5350","#ab47bc",
+            "#26c6da","#8d6e63","#e91e63","#ff7043","#29b6f6","#ec407a","#66bb6a","#5c6bc0",
+            "#ffca28","#26a69a","#7e57c2","#8d6e63","#7cb342","#9575cd","#1e88e5",
+            "#00897b","#6d4c41","#00acc1","#546e7a","#8e24aa","#c62828","#5d4037",
+            "#3949ab","#ff8f00","#2e7d32"
         ];
         // Keep backward compat aliases
         const AGENTS = ALL_AGENTS;
@@ -865,7 +939,7 @@
                 labels: ALL_AGENT_LABELS,
                 datasets: [{
                     label: 'Duration (ms)',
-                    data: new Array(18).fill(0),
+                    data: new Array(ALL_AGENTS.length).fill(0),
                     backgroundColor: ALL_AGENT_COLORS,
                     borderRadius: 4
                 }]
@@ -1302,8 +1376,11 @@
             document.getElementById("statArtifacts").textContent = data.artifactCount;
             document.getElementById("statFindings").textContent = data.findingCount;
             document.getElementById("statTime").textContent = data.durationMs.toFixed(0) + "ms";
-            appendLog("success", `Pipeline complete: ${data.artifactCount} artifacts, ${data.findingCount} findings, ${data.testDiagnosticCount || 0} tests`);
+            appendLog(data.cancelled ? "warning" : "success", data.cancelled
+                ? `Pipeline stopped: ${data.artifactCount} artifacts, ${data.findingCount} findings, ${data.testDiagnosticCount || 0} tests`
+                : `Pipeline complete: ${data.artifactCount} artifacts, ${data.findingCount} findings, ${data.testDiagnosticCount || 0} tests`);
             document.getElementById("btnRunPipeline").disabled = false;
+            document.getElementById("btnStopPipeline").disabled = true;
             if (data.findings && data.findings.length > 0) {
                 renderFindings(data.findings);
                 nocUpdateSeverity(data.findings);
@@ -1451,6 +1528,82 @@
         // Auto-load config on page start
         loadConfig();
 
+        // ─── Template Manager ───────────────────────────────────────
+        let _templateRows = [];
+
+        async function loadTemplates() {
+            try {
+                const res = await fetch('/api/pipeline/templates');
+                if (!res.ok) { appendLog('error', 'Failed to load templates: ' + res.statusText); return; }
+                const data = await res.json();
+                _templateRows = data.templates || [];
+
+                const sel = document.getElementById('tmplKey');
+                sel.innerHTML = '<option value="">-- Select Template --</option>' +
+                    _templateRows.map(t => `<option value="${t.templateKey}">${t.templateKey} (${t.itemType})</option>`).join('');
+
+                if (_templateRows.length > 0) {
+                    sel.value = _templateRows[0].templateKey;
+                    onTemplateSelect(sel.value);
+                }
+
+                appendLog('system', `Loaded ${_templateRows.length} templates.`);
+            } catch (e) {
+                appendLog('error', 'Load templates error: ' + e.message);
+            }
+        }
+
+        function onTemplateSelect(templateKey) {
+            const t = _templateRows.find(x => x.templateKey === templateKey);
+            if (!t) return;
+
+            document.getElementById('tmplItemType').value = t.itemType || '';
+            document.getElementById('tmplName').value = t.templateName || '';
+            document.getElementById('tmplPurpose').value = t.purpose || '';
+            document.getElementById('tmplFormat').value = t.templateFormat || '';
+            document.getElementById('tmplExample').value = t.exampleContent || '';
+            document.getElementById('tmplVersion').value = t.version || 1;
+            document.getElementById('tmplIsActive').checked = !!t.isActive;
+        }
+
+        async function saveTemplate() {
+            const templateKey = (document.getElementById('tmplKey').value || '').trim();
+            if (!templateKey) {
+                appendLog('error', 'Select a template key to save.');
+                return;
+            }
+
+            const payload = {
+                itemType: document.getElementById('tmplItemType').value.trim(),
+                templateName: document.getElementById('tmplName').value.trim(),
+                purpose: document.getElementById('tmplPurpose').value.trim(),
+                templateFormat: document.getElementById('tmplFormat').value.trim(),
+                exampleContent: document.getElementById('tmplExample').value.trim(),
+                version: parseInt(document.getElementById('tmplVersion').value) || 1,
+                isActive: document.getElementById('tmplIsActive').checked
+            };
+
+            try {
+                const res = await fetch('/api/pipeline/templates/' + encodeURIComponent(templateKey), {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                if (!res.ok) {
+                    appendLog('error', 'Failed to save template: ' + res.statusText);
+                    return;
+                }
+                appendLog('success', `Template saved: ${templateKey}`);
+                await loadTemplates();
+                document.getElementById('tmplKey').value = templateKey;
+                onTemplateSelect(templateKey);
+            } catch (e) {
+                appendLog('error', 'Save template error: ' + e.message);
+            }
+        }
+
+        loadTemplates();
+
         // ─── Restore dashboard state from last run ──────────────────────
         async function restoreDashboardState() {
             try {
@@ -1560,6 +1713,7 @@
                     _blPage = 1;
                     applyBacklogFilters();
                     document.getElementById('btnRunPipeline').disabled = false;
+                    document.getElementById('btnStopPipeline').disabled = true;
                     appendLog('info', `Project reset complete.${data.outputDeleted ? ' Generated code deleted.' : ''} Ready to start fresh.`);
                 } else {
                     appendLog('error', 'Reset failed: ' + (data.error || 'unknown'));
@@ -1572,6 +1726,7 @@
         // ─── Pipeline + Card logic ──────────────────────────────────────
         async function runPipeline() {
             document.getElementById("btnRunPipeline").disabled = true;
+            document.getElementById("btnStopPipeline").disabled = false;
             resetCards();
             nocResetCharts();
             clearLog();
@@ -1581,6 +1736,7 @@
             if (!reqsPath || !outputPath) {
                 appendLog('error', 'Requirements Path and Output Path are required.');
                 document.getElementById('btnRunPipeline').disabled = false;
+                document.getElementById('btnStopPipeline').disabled = true;
                 return;
             }
 
@@ -1620,10 +1776,31 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(body)
                 });
-                if (!res.ok) appendLog('error', 'Pipeline trigger failed: ' + res.statusText);
+                if (!res.ok) {
+                    appendLog('error', 'Pipeline trigger failed: ' + res.statusText);
+                    document.getElementById('btnRunPipeline').disabled = false;
+                    document.getElementById('btnStopPipeline').disabled = true;
+                }
             } catch (e) {
                 appendLog('error', 'Request failed: ' + e.message);
                 document.getElementById('btnRunPipeline').disabled = false;
+                document.getElementById('btnStopPipeline').disabled = true;
+            }
+        }
+
+        async function stopPipeline() {
+            try {
+                const res = await fetch('/api/pipeline/stop', { method: 'POST' });
+                const data = await res.json();
+                if (res.ok && data.stopped) {
+                    appendLog('warning', data.message || 'Stop requested for all running agents.');
+                    document.getElementById('btnStopPipeline').disabled = true;
+                } else {
+                    appendLog('system', (data && data.message) ? data.message : 'No active pipeline run to stop.');
+                    document.getElementById('btnStopPipeline').disabled = true;
+                }
+            } catch (e) {
+                appendLog('error', 'Stop request failed: ' + e.message);
             }
         }
 
@@ -1832,7 +2009,7 @@
         let _blPageSize = 25;
 
         const blStatusColors = { 'New': 'primary', 'InQueue': 'info', 'UnderDev': 'warning', 'Completed': 'success', 'Blocked': 'danger' };
-        const blTypeIcons = { 'Epic': 'bi-layers', 'UserStory': 'bi-person', 'UseCase': 'bi-lightning', 'Task': 'bi-check-square' };
+        const blTypeIcons = { 'Epic': 'bi-layers', 'UserStory': 'bi-person', 'UseCase': 'bi-lightning', 'Task': 'bi-check-square', 'Bug': 'bi-bug-fill' };
         const blPriorityLabels = { 0: 'P0 Critical', 1: 'P1 High', 2: 'P2 Medium', 3: 'P3 Low' };
         const blPriorityBadge = { 0: 'danger', 1: 'warning text-dark', 2: 'info', 3: 'secondary' };
 
@@ -2045,6 +2222,9 @@
             const ac = item.acceptanceCriteria || [];
             const deps = item.dependsOn || [];
             const tags = item.tags || [];
+            const dod = item.definitionOfDone || [];
+            const technicalNotes = (item.technicalNotes || '').trim();
+            const detailedSpec = (item.detailedSpec || '').trim();
 
             const html = `
                 <div class="mb-3">
@@ -2067,6 +2247,9 @@
                 ${ac.length ? `<div class="mb-2"><strong class="small">Acceptance Criteria:</strong><ul class="small mb-0">${ac.map(c => `<li>${c}</li>`).join('')}</ul></div>` : ''}
                 ${deps.length ? `<div class="mb-2"><strong class="small">Dependencies:</strong><ul class="small mb-0">${deps.map(d => `<li>${d}</li>`).join('')}</ul></div>` : ''}
                 ${tags.length ? `<div class="mb-2"><strong class="small">Tags:</strong> ${tags.map(t => `<span class="badge bg-light text-dark border me-1">${t}</span>`).join('')}</div>` : ''}
+                ${(item.itemType === 'Task' && technicalNotes) ? `<div class="mb-2"><strong class="small">Technical Notes:</strong><p class="small text-muted mb-0">${technicalNotes}</p></div>` : ''}
+                ${(item.itemType === 'Task' && dod.length) ? `<div class="mb-2"><strong class="small">Definition Of Done:</strong><ul class="small mb-0">${dod.map(d => `<li>${d}</li>`).join('')}</ul></div>` : ''}
+                ${(item.itemType === 'Task' && detailedSpec) ? `<div class="mb-2"><strong class="small">Detailed Spec:</strong><p class="small text-muted mb-0">${detailedSpec}</p></div>` : ''}
                 <hr>
                 <div class="row g-2">
                     <div class="col-6">
@@ -2130,7 +2313,7 @@
         }, 5000);
 
         function nocResetCharts() {
-            chartTimeline.data.datasets[0].data = new Array(20).fill(0);
+            chartTimeline.data.datasets[0].data = new Array(ALL_AGENTS.length).fill(0);
             chartTimeline.update('none');
             chartByService.data.datasets[0].data = new Array(8).fill(0);
             chartByService.update('none');
@@ -2284,6 +2467,11 @@
             input.focus();
         }
 
+        function showAgentArtifactsTab() {
+            const trigger = document.querySelector('a[data-bs-toggle="tab"][href="#adTabArtifacts"]');
+            if (trigger) bootstrap.Tab.getOrCreateInstance(trigger).show();
+        }
+
         async function openAgentDetail(agentKey) {
             _askAgentKey = agentKey;
             // Reset Ask Agent chat
@@ -2314,6 +2502,39 @@
             const artifactCount = card ? (card.querySelector('.agent-artifacts')?.textContent || '0') : '0';
             document.getElementById('adArtifacts').textContent = artifactCount;
             document.getElementById('adFindings').textContent = '0';
+
+            // ── Artifacts tab ──
+            const artifactsDiv = document.getElementById('adArtifactsList');
+            artifactsDiv.innerHTML = '<p class="text-muted text-center py-4 mb-0">Loading artifacts...</p>';
+            try {
+                const res = await fetch('/api/pipeline/artifacts');
+                if (res.ok) {
+                    const allArtifacts = await res.json();
+                    const rows = (allArtifacts || []).filter(a => (a.producedBy || '') === agentKey);
+                    if (rows.length === 0) {
+                        artifactsDiv.innerHTML = '<p class="text-muted text-center py-4 mb-0">No artifacts found for this agent.</p>';
+                    } else {
+                        artifactsDiv.innerHTML = rows.map(a => {
+                            const path = a.relativePath || a.fileName || a.id;
+                            const layer = a.layer || 'Unknown';
+                            const size = a.contentLength || 0;
+                            return `<div class="border rounded p-2">
+                                <div class="d-flex justify-content-between align-items-center gap-2">
+                                    <a href="/api/pipeline/artifacts/${encodeURIComponent(a.id)}" target="_blank" rel="noopener" class="fw-semibold text-decoration-none">${escapeHtml(path)}</a>
+                                    <span class="badge bg-light text-dark border">${escapeHtml(layer)}</span>
+                                </div>
+                                <div class="text-muted" style="font-size:0.8rem;">
+                                    ${escapeHtml(a.namespace || '')} ${size > 0 ? `• ${size} chars` : ''}
+                                </div>
+                            </div>`;
+                        }).join('');
+                    }
+                } else {
+                    artifactsDiv.innerHTML = '<p class="text-muted text-center py-4 mb-0">Artifacts API unavailable.</p>';
+                }
+            } catch {
+                artifactsDiv.innerHTML = '<p class="text-muted text-center py-4 mb-0">Failed to load artifacts.</p>';
+            }
 
             // Retries
             const activity = agentActivityLog[agentKey] || [];

@@ -27,19 +27,23 @@ public sealed class ApplicationAgent : IAgent
         _logger.LogInformation("ApplicationAgent starting — API Gateway + per-service APIs");
 
         var artifacts = new List<CodeArtifact>();
+        var scopedServices = ResolveTargetServices(context);
+        var guidance = GetGuidanceSummary(context);
 
         try
         {
             // API Gateway
             if (context.ReportProgress is not null)
                 await context.ReportProgress(Type, "Generating YARP API Gateway — Program.cs, routes, Dockerfile, csproj");
+            if (context.ReportProgress is not null && !string.IsNullOrWhiteSpace(guidance))
+                await context.ReportProgress(Type, $"Applying architecture/platform guidance: {guidance}");
             artifacts.Add(GenerateGatewayProgram());
-            artifacts.Add(GenerateGatewayAppSettingsRoutes());
+            artifacts.Add(GenerateGatewayAppSettingsRoutes(scopedServices));
             artifacts.Add(GenerateGatewayDockerfile());
             artifacts.Add(GenerateGatewayCsproj());
 
             // Per-microservice API
-            foreach (var svc in MicroserviceCatalog.All)
+            foreach (var svc in scopedServices)
             {
                 _logger.LogInformation("Generating minimal API for {Service} (port {Port})", svc.Name, svc.ApiPort);
                 if (context.ReportProgress is not null)
@@ -71,11 +75,11 @@ public sealed class ApplicationAgent : IAgent
             return new AgentResult
             {
                 Agent = Type, Success = true,
-                Summary = $"Generated {artifacts.Count} application artifacts: Gateway + {MicroserviceCatalog.All.Length} service APIs",
+                Summary = $"Generated {artifacts.Count} application artifacts: Gateway + {scopedServices.Count} service APIs",
                 Artifacts = artifacts,
                 Messages = [new AgentMessage { From = Type, To = AgentType.Orchestrator,
                     Subject = "Application layer ready",
-                    Body = $"API Gateway + {MicroserviceCatalog.All.Length} minimal API services with tenant/correlation middleware." }],
+                    Body = $"API Gateway + {scopedServices.Count} minimal API services with tenant/correlation middleware. Scoped services: {string.Join(", ", scopedServices.Select(s => s.Name))}." }],
                 Duration = sw.Elapsed
             };
         }
@@ -120,9 +124,46 @@ public sealed class ApplicationAgent : IAgent
             """
     };
 
-    private static CodeArtifact GenerateGatewayAppSettingsRoutes()
+    private static List<MicroserviceDefinition> ResolveTargetServices(AgentContext context)
     {
-        var routes = string.Join(",\n", MicroserviceCatalog.All.Select(svc => $$"""
+        var archInstruction = context.OrchestratorInstructions
+            .FirstOrDefault(i => i.StartsWith("[ARCH]", StringComparison.OrdinalIgnoreCase));
+
+        if (string.IsNullOrWhiteSpace(archInstruction))
+            return MicroserviceCatalog.All.ToList();
+
+        var marker = "TARGET_SERVICES=";
+        var start = archInstruction.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+        if (start < 0)
+            return MicroserviceCatalog.All.ToList();
+
+        start += marker.Length;
+        var end = archInstruction.IndexOf(';', start);
+        var csv = end >= 0 ? archInstruction[start..end] : archInstruction[start..];
+
+        var services = csv
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(MicroserviceCatalog.ByName)
+            .Where(s => s is not null)
+            .Cast<MicroserviceDefinition>()
+            .ToList();
+
+        return services.Count > 0 ? services : MicroserviceCatalog.All.ToList();
+    }
+
+    private static string GetGuidanceSummary(AgentContext context)
+    {
+        var guidance = context.OrchestratorInstructions
+            .Where(i => i.StartsWith("[ARCH]", StringComparison.OrdinalIgnoreCase)
+                     || i.StartsWith("[PLATFORM]", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        return guidance.Count == 0 ? string.Empty : string.Join(" | ", guidance);
+    }
+
+    private static CodeArtifact GenerateGatewayAppSettingsRoutes(IEnumerable<MicroserviceDefinition> services)
+    {
+        var routes = string.Join(",\n", services.Select(svc => $$"""
                     {
                       "RouteId": "{{svc.ShortName}}-route",
                       "ClusterId": "{{svc.ShortName}}-cluster",
@@ -131,7 +172,7 @@ public sealed class ApplicationAgent : IAgent
                     }
             """));
 
-        var clusters = string.Join(",\n", MicroserviceCatalog.All.Select(svc => $$"""
+        var clusters = string.Join(",\n", services.Select(svc => $$"""
                     "{{svc.ShortName}}-cluster": {
                       "Destinations": {
                         "default": { "Address": "http://{{svc.ShortName}}-api:8080" }

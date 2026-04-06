@@ -121,6 +121,9 @@ public sealed class SignalRPipelineEventSink : IPipelineEventSink
                     Title = e.Title, Description = e.Description, Module = e.Module,
                     Priority = e.Priority, Iteration = e.Iteration,
                     AcceptanceCriteria = e.AcceptanceCriteria, DependsOn = e.DependsOn, Tags = e.Tags,
+                    TechnicalNotes = e.TechnicalNotes,
+                    DefinitionOfDone = e.DefinitionOfDone,
+                    DetailedSpec = e.DetailedSpec,
                     CreatedAt = e.CreatedAt, StartedAt = e.StartedAt, CompletedAt = e.CompletedAt,
                     AssignedAgent = e.AssignedAgent
                 }));

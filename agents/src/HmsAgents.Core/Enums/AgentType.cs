@@ -4,6 +4,8 @@ public enum AgentType
 {
     Orchestrator,
     RequirementsReader,
+    Architect,
+    PlatformBuilder,
     Database,
     ServiceLayer,
     Application,

@@ -31,16 +31,20 @@ public sealed class TestingAgent : IAgent
 
         var artifacts = new List<CodeArtifact>();
         var model = context.DomainModel;
+        var scopedServices = ResolveTargetServices(context);
+        var guidance = GetGuidanceSummary(context);
 
         try
         {
             // 1. Generate test project file
             if (context.ReportProgress is not null)
                 await context.ReportProgress(Type, "Generating test project — xUnit, Moq, FluentAssertions, InMemory EF Core");
-            artifacts.Add(GenerateTestCsproj());
+            if (context.ReportProgress is not null && !string.IsNullOrWhiteSpace(guidance))
+                await context.ReportProgress(Type, $"Applying architecture/platform guidance: {guidance}");
+            artifacts.Add(GenerateTestCsproj(scopedServices));
 
             // 2. Per-entity service tests with Moq
-            foreach (var svc in MicroserviceCatalog.All)
+            foreach (var svc in scopedServices)
             {
                 if (context.ReportProgress is not null)
                     await context.ReportProgress(Type, $"Generating tests for {svc.Name} — {svc.Entities.Length} service tests + {svc.Entities.Length} repository tests with Moq");
@@ -81,7 +85,7 @@ public sealed class TestingAgent : IAgent
                 Artifacts = artifacts,
                 Messages = [new AgentMessage { From = Type, To = AgentType.Orchestrator,
                     Subject = "Tests generated",
-                    Body = $"{artifacts.Count} test files: service tests (Moq), repo tests (InMemory EF), tenant isolation, entity field coverage, AI safety, feature traceability." }],
+                    Body = $"{artifacts.Count} test files: service tests (Moq), repo tests (InMemory EF), tenant isolation, entity field coverage, AI safety, feature traceability. Scoped services: {string.Join(", ", scopedServices.Select(s => s.Name))}." }],
                 Duration = sw.Elapsed
             };
         }
@@ -95,10 +99,47 @@ public sealed class TestingAgent : IAgent
 
     // ─── Test Project ───────────────────────────────────────────────────────
 
-    private static CodeArtifact GenerateTestCsproj()
+    private static List<MicroserviceDefinition> ResolveTargetServices(AgentContext context)
+    {
+        var archInstruction = context.OrchestratorInstructions
+            .FirstOrDefault(i => i.StartsWith("[ARCH]", StringComparison.OrdinalIgnoreCase));
+
+        if (string.IsNullOrWhiteSpace(archInstruction))
+            return MicroserviceCatalog.All.ToList();
+
+        var marker = "TARGET_SERVICES=";
+        var start = archInstruction.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+        if (start < 0)
+            return MicroserviceCatalog.All.ToList();
+
+        start += marker.Length;
+        var end = archInstruction.IndexOf(';', start);
+        var csv = end >= 0 ? archInstruction[start..end] : archInstruction[start..];
+
+        var services = csv
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(MicroserviceCatalog.ByName)
+            .Where(s => s is not null)
+            .Cast<MicroserviceDefinition>()
+            .ToList();
+
+        return services.Count > 0 ? services : MicroserviceCatalog.All.ToList();
+    }
+
+    private static string GetGuidanceSummary(AgentContext context)
+    {
+        var guidance = context.OrchestratorInstructions
+            .Where(i => i.StartsWith("[ARCH]", StringComparison.OrdinalIgnoreCase)
+                     || i.StartsWith("[PLATFORM]", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        return guidance.Count == 0 ? string.Empty : string.Join(" | ", guidance);
+    }
+
+    private static CodeArtifact GenerateTestCsproj(IEnumerable<MicroserviceDefinition> services)
     {
         var projRefs = string.Join("\n    ",
-            MicroserviceCatalog.All.Select(s =>
+            services.Select(s =>
                 $"<ProjectReference Include=\"..\\{s.ProjectName}\\{s.ProjectName}.csproj\" />"));
 
         return new CodeArtifact

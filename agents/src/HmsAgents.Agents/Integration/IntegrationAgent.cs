@@ -27,19 +27,23 @@ public sealed class IntegrationAgent : IAgent
         _logger.LogInformation("IntegrationAgent starting — Kafka event bus + FHIR/HL7");
 
         var artifacts = new List<CodeArtifact>();
+        var scopedServices = ResolveTargetServices(context);
+        var guidance = GetGuidanceSummary(context);
 
         try
         {
             // Kafka infrastructure
             if (context.ReportProgress is not null)
                 await context.ReportProgress(Type, "Generating Kafka infrastructure — consumer hosted service, outbox pattern, dead-letter handler");
+            if (context.ReportProgress is not null && !string.IsNullOrWhiteSpace(guidance))
+                await context.ReportProgress(Type, $"Applying architecture/platform guidance: {guidance}");
             artifacts.Add(GenerateKafkaConsumerHostedService());
             artifacts.Add(GenerateOutboxEntity());
             artifacts.Add(GenerateOutboxProcessor());
             artifacts.Add(GenerateDeadLetterHandler());
 
             // Per-service consumer registrations
-            foreach (var svc in MicroserviceCatalog.All)
+            foreach (var svc in scopedServices)
             {
                 if (svc.DependsOn.Length > 0)
                 {
@@ -76,7 +80,7 @@ public sealed class IntegrationAgent : IAgent
                 Artifacts = artifacts,
                 Messages = [new AgentMessage { From = Type, To = AgentType.Orchestrator,
                     Subject = "Integration layer ready",
-                    Body = $"{artifacts.Count} artifacts: Kafka consumers/producers, outbox, DLQ, FHIR R4, HL7v2." }],
+                    Body = $"{artifacts.Count} artifacts: Kafka consumers/producers, outbox, DLQ, FHIR R4, HL7v2. Scoped services: {string.Join(", ", scopedServices.Select(s => s.Name))}." }],
                 Duration = sw.Elapsed
             };
         }
@@ -86,6 +90,43 @@ public sealed class IntegrationAgent : IAgent
             _logger.LogError(ex, "IntegrationAgent failed");
             return new AgentResult { Agent = Type, Success = false, Errors = [ex.Message], Duration = sw.Elapsed };
         }
+    }
+
+    private static List<MicroserviceDefinition> ResolveTargetServices(AgentContext context)
+    {
+        var archInstruction = context.OrchestratorInstructions
+            .FirstOrDefault(i => i.StartsWith("[ARCH]", StringComparison.OrdinalIgnoreCase));
+
+        if (string.IsNullOrWhiteSpace(archInstruction))
+            return MicroserviceCatalog.All.ToList();
+
+        var marker = "TARGET_SERVICES=";
+        var start = archInstruction.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+        if (start < 0)
+            return MicroserviceCatalog.All.ToList();
+
+        start += marker.Length;
+        var end = archInstruction.IndexOf(';', start);
+        var csv = end >= 0 ? archInstruction[start..end] : archInstruction[start..];
+
+        var services = csv
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(MicroserviceCatalog.ByName)
+            .Where(s => s is not null)
+            .Cast<MicroserviceDefinition>()
+            .ToList();
+
+        return services.Count > 0 ? services : MicroserviceCatalog.All.ToList();
+    }
+
+    private static string GetGuidanceSummary(AgentContext context)
+    {
+        var guidance = context.OrchestratorInstructions
+            .Where(i => i.StartsWith("[ARCH]", StringComparison.OrdinalIgnoreCase)
+                     || i.StartsWith("[PLATFORM]", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        return guidance.Count == 0 ? string.Empty : string.Join(" | ", guidance);
     }
 
     // ─── Kafka Consumer Hosted Service ──────────────────────────────────────

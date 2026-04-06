@@ -1,14 +1,16 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using Microsoft.Data.Sqlite;
+using SqliteCommand = Npgsql.NpgsqlCommand;
+using SqliteConnection = Npgsql.NpgsqlConnection;
+using SqliteDataReader = Npgsql.NpgsqlDataReader;
 
 namespace HmsAgents.Web.Services;
 
 /// <summary>
-/// SQLite-backed persistent database for all pipeline run data.
+/// PostgreSQL-backed persistent database for all pipeline run data.
 /// Survives server restarts and enables disaster recovery of the full pipeline state.
-/// DB file: agents/src/HmsAgents.Web/agent-pipeline.db
+/// Connection string is read from ConnectionStrings:MasterDb.
 /// </summary>
 public sealed class AgentPipelineDb : IDisposable
 {
@@ -16,20 +18,19 @@ public sealed class AgentPipelineDb : IDisposable
     private readonly ILogger<AgentPipelineDb> _logger;
     private static readonly JsonSerializerOptions s_json = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 
-    public AgentPipelineDb(ILogger<AgentPipelineDb> logger)
+    public AgentPipelineDb(ILogger<AgentPipelineDb> logger, IConfiguration configuration)
     {
-        var dbPath = Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "agent-pipeline.db");
-        dbPath = Path.GetFullPath(dbPath);
-        _connectionString = $"Data Source={dbPath}";
+        _connectionString = configuration.GetConnectionString("MasterDb")
+            ?? throw new InvalidOperationException("Connection string 'MasterDb' is missing.");
         _logger = logger;
 
         InitializeSchema();
-        _logger.LogInformation("AgentPipelineDb initialized at {Path}", dbPath);
+        _logger.LogInformation("AgentPipelineDb initialized using PostgreSQL master database");
     }
 
-    // ════════════════════════════════════════════════════════════════
+    // ΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉ
     //  Schema
-    // ════════════════════════════════════════════════════════════════
+    // ΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉ
 
     private void InitializeSchema()
     {
@@ -52,7 +53,7 @@ public sealed class AgentPipelineDb : IDisposable
             );
 
             CREATE TABLE IF NOT EXISTS AgentEvents (
-                Id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                Id          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
                 RunId       TEXT NOT NULL,
                 Agent       TEXT NOT NULL,
                 Status      TEXT NOT NULL,
@@ -111,6 +112,9 @@ public sealed class AgentPipelineDb : IDisposable
                 AcceptanceCriteria  TEXT,
                 DependsOn           TEXT,
                 Tags                TEXT,
+                TechnicalNotes      TEXT,
+                DefinitionOfDone    TEXT,
+                DetailedSpec        TEXT,
                 CreatedAt           TEXT NOT NULL,
                 StartedAt           TEXT,
                 CompletedAt         TEXT,
@@ -208,7 +212,7 @@ public sealed class AgentPipelineDb : IDisposable
             );
 
             CREATE TABLE IF NOT EXISTS OrchestratorInstructions (
-                Id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                Id              BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
                 RunId           TEXT,
                 Instruction     TEXT NOT NULL,
                 Source          TEXT NOT NULL DEFAULT 'Manual',
@@ -216,22 +220,106 @@ public sealed class AgentPipelineDb : IDisposable
                 FOREIGN KEY (RunId) REFERENCES PipelineRuns(RunId)
             );
 
+            CREATE TABLE IF NOT EXISTS WorkItemTemplates (
+                TemplateKey     TEXT PRIMARY KEY,
+                ItemType        TEXT NOT NULL,
+                TemplateName    TEXT NOT NULL,
+                Purpose         TEXT NOT NULL,
+                TemplateFormat  TEXT NOT NULL,
+                ExampleContent  TEXT,
+                Version         INTEGER NOT NULL DEFAULT 1,
+                IsActive        BOOLEAN NOT NULL DEFAULT TRUE,
+                UpdatedAt       TEXT NOT NULL
+            );
+
             CREATE INDEX IF NOT EXISTS IX_AuditLog_RunId ON AuditLog(RunId);
             CREATE INDEX IF NOT EXISTS IX_AuditLog_RunId_Sequence ON AuditLog(RunId, Sequence);
             CREATE INDEX IF NOT EXISTS IX_HumanDecisions_RunId ON HumanDecisions(RunId);
             CREATE INDEX IF NOT EXISTS IX_HumanDecisions_Pending ON HumanDecisions(Decision) WHERE Decision = 'Pending';
             CREATE INDEX IF NOT EXISTS IX_OrchestratorInstructions_RunId ON OrchestratorInstructions(RunId);
+
+            ALTER TABLE BacklogItems ADD COLUMN IF NOT EXISTS TechnicalNotes TEXT;
+            ALTER TABLE BacklogItems ADD COLUMN IF NOT EXISTS DefinitionOfDone TEXT;
+            ALTER TABLE BacklogItems ADD COLUMN IF NOT EXISTS DetailedSpec TEXT;
+
+            INSERT INTO WorkItemTemplates (TemplateKey, ItemType, TemplateName, Purpose, TemplateFormat, ExampleContent, Version, IsActive, UpdatedAt)
+            VALUES
+            (
+                'epic.v1',
+                'Epic',
+                'Epic Template',
+                'High-level strategic outcome with business value and measurable success criteria.',
+                'EPIC|<id>|<title>|<summary>|<business_value>|<success_criteria_semicolon_sep>|<scope>|<priority 1-3>|<services_csv>|<depends_on_ids_csv>',
+                '[E-AUTH-001] Password Recovery Modernization',
+                1,
+                TRUE,
+                @now
+            ),
+            (
+                'story.v1',
+                'UserStory',
+                'User Story Template',
+                'Feature from end-user perspective using As a / I want / so that format.',
+                'STORY|<id>|<parent_id>|As a [Type of User], I want to [Action] so that [Value/Benefit].|<given_when_then_acceptance_criteria_semicolon_sep>|<story_points 1,2,3,5,8>|<labels_csv>|<priority 1-3>|<services_csv>|<depends_on_ids_csv>|<detailed_spec>',
+                'As a Registered User, I want to reset my forgotten password so that I can regain account access securely.',
+                1,
+                TRUE,
+                @now
+            ),
+            (
+                'usecase.v1',
+                'UseCase',
+                'Use Case Template',
+                'Detailed actor-system flow with preconditions, numbered main flow, and postconditions.',
+                'USECASE|<id>|<parent_id>|<use_case_name>|<actor>|<preconditions>|<main_flow_steps_semicolon_sep>|<alt_flows>|<postconditions>|<services_csv>',
+                'Reset Forgotten Password | Actor: Registered User | Preconditions: User is on login page with internet connection.',
+                1,
+                TRUE,
+                @now
+            ),
+            (
+                'task.v1',
+                'Task',
+                'Task Template',
+                'Technical to-do item to fulfill a story.',
+                'TASK|<id>|<parent_id>|[T-101] <technical_title>|<description>|<technical_notes>|<definition_of_done_semicolon_sep>|<tags_csv>|<priority 1-3>|<services_csv>|<detailed_spec>',
+                '[T-101] Create POST /auth/reset endpoint | DoD: [ ] Unit tests passed.; [ ] Documentation updated in Swagger.; [ ] Code reviewed by peer.',
+                1,
+                TRUE,
+                @now
+            ),
+            (
+                'bug.v1',
+                'Bug',
+                'Bug Report Template',
+                'Clear, reproducible failure documentation.',
+                'BUG|<id>|<parent_id>|[BUG] <title>|<severity Blocker/Critical/Major/Minor>|<environment>|<steps_to_reproduce_semicolon_sep>|<expected_result>|<actual_result>|<services_csv>',
+                '[BUG] Login button non-responsive on Safari (Mobile)',
+                1,
+                TRUE,
+                @now
+            )
+            ON CONFLICT (TemplateKey) DO UPDATE SET
+                ItemType = EXCLUDED.ItemType,
+                TemplateName = EXCLUDED.TemplateName,
+                Purpose = EXCLUDED.Purpose,
+                TemplateFormat = EXCLUDED.TemplateFormat,
+                ExampleContent = EXCLUDED.ExampleContent,
+                Version = EXCLUDED.Version,
+                IsActive = EXCLUDED.IsActive,
+                UpdatedAt = EXCLUDED.UpdatedAt;
         """;
+        cmd.Parameters.AddWithValue("@now", DateTimeOffset.UtcNow.ToString("o"));
         cmd.ExecuteNonQuery();
     }
 
-    // ════════════════════════════════════════════════════════════════
+    // ΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉ
     //  Pipeline Run lifecycle
-    // ════════════════════════════════════════════════════════════════
+    // ΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉ
 
-    // ════════════════════════════════════════════════════════════════
+    // ΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉ
     //  Orchestrator Instructions
-    // ════════════════════════════════════════════════════════════════
+    // ΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉ
 
     public void SaveInstruction(string? runId, string instruction, string source = "Manual")
     {
@@ -284,9 +372,9 @@ public sealed class AgentPipelineDb : IDisposable
         public string CreatedAt { get; set; } = "";
     }
 
-    // ════════════════════════════════════════════════════════════════
+    // ΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉ
     //  Pipeline Run lifecycle
-    // ════════════════════════════════════════════════════════════════
+    // ΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉ
 
     public void StartRun(string runId, string? instructions, string? configJson)
     {
@@ -340,9 +428,9 @@ public sealed class AgentPipelineDb : IDisposable
         cmd.ExecuteNonQuery();
     }
 
-    // ════════════════════════════════════════════════════════════════
+    // ΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉ
     //  Agent Events (append-only timeline)
-    // ════════════════════════════════════════════════════════════════
+    // ΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉ
 
     public void RecordAgentEvent(string runId, string agent, string status, string message,
         int artifactCount, int findingCount, double elapsedMs, int retryAttempt)
@@ -394,9 +482,9 @@ public sealed class AgentPipelineDb : IDisposable
         }
     }
 
-    // ════════════════════════════════════════════════════════════════
+    // ΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉ
     //  Bulk persist at pipeline completion
-    // ════════════════════════════════════════════════════════════════
+    // ΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉ
 
     public void SaveRequirements(string runId, IEnumerable<RequirementRow> items)
     {
@@ -463,9 +551,11 @@ public sealed class AgentPipelineDb : IDisposable
                 cmd.CommandText = """
                     INSERT INTO BacklogItems (Id, RunId, ParentId, SourceRequirementId, ItemType, Status,
                         Title, Description, Module, Priority, Iteration, AcceptanceCriteria, DependsOn, Tags,
+                        TechnicalNotes, DefinitionOfDone, DetailedSpec,
                         CreatedAt, StartedAt, CompletedAt, AssignedAgent)
                     VALUES (@id, @runId, @parentId, @srcReqId, @type, @status,
                         @title, @desc, @module, @priority, @iteration, @ac, @deps, @tags,
+                        @technicalNotes, @definitionOfDone, @detailedSpec,
                         @created, @started, @completed, @assignedAgent)
                 """;
                 cmd.Parameters.AddWithValue("@id", item.Id);
@@ -482,6 +572,9 @@ public sealed class AgentPipelineDb : IDisposable
                 cmd.Parameters.AddWithValue("@ac", JsonSerializer.Serialize(item.AcceptanceCriteria ?? [], s_json));
                 cmd.Parameters.AddWithValue("@deps", JsonSerializer.Serialize(item.DependsOn ?? [], s_json));
                 cmd.Parameters.AddWithValue("@tags", JsonSerializer.Serialize(item.Tags ?? [], s_json));
+                cmd.Parameters.AddWithValue("@technicalNotes", item.TechnicalNotes ?? "");
+                cmd.Parameters.AddWithValue("@definitionOfDone", JsonSerializer.Serialize(item.DefinitionOfDone ?? [], s_json));
+                cmd.Parameters.AddWithValue("@detailedSpec", item.DetailedSpec ?? "");
                 cmd.Parameters.AddWithValue("@created", item.CreatedAt.ToString("o"));
                 cmd.Parameters.AddWithValue("@started", (object?)item.StartedAt?.ToString("o") ?? DBNull.Value);
                 cmd.Parameters.AddWithValue("@completed", (object?)item.CompletedAt?.ToString("o") ?? DBNull.Value);
@@ -609,9 +702,9 @@ public sealed class AgentPipelineDb : IDisposable
         catch { tx.Rollback(); throw; }
     }
 
-    // ════════════════════════════════════════════════════════════════
-    //  Queries — for dashboard restore
-    // ════════════════════════════════════════════════════════════════
+    // ΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉ
+    //  Queries ΓÇö for dashboard restore
+    // ΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉ
 
     public PipelineRunRow? GetLatestRun()
     {
@@ -711,6 +804,9 @@ public sealed class AgentPipelineDb : IDisposable
                 AcceptanceCriteria = DeserializeList(GetNullableString(r, "AcceptanceCriteria")),
                 DependsOn = DeserializeList(GetNullableString(r, "DependsOn")),
                 Tags = DeserializeList(GetNullableString(r, "Tags")),
+                TechnicalNotes = GetNullableString(r, "TechnicalNotes"),
+                DefinitionOfDone = DeserializeList(GetNullableString(r, "DefinitionOfDone")),
+                DetailedSpec = GetNullableString(r, "DetailedSpec"),
                 CreatedAt = DateTimeOffset.Parse(r.GetString(r.GetOrdinal("CreatedAt"))),
                 StartedAt = ParseNullableDateTimeOffset(GetNullableString(r, "StartedAt")),
                 CompletedAt = ParseNullableDateTimeOffset(GetNullableString(r, "CompletedAt")),
@@ -718,6 +814,65 @@ public sealed class AgentPipelineDb : IDisposable
             });
         }
         return items;
+    }
+
+    public List<WorkItemTemplateRow> GetWorkItemTemplates(bool activeOnly = true)
+    {
+        using var conn = Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = activeOnly
+            ? "SELECT * FROM WorkItemTemplates WHERE IsActive = TRUE ORDER BY ItemType, TemplateKey"
+            : "SELECT * FROM WorkItemTemplates ORDER BY ItemType, TemplateKey";
+
+        using var r = cmd.ExecuteReader();
+        var rows = new List<WorkItemTemplateRow>();
+        while (r.Read())
+        {
+            rows.Add(new WorkItemTemplateRow
+            {
+                TemplateKey = r.GetString(r.GetOrdinal("TemplateKey")),
+                ItemType = r.GetString(r.GetOrdinal("ItemType")),
+                TemplateName = r.GetString(r.GetOrdinal("TemplateName")),
+                Purpose = r.GetString(r.GetOrdinal("Purpose")),
+                TemplateFormat = r.GetString(r.GetOrdinal("TemplateFormat")),
+                ExampleContent = GetNullableString(r, "ExampleContent"),
+                Version = r.GetInt32(r.GetOrdinal("Version")),
+                IsActive = r.GetBoolean(r.GetOrdinal("IsActive")),
+                UpdatedAt = r.GetString(r.GetOrdinal("UpdatedAt"))
+            });
+        }
+        return rows;
+    }
+
+    public void UpsertWorkItemTemplate(WorkItemTemplateRow template)
+    {
+        using var conn = Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            INSERT INTO WorkItemTemplates
+                (TemplateKey, ItemType, TemplateName, Purpose, TemplateFormat, ExampleContent, Version, IsActive, UpdatedAt)
+            VALUES
+                (@key, @itemType, @name, @purpose, @format, @example, @version, @active, @updatedAt)
+            ON CONFLICT (TemplateKey) DO UPDATE SET
+                ItemType = EXCLUDED.ItemType,
+                TemplateName = EXCLUDED.TemplateName,
+                Purpose = EXCLUDED.Purpose,
+                TemplateFormat = EXCLUDED.TemplateFormat,
+                ExampleContent = EXCLUDED.ExampleContent,
+                Version = EXCLUDED.Version,
+                IsActive = EXCLUDED.IsActive,
+                UpdatedAt = EXCLUDED.UpdatedAt
+        """;
+        cmd.Parameters.AddWithValue("@key", template.TemplateKey);
+        cmd.Parameters.AddWithValue("@itemType", template.ItemType);
+        cmd.Parameters.AddWithValue("@name", template.TemplateName);
+        cmd.Parameters.AddWithValue("@purpose", template.Purpose);
+        cmd.Parameters.AddWithValue("@format", template.TemplateFormat);
+        cmd.Parameters.AddWithValue("@example", (object?)template.ExampleContent ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@version", template.Version);
+        cmd.Parameters.AddWithValue("@active", template.IsActive);
+        cmd.Parameters.AddWithValue("@updatedAt", DateTimeOffset.UtcNow.ToString("o"));
+        cmd.ExecuteNonQuery();
     }
 
     /// <summary>Update priority for a single backlog item.</summary>
@@ -898,9 +1053,9 @@ public sealed class AgentPipelineDb : IDisposable
         return items;
     }
 
-    // ════════════════════════════════════════════════════════════════
-    //  Audit Log — hash-chained, tamper-evident
-    // ════════════════════════════════════════════════════════════════
+    // ΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉ
+    //  Audit Log ΓÇö hash-chained, tamper-evident
+    // ΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉ
 
     private readonly object _auditLock = new();
 
@@ -1010,9 +1165,9 @@ public sealed class AgentPipelineDb : IDisposable
         return (true, null);
     }
 
-    // ════════════════════════════════════════════════════════════════
+    // ΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉ
     //  Human-in-the-Loop Decisions
-    // ════════════════════════════════════════════════════════════════
+    // ΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉ
 
     public void InsertHumanDecision(string id, string runId, string agent, string category,
         string title, string description, string? details, double timeoutMinutes)
@@ -1108,18 +1263,14 @@ public sealed class AgentPipelineDb : IDisposable
         return BitConverter.ToString(bytes).Replace("-", "").ToLowerInvariant();
     }
 
-    // ════════════════════════════════════════════════════════════════
+    // ΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉ
     //  Helpers
-    // ════════════════════════════════════════════════════════════════
+    // ΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉ
 
     private SqliteConnection Open()
     {
         var conn = new SqliteConnection(_connectionString);
         conn.Open();
-        // Enable WAL mode for better concurrent read performance
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;";
-        cmd.ExecuteNonQuery();
         return conn;
     }
 
@@ -1139,7 +1290,7 @@ public sealed class AgentPipelineDb : IDisposable
     private static DateTimeOffset? ParseNullableDateTimeOffset(string? s)
         => string.IsNullOrEmpty(s) ? null : DateTimeOffset.Parse(s);
 
-    /// <summary>Deletes all data from every table — full project reset.</summary>
+    /// <summary>Deletes all data from every table ΓÇö full project reset.</summary>
     public void PurgeAllData()
     {
         using var conn = Open();
@@ -1163,12 +1314,12 @@ public sealed class AgentPipelineDb : IDisposable
         catch { tx.Rollback(); throw; }
     }
 
-    public void Dispose() { /* SQLite connections are opened/closed per operation */ }
+    public void Dispose() { /* Connections are opened/closed per operation */ }
 }
 
-// ════════════════════════════════════════════════════════════════════
+// ΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉ
 //  Row DTOs
-// ════════════════════════════════════════════════════════════════════
+// ΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉ
 
 public sealed class PipelineRunRow
 {
@@ -1210,6 +1361,8 @@ public sealed class BacklogItemRow
     public List<string>? AcceptanceCriteria { get; set; }
     public List<string>? DependsOn { get; set; }
     public List<string>? Tags { get; set; }
+    public string? TechnicalNotes { get; set; }
+    public List<string>? DefinitionOfDone { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset? StartedAt { get; set; }
     public DateTimeOffset? CompletedAt { get; set; }
@@ -1276,6 +1429,19 @@ public sealed class TestDiagRow
     public double DurationMs { get; set; }
     public int AttemptNumber { get; set; }
     public DateTimeOffset Timestamp { get; set; }
+}
+
+public sealed class WorkItemTemplateRow
+{
+    public string TemplateKey { get; set; } = "";
+    public string ItemType { get; set; } = "";
+    public string TemplateName { get; set; } = "";
+    public string Purpose { get; set; } = "";
+    public string TemplateFormat { get; set; } = "";
+    public string? ExampleContent { get; set; }
+    public int Version { get; set; } = 1;
+    public bool IsActive { get; set; } = true;
+    public string UpdatedAt { get; set; } = "";
 }
 
 public sealed class AgentEventRow

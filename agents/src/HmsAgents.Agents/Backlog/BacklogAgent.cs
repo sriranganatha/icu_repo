@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text.RegularExpressions;
 using HmsAgents.Core.Enums;
 using HmsAgents.Core.Interfaces;
 using HmsAgents.Core.Models;
@@ -27,13 +28,27 @@ public sealed class BacklogAgent : IAgent
         context.AgentStatuses[Type] = AgentStatus.Running;
         _logger.LogInformation("BacklogAgent starting — iteration {Iter}", context.DevIteration);
 
-        // 1. Auto-generate backlog items from high-level requirements if none exist
+        // 1. Backlog must consume only expander output.
+        // Never synthesize backlog directly from raw requirements.
         if (context.ExpandedRequirements.Count == 0 && context.Requirements.Count > 0)
         {
-            context.ReportProgress?.Invoke(Type, $"No expanded items found — auto-generating backlog from {context.Requirements.Count} requirements");
-            ExpandRequirementsToBacklog(context);
-            context.ReportProgress?.Invoke(Type, $"Generated {context.ExpandedRequirements.Count} backlog items from requirements");
+            context.ReportProgress?.Invoke(Type,
+                $"No expanded items available yet ({context.Requirements.Count} requirements). Waiting for RequirementsExpander output.");
+
+            context.AgentStatuses[Type] = AgentStatus.Idle;
+            return Task.FromResult(new AgentResult
+            {
+                Agent = Type,
+                Success = true,
+                Summary = $"Backlog waiting: {context.Requirements.Count} requirements pending expansion",
+                Duration = sw.Elapsed
+            });
         }
+
+        // 1b. Convert cross-agent findings into standardized bug backlog items
+        var bugItemsAdded = EnsureBugItemsFromFindings(context);
+        if (bugItemsAdded > 0)
+            context.ReportProgress?.Invoke(Type, $"Added {bugItemsAdded} bug item(s) from findings using bug report template");
 
         // 2. Update statuses based on current artifacts and findings
         context.ReportProgress?.Invoke(Type, $"Updating backlog statuses — {context.Artifacts.Count} artifacts, {context.Findings.Count} findings");
@@ -90,30 +105,40 @@ public sealed class BacklogAgent : IAgent
             foreach (var ac in req.AcceptanceCriteria)
             {
                 var storyId = $"US-{module}-{seq:D3}-{++storySeq:D2}";
+                var storyTitle = BuildUserStoryTitle(ac, req.Title);
+                var storyCriteria = NormalizeAcceptanceCriteria(ac);
                 context.ExpandedRequirements.Add(new ExpandedRequirement
                 {
                     Id = storyId,
                     ParentId = epicId,
                     SourceRequirementId = req.Id,
                     ItemType = WorkItemType.UserStory,
-                    Title = $"As a user, {ac}",
+                    Title = storyTitle,
                     Description = ac,
                     Module = module,
                     Priority = 2,
                     Iteration = iteration,
+                    StoryPoints = 3,
+                    Labels = ["API", "Backend"],
+                    AcceptanceCriteria = storyCriteria,
                     Status = WorkItemStatus.InQueue
                 });
 
                 // Create implementation Tasks under each story
+                var taskSubject = BuildTaskSubject(ac, req.Title);
                 context.ExpandedRequirements.Add(new ExpandedRequirement
                 {
                     Id = $"TASK-{module}-{seq:D3}-{storySeq:D2}-DB",
                     ParentId = storyId,
                     SourceRequirementId = req.Id,
                     ItemType = WorkItemType.Task,
-                    Title = $"Database schema for: {Truncate(ac, 60)}",
+                    Title = $"[T-{seq:D3}-{storySeq:D2}-DB] Create persistence layer for {taskSubject}",
+                    Description = $"Implement database-side changes to support: {taskSubject}.",
                     Module = module, Priority = 3, Iteration = iteration,
-                    Tags = ["database"], Status = WorkItemStatus.InQueue
+                    Tags = ["database"],
+                    TechnicalNotes = "Use PostgreSQL best practices, tenant-safe constraints, and indexed lookup fields.",
+                    DefinitionOfDone = ["[ ] Unit tests passed.", "[ ] Documentation updated in Swagger.", "[ ] Code reviewed by peer."],
+                    Status = WorkItemStatus.InQueue
                 });
 
                 context.ExpandedRequirements.Add(new ExpandedRequirement
@@ -122,9 +147,13 @@ public sealed class BacklogAgent : IAgent
                     ParentId = storyId,
                     SourceRequirementId = req.Id,
                     ItemType = WorkItemType.Task,
-                    Title = $"Service implementation for: {Truncate(ac, 60)}",
+                    Title = $"[T-{seq:D3}-{storySeq:D2}-SVC] Implement service/API logic for {taskSubject}",
+                    Description = $"Implement backend behavior and endpoints required for: {taskSubject}.",
                     Module = module, Priority = 3, Iteration = iteration,
-                    Tags = ["service"], Status = WorkItemStatus.InQueue
+                    Tags = ["service", "api"],
+                    TechnicalNotes = "Implement validation, error handling, and auditable state transitions.",
+                    DefinitionOfDone = ["[ ] Unit tests passed.", "[ ] Documentation updated in Swagger.", "[ ] Code reviewed by peer."],
+                    Status = WorkItemStatus.InQueue
                 });
 
                 context.ExpandedRequirements.Add(new ExpandedRequirement
@@ -133,23 +162,33 @@ public sealed class BacklogAgent : IAgent
                     ParentId = storyId,
                     SourceRequirementId = req.Id,
                     ItemType = WorkItemType.Task,
-                    Title = $"Tests for: {Truncate(ac, 60)}",
+                    Title = $"[T-{seq:D3}-{storySeq:D2}-TEST] Add automated tests for {taskSubject}",
+                    Description = $"Add test coverage and negative-path checks for: {taskSubject}.",
                     Module = module, Priority = 3, Iteration = iteration,
-                    Tags = ["testing"], Status = WorkItemStatus.InQueue
+                    Tags = ["testing"],
+                    TechnicalNotes = "Cover happy path, edge cases, authorization failures, and validation errors.",
+                    DefinitionOfDone = ["[ ] Unit tests passed.", "[ ] Documentation updated in Swagger.", "[ ] Code reviewed by peer."],
+                    Status = WorkItemStatus.InQueue
                 });
             }
 
             // If no acceptance criteria, create a UseCase
             if (req.AcceptanceCriteria.Count == 0)
             {
+                var ucTitle = BuildUseCaseTitle(req.Title);
+                var ucMainFlow = BuildUseCaseMainFlow(req.Title);
                 context.ExpandedRequirements.Add(new ExpandedRequirement
                 {
                     Id = $"UC-{module}-{seq:D3}",
                     ParentId = epicId,
                     SourceRequirementId = req.Id,
                     ItemType = WorkItemType.UseCase,
-                    Title = $"Implement: {req.Title}",
-                    Description = req.Description,
+                    Title = ucTitle,
+                    Actor = "Registered User",
+                    Preconditions = "User is on the relevant entry page and has network connectivity.",
+                    MainFlow = ucMainFlow,
+                    Postconditions = "Requested action is completed, persisted, and auditable.",
+                    Description = $"Actor: Registered User\nPreconditions: User is on the relevant entry page and has network connectivity.\nMain Flow: {string.Join("; ", ucMainFlow)}\nPostconditions: Requested action is completed, persisted, and auditable.",
                     Module = module,
                     Priority = 2,
                     Iteration = iteration,
@@ -160,6 +199,59 @@ public sealed class BacklogAgent : IAgent
 
         _logger.LogInformation("Expanded {ReqCount} requirements → {BacklogCount} backlog items",
             context.Requirements.Count, context.ExpandedRequirements.Count);
+    }
+
+    private static string BuildUserStoryTitle(string ac, string requirementTitle)
+    {
+        var action = ac.Trim();
+        if (action.StartsWith("As a ", StringComparison.OrdinalIgnoreCase))
+            return action;
+
+        return $"As a clinical user, I want to {ToSentenceFragment(action)} so that {ToSentenceFragment(requirementTitle)} is delivered safely and efficiently.";
+    }
+
+    private static List<string> NormalizeAcceptanceCriteria(string ac)
+    {
+        var trimmed = ac.Trim();
+        if (trimmed.Contains("given", StringComparison.OrdinalIgnoreCase) &&
+            trimmed.Contains("when", StringComparison.OrdinalIgnoreCase) &&
+            trimmed.Contains("then", StringComparison.OrdinalIgnoreCase))
+        {
+            return [trimmed];
+        }
+
+        return [$"Given the user is authorized, when they {ToSentenceFragment(trimmed)}, then the system completes the request and records an auditable outcome."];
+    }
+
+    private static string ToSentenceFragment(string value)
+    {
+        var v = value.Trim().Trim('.', ';', ':', ',');
+        if (string.IsNullOrWhiteSpace(v)) return "complete the requested operation";
+        return char.ToLowerInvariant(v[0]) + v[1..];
+    }
+
+    private static string BuildUseCaseTitle(string requirementTitle)
+    {
+        var normalized = requirementTitle.Trim();
+        if (string.IsNullOrWhiteSpace(normalized))
+            return "Complete Requested Workflow";
+
+        return normalized.StartsWith("Reset ", StringComparison.OrdinalIgnoreCase)
+            ? normalized
+            : $"Execute {normalized}";
+    }
+
+    private static List<string> BuildUseCaseMainFlow(string requirementTitle)
+    {
+        var action = ToSentenceFragment(requirementTitle);
+        return
+        [
+            "1. User initiates the workflow from the UI.",
+            "2. System prompts for required input.",
+            $"3. User submits valid input to {action}.",
+            "4. System validates and processes the request securely.",
+            "5. System confirms success to the user."
+        ];
     }
 
     private void UpdateBacklogStatuses(AgentContext context)
@@ -236,10 +328,16 @@ public sealed class BacklogAgent : IAgent
                     {
                         Id = $"DIR-{Guid.NewGuid():N}"[..16],
                         ItemType = WorkItemType.Task,
-                        Title = directive.Details,
+                        Title = directive.Details.StartsWith("[T-", StringComparison.OrdinalIgnoreCase)
+                            ? directive.Details
+                            : "[T-DIR-001] " + directive.Details,
+                        Description = directive.Details,
+                        TechnicalNotes = "Follow service standards, add validation, and keep auditable logs.",
+                        DefinitionOfDone = ["[ ] Unit tests passed.", "[ ] Documentation updated in Swagger.", "[ ] Code reviewed by peer."],
                         Module = "General",
                         Priority = directive.Priority,
                         Iteration = context.DevIteration,
+                        Tags = ["service"],
                         Status = WorkItemStatus.New
                     });
                     break;
@@ -293,6 +391,130 @@ public sealed class BacklogAgent : IAgent
 
     private static string Truncate(string s, int max) =>
         s.Length <= max ? s : s[..max] + "...";
+
+    private static string BuildTaskSubject(string acceptanceCriterion, string fallbackTitle)
+    {
+        var ac = acceptanceCriterion?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(ac))
+            return Truncate(fallbackTitle, 48);
+
+        // Remove common GWT prefixes so task titles remain technical and concise.
+        ac = Regex.Replace(ac, @"\bGiven\b.*?\bwhen\b", string.Empty, RegexOptions.IgnoreCase).Trim();
+        ac = Regex.Replace(ac, @"\bthen\b", string.Empty, RegexOptions.IgnoreCase).Trim();
+        ac = ac.Trim(',', '.', ';', ':');
+
+        if (string.IsNullOrWhiteSpace(ac))
+            ac = fallbackTitle;
+
+        return Truncate(ac, 48);
+    }
+
+    private static int EnsureBugItemsFromFindings(AgentContext context)
+    {
+        var added = 0;
+        var existingFindingRefs = context.ExpandedRequirements
+            .Where(e => e.ItemType == WorkItemType.Bug && !string.IsNullOrWhiteSpace(e.SourceRequirementId))
+            .Select(e => e.SourceRequirementId)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var finding in context.Findings)
+        {
+            if (!ShouldCreateBugFromFinding(finding))
+                continue;
+
+            var sourceRef = $"FINDING:{finding.Id}";
+            if (existingFindingRefs.Contains(sourceRef))
+                continue;
+
+            var bugId = $"BUG-AUTO-{finding.Id[..Math.Min(8, finding.Id.Length)].ToUpperInvariant()}";
+            var title = BuildBugTitle(finding);
+            var severity = MapBugSeverity(finding.Severity);
+            var environment = BuildBugEnvironment(finding);
+            var steps = BuildBugSteps(finding);
+            var expected = BuildExpectedResult(finding);
+            var actual = BuildActualResult(finding);
+
+            context.ExpandedRequirements.Add(new ExpandedRequirement
+            {
+                Id = bugId,
+                SourceRequirementId = sourceRef,
+                ItemType = WorkItemType.Bug,
+                Title = title,
+                Severity = severity,
+                Environment = environment,
+                StepsToReproduce = steps,
+                ExpectedResult = expected,
+                ActualResult = actual,
+                Description = $"Severity: {severity}\nEnvironment: {environment}\nSteps to Reproduce:\n{string.Join("\n", steps)}\nExpected Result: {expected}\nActual Result: {actual}\nAttachments: [Screenshot/Screen Recording/Log Snippet]",
+                Module = InferModuleFromFinding(finding),
+                Priority = severity is "Blocker" or "Critical" ? 1 : 2,
+                Iteration = context.DevIteration,
+                Tags = ["bugfix", finding.Category.ToLowerInvariant()],
+                Status = WorkItemStatus.InQueue,
+                ProducedBy = "Backlog",
+            });
+
+            existingFindingRefs.Add(sourceRef);
+            added++;
+        }
+
+        return added;
+    }
+
+    private static bool ShouldCreateBugFromFinding(ReviewFinding finding)
+        => finding.Severity is ReviewSeverity.Error
+            or ReviewSeverity.Critical
+            or ReviewSeverity.SecurityViolation
+            or ReviewSeverity.ComplianceViolation;
+
+    private static string BuildBugTitle(ReviewFinding finding)
+    {
+        var msg = string.IsNullOrWhiteSpace(finding.Message) ? "Unhandled failure detected" : finding.Message.Trim();
+        return $"[BUG] {Truncate(msg, 90)}";
+    }
+
+    private static string MapBugSeverity(ReviewSeverity severity) => severity switch
+    {
+        ReviewSeverity.Critical => "Critical",
+        ReviewSeverity.SecurityViolation => "Critical",
+        ReviewSeverity.ComplianceViolation => "Critical",
+        ReviewSeverity.Error => "Major",
+        ReviewSeverity.Warning => "Minor",
+        _ => "Minor"
+    };
+
+    private static string BuildBugEnvironment(ReviewFinding finding)
+        => string.IsNullOrWhiteSpace(finding.FilePath)
+            ? ".NET 8, PostgreSQL 16, Local"
+            : $".NET 8, PostgreSQL 16, Local — {finding.FilePath}";
+
+    private static List<string> BuildBugSteps(ReviewFinding finding)
+        =>
+        [
+            "1. Navigate to the impacted workflow or endpoint.",
+            "2. Perform the action under normal expected input.",
+            $"3. Observe failure: {Truncate(finding.Message, 120)}"
+        ];
+
+    private static string BuildExpectedResult(ReviewFinding finding)
+        => string.IsNullOrWhiteSpace(finding.Suggestion)
+            ? "The operation should complete with expected validation and stable UI/API behavior."
+            : finding.Suggestion;
+
+    private static string BuildActualResult(ReviewFinding finding)
+        => string.IsNullOrWhiteSpace(finding.Message)
+            ? "The operation fails or produces unstable behavior."
+            : finding.Message;
+
+    private static string InferModuleFromFinding(ReviewFinding finding)
+    {
+        var path = finding.FilePath ?? string.Empty;
+        if (path.Contains("database", StringComparison.OrdinalIgnoreCase)) return "Database";
+        if (path.Contains("service", StringComparison.OrdinalIgnoreCase)) return "ServiceLayer";
+        if (path.Contains("api", StringComparison.OrdinalIgnoreCase) || path.Contains("web", StringComparison.OrdinalIgnoreCase)) return "Application";
+        if (path.Contains("integration", StringComparison.OrdinalIgnoreCase)) return "Integration";
+        return "General";
+    }
 
     private record BacklogStats
     {

@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text;
 using System.Text.Json;
 using HmsAgents.Core.Enums;
 using HmsAgents.Core.Interfaces;
@@ -14,6 +15,10 @@ namespace HmsAgents.Web.Api;
 [Route("api/pipeline")]
 public sealed class PipelineController : ControllerBase
 {
+    private static readonly object s_runLock = new();
+    private static CancellationTokenSource? s_runCts;
+    private static bool s_runActive;
+
     private readonly IAgentOrchestrator _orchestrator;
     private readonly IHubContext<PipelineHub> _hub;
     private readonly IConfiguration _config;
@@ -79,8 +84,20 @@ public sealed class PipelineController : ControllerBase
             ServicePorts = request.ServicePorts ?? new ServicePortMap()
         };
 
-        // Fire-and-forget: use app lifetime token so client disconnects don't cancel
-        var appCt = lifetime.ApplicationStopping;
+        CancellationTokenSource runCts;
+        lock (s_runLock)
+        {
+            if (s_runActive)
+                return Conflict(new { error = "A pipeline is already running. Stop it first or wait for completion." });
+
+            s_runCts?.Dispose();
+            s_runCts = new CancellationTokenSource();
+            runCts = s_runCts;
+            s_runActive = true;
+        }
+
+        // Fire-and-forget: use app lifetime token + stop token so UI can cancel active runs.
+        var lifetimeCt = lifetime.ApplicationStopping;
         var stateStore = _stateStore;
         var db = _db;
         var configJson = JsonSerializer.Serialize(pipelineConfig);
@@ -91,11 +108,14 @@ public sealed class PipelineController : ControllerBase
 
         _ = Task.Run(async () =>
         {
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(lifetimeCt, runCts.Token);
+            var appCt = linked.Token;
             var sw = Stopwatch.StartNew();
             stateStore.Reset(Guid.NewGuid().ToString("N")[..8]);
+            AgentContext? context = null;
             try
             {
-                var context = await _orchestrator.RunPipelineAsync(pipelineConfig, appCt);
+                context = await _orchestrator.RunPipelineAsync(pipelineConfig, appCt);
 
                 // ── Persist to JSON snapshot ──
                 stateStore.TrackCompletion(
@@ -128,6 +148,9 @@ public sealed class PipelineController : ControllerBase
                     Title = e.Title, Description = e.Description, Module = e.Module,
                     Priority = e.Priority, Iteration = e.Iteration,
                     AcceptanceCriteria = e.AcceptanceCriteria, DependsOn = e.DependsOn, Tags = e.Tags,
+                    TechnicalNotes = e.TechnicalNotes,
+                    DefinitionOfDone = e.DefinitionOfDone,
+                    DetailedSpec = e.DetailedSpec,
                     CreatedAt = e.CreatedAt, StartedAt = e.StartedAt, CompletedAt = e.CompletedAt,
                     AssignedAgent = e.AssignedAgent
                 }));
@@ -192,14 +215,66 @@ public sealed class PipelineController : ControllerBase
                     })
                 }, appCt);
             }
+            catch (OperationCanceledException)
+            {
+                var reqCount = context?.Requirements.Count ?? 0;
+                var artifactCount = context?.Artifacts.Count ?? 0;
+                var findingCount = context?.Findings.Count ?? 0;
+                var testDiagCount = context?.TestDiagnostics.Count ?? 0;
+
+                if (!string.IsNullOrWhiteSpace(context?.RunId))
+                {
+                    try { db.FailRun(context.RunId, "Pipeline was stopped by user."); } catch { }
+                }
+
+                await _hub.Clients.All.SendAsync("PipelineComplete", new
+                {
+                    requirementCount = reqCount,
+                    artifactCount,
+                    findingCount,
+                    testDiagnosticCount = testDiagCount,
+                    durationMs = sw.Elapsed.TotalMilliseconds,
+                    findings = Array.Empty<object>(),
+                    artifacts = Array.Empty<object>(),
+                    testDiagnostics = Array.Empty<object>(),
+                    cancelled = true
+                });
+            }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Pipeline background execution failed");
                 try { db.FailRun(stateStore.CurrentSnapshot?.RunId ?? "unknown", ex.Message); } catch { }
             }
-        }, appCt);
+            finally
+            {
+                lock (s_runLock)
+                {
+                    s_runActive = false;
+                    if (ReferenceEquals(s_runCts, runCts))
+                    {
+                        s_runCts.Dispose();
+                        s_runCts = null;
+                    }
+                }
+            }
+        }, CancellationToken.None);
 
         return Accepted(new { status = "started", message = "Pipeline running. Poll GET /api/pipeline/status for progress." });
+    }
+
+    [HttpPost("stop")]
+    public IActionResult StopPipeline()
+    {
+        lock (s_runLock)
+        {
+            if (!s_runActive || s_runCts is null)
+                return Ok(new { stopped = false, message = "No active pipeline run." });
+
+            if (!s_runCts.IsCancellationRequested)
+                s_runCts.Cancel();
+        }
+
+        return Ok(new { stopped = true, message = "Stop requested. Active agents are being cancelled." });
     }
 
     [HttpGet("status")]
@@ -266,6 +341,20 @@ public sealed class PipelineController : ControllerBase
             tracedRequirements = a.TracedRequirementIds.Count,
             contentLength = a.Content.Length
         }));
+    }
+
+    [HttpGet("artifacts/{id}")]
+    public IActionResult GetArtifactContent(string id)
+    {
+        var ctx = _orchestrator.GetCurrentContext();
+        if (ctx is null) return NotFound(new { error = "No active pipeline context" });
+
+        var artifact = ctx.Artifacts.FirstOrDefault(a => a.Id.Equals(id, StringComparison.OrdinalIgnoreCase));
+        if (artifact is null)
+            return NotFound(new { error = "Artifact not found", id });
+
+        var fileName = string.IsNullOrWhiteSpace(artifact.FileName) ? $"{id}.txt" : artifact.FileName;
+        return File(Encoding.UTF8.GetBytes(artifact.Content), "text/plain; charset=utf-8", fileName);
     }
 
     [HttpGet("findings")]
@@ -339,6 +428,59 @@ public sealed class PipelineController : ControllerBase
     {
         var rows = _db.GetInstructionHistory(limit);
         return Ok(new { instructions = rows, count = rows.Count });
+    }
+
+    // ─── Work Item Templates ───────────────────────────────────────
+
+    [HttpGet("templates")]
+    public IActionResult GetTemplates([FromQuery] bool activeOnly = false)
+    {
+        var rows = _db.GetWorkItemTemplates(activeOnly);
+        return Ok(new
+        {
+            templates = rows.Select(t => new
+            {
+                t.TemplateKey,
+                t.ItemType,
+                t.TemplateName,
+                t.Purpose,
+                t.TemplateFormat,
+                t.ExampleContent,
+                t.Version,
+                t.IsActive,
+                t.UpdatedAt
+            }),
+            count = rows.Count
+        });
+    }
+
+    [HttpPut("templates/{templateKey}")]
+    public IActionResult UpsertTemplate(string templateKey, [FromBody] TemplateUpsertDto dto)
+    {
+        if (string.IsNullOrWhiteSpace(templateKey))
+            return BadRequest(new { error = "templateKey is required" });
+        if (string.IsNullOrWhiteSpace(dto.ItemType))
+            return BadRequest(new { error = "itemType is required" });
+        if (string.IsNullOrWhiteSpace(dto.TemplateName))
+            return BadRequest(new { error = "templateName is required" });
+        if (string.IsNullOrWhiteSpace(dto.Purpose))
+            return BadRequest(new { error = "purpose is required" });
+        if (string.IsNullOrWhiteSpace(dto.TemplateFormat))
+            return BadRequest(new { error = "templateFormat is required" });
+
+        _db.UpsertWorkItemTemplate(new WorkItemTemplateRow
+        {
+            TemplateKey = templateKey,
+            ItemType = dto.ItemType,
+            TemplateName = dto.TemplateName,
+            Purpose = dto.Purpose,
+            TemplateFormat = dto.TemplateFormat,
+            ExampleContent = dto.ExampleContent,
+            Version = dto.Version <= 0 ? 1 : dto.Version,
+            IsActive = dto.IsActive
+        });
+
+        return Ok(new { saved = true, templateKey });
     }
 
     [HttpPost("instructions/save")]
@@ -422,6 +564,10 @@ public sealed class PipelineController : ControllerBase
                     e.Iteration,
                     e.Tags,
                     e.AcceptanceCriteria,
+                    e.DependsOn,
+                    e.TechnicalNotes,
+                    e.DefinitionOfDone,
+                    e.DetailedSpec,
                     e.CreatedAt,
                     e.StartedAt,
                     e.CompletedAt,
@@ -467,6 +613,10 @@ public sealed class PipelineController : ControllerBase
                         e.Iteration,
                         e.Tags,
                         e.AcceptanceCriteria,
+                        e.DependsOn,
+                        e.TechnicalNotes,
+                        e.DefinitionOfDone,
+                        e.DetailedSpec,
                         e.CreatedAt,
                         e.StartedAt,
                         e.CompletedAt,
@@ -563,6 +713,17 @@ public sealed class PipelineController : ControllerBase
     {
         public string ItemId { get; set; } = "";
         public int Priority { get; set; }
+    }
+
+    public sealed class TemplateUpsertDto
+    {
+        public string ItemType { get; set; } = "";
+        public string TemplateName { get; set; } = "";
+        public string Purpose { get; set; } = "";
+        public string TemplateFormat { get; set; } = "";
+        public string? ExampleContent { get; set; }
+        public int Version { get; set; } = 1;
+        public bool IsActive { get; set; } = true;
     }
 
     // ═══════════════════════════════════════════════════════════════

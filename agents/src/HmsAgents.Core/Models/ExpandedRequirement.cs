@@ -1,6 +1,6 @@
 namespace HmsAgents.Core.Models;
 
-public enum WorkItemType { Epic, UserStory, UseCase, Task }
+public enum WorkItemType { Epic, UserStory, UseCase, Task, Bug }
 
 public enum WorkItemStatus
 {
@@ -43,6 +43,52 @@ public sealed class ExpandedRequirement
     public DateTimeOffset? CompletedAt { get; set; }
     /// <summary>Which agent is currently working on (or completed) this item.</summary>
     public string AssignedAgent { get; set; } = string.Empty;
+
+    // ── Epic template fields ──
+    /// <summary>Brief "elevator pitch" of what this epic achieves.</summary>
+    public string Summary { get; set; } = string.Empty;
+    /// <summary>Why are we doing this? Business justification.</summary>
+    public string BusinessValue { get; set; } = string.Empty;
+    /// <summary>Measurable outcomes (e.g., "Users can log in via MFA with &lt; 2s latency").</summary>
+    public List<string> SuccessCriteria { get; set; } = [];
+    /// <summary>What is included — and importantly, what is NOT included.</summary>
+    public string Scope { get; set; } = string.Empty;
+
+    // ── User Story template fields ──
+    /// <summary>Story points estimate: 1, 2, 3, 5, or 8.</summary>
+    public int StoryPoints { get; set; }
+    /// <summary>Labels (e.g., Frontend, API, Design).</summary>
+    public List<string> Labels { get; set; } = [];
+
+    // ── Use Case template fields ──
+    /// <summary>The actor interacting with the system.</summary>
+    public string Actor { get; set; } = string.Empty;
+    /// <summary>Pre-conditions that must hold before the use case starts.</summary>
+    public string Preconditions { get; set; } = string.Empty;
+    /// <summary>Main success scenario — numbered steps.</summary>
+    public List<string> MainFlow { get; set; } = [];
+    /// <summary>Alternative / exception flows.</summary>
+    public string AlternativeFlows { get; set; } = string.Empty;
+    /// <summary>Post-conditions after successful completion.</summary>
+    public string Postconditions { get; set; } = string.Empty;
+
+    // ── Task template fields ──
+    /// <summary>Implementation-specific technical notes (e.g., "Use Redis for token storage, 15-min TTL").</summary>
+    public string TechnicalNotes { get; set; } = string.Empty;
+    /// <summary>Definition of Done checklist items.</summary>
+    public List<string> DefinitionOfDone { get; set; } = [];
+
+    // ── Bug Report template fields ──
+    /// <summary>Severity: Blocker, Critical, Major, Minor.</summary>
+    public string Severity { get; set; } = string.Empty;
+    /// <summary>Environment where bug occurs (e.g., "iOS 17.4, Safari, Production").</summary>
+    public string Environment { get; set; } = string.Empty;
+    /// <summary>Numbered steps to reproduce the bug.</summary>
+    public List<string> StepsToReproduce { get; set; } = [];
+    /// <summary>What should happen.</summary>
+    public string ExpectedResult { get; set; } = string.Empty;
+    /// <summary>What actually happens.</summary>
+    public string ActualResult { get; set; } = string.Empty;
 
     // ── Gap-analysis fields (populated by RequirementAnalyzerAgent) ──
     /// <summary>Coverage assessment after artifact analysis.</summary>

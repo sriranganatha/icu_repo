@@ -9,6 +9,20 @@ public sealed partial class RequirementParser : IRequirementsReader
 {
     private readonly ILogger<RequirementParser> _logger;
     private static readonly string[] s_docExtensions = [".md", ".yaml", ".yml"];
+    private static readonly string[] s_requirementSignals =
+    [
+        "shall", "must", "should", "will", "given", "when", "then",
+        "as a", "i want", "system", "user", "enable", "allow",
+        "capture", "validate", "create", "update", "delete", "generate", "process"
+    ];
+
+    private static readonly string[] s_structuralHeadings =
+    [
+        "table of contents", "toc", "purpose", "scope", "references", "definitions",
+        "glossary", "revision history", "approvals", "owners", "document control",
+        "background", "introduction"
+    ];
+
     private int _idCounter;
 
     public RequirementParser(ILogger<RequirementParser> logger) => _logger = logger;
@@ -63,8 +77,8 @@ public sealed partial class RequirementParser : IRequirementsReader
                 // Flush previous section
                 if (!string.IsNullOrWhiteSpace(currentTitle))
                 {
-                    results.Add(BuildRequirement(sourceFile, module, currentSection,
-                        currentLevel, currentTitle, bodyLines, tags));
+                    TryAddRequirement(results, sourceFile, module, currentSection,
+                        currentLevel, currentTitle, bodyLines, tags);
                 }
 
                 currentLevel = headingMatch.Groups[1].Value.Length;
@@ -82,11 +96,56 @@ public sealed partial class RequirementParser : IRequirementsReader
         // Flush last section
         if (!string.IsNullOrWhiteSpace(currentTitle))
         {
-            results.Add(BuildRequirement(sourceFile, module, currentSection,
-                currentLevel, currentTitle, bodyLines, tags));
+            TryAddRequirement(results, sourceFile, module, currentSection,
+                currentLevel, currentTitle, bodyLines, tags);
         }
 
         return results;
+    }
+
+    private void TryAddRequirement(
+        List<Requirement> results,
+        string source,
+        string module,
+        string section,
+        int level,
+        string title,
+        List<string> bodyLines,
+        List<string> tags)
+    {
+        if (!IsCandidateRequirement(level, title, bodyLines))
+            return;
+
+        results.Add(BuildRequirement(source, module, section, level, title, bodyLines, tags));
+    }
+
+    private static bool IsCandidateRequirement(int level, string title, List<string> bodyLines)
+    {
+        if (level <= 0 || string.IsNullOrWhiteSpace(title))
+            return false;
+
+        // Deep headings are usually implementation notes or doc structure, not first-cut requirements.
+        if (level > 4)
+            return false;
+
+        var trimmedTitle = title.Trim();
+        var lowerTitle = trimmedTitle.ToLowerInvariant();
+        if (s_structuralHeadings.Any(h => lowerTitle.Equals(h) || lowerTitle.StartsWith(h + " ")))
+            return false;
+
+        if (NumberedStructuralHeadingRegex().IsMatch(trimmedTitle))
+            return false;
+
+        var body = string.Join('\n', bodyLines).Trim();
+        var bulletCount = bodyLines.Count(l => l.TrimStart().StartsWith("- "));
+        var hasContent = body.Length >= 40 || bulletCount > 0;
+        if (!hasContent)
+            return false;
+
+        var lowerBody = body.ToLowerInvariant();
+        var hasSignal = s_requirementSignals.Any(k => lowerTitle.Contains(k) || lowerBody.Contains(k));
+
+        return hasSignal || bulletCount > 0;
     }
 
     private Requirement BuildRequirement(string source, string module, string section,
@@ -149,4 +208,7 @@ public sealed partial class RequirementParser : IRequirementsReader
 
     [GeneratedRegex(@"^(#{1,6})\s+(.+)$")]
     private static partial Regex HeadingRegex();
+
+    [GeneratedRegex(@"^\d+(\.\d+)*\.?\s*(purpose|scope|references?|definitions?|glossary|revision history|table of contents)$", RegexOptions.IgnoreCase)]
+    private static partial Regex NumberedStructuralHeadingRegex();
 }

@@ -18,6 +18,7 @@ public sealed class RequirementsExpanderAgent : IAgent
 {
     private readonly ILlmProvider _llm;
     private readonly ILogger<RequirementsExpanderAgent> _logger;
+    private const int MaxInvestImprovementIterations = 10;
 
     public AgentType Type => AgentType.RequirementsExpander;
     public string Name => "Requirements Expander";
@@ -39,13 +40,96 @@ public sealed class RequirementsExpanderAgent : IAgent
         var expanded = new List<ExpandedRequirement>();
         var iteration = context.DevIteration;
 
-        // ── Step 1: Build requirement→service mapping ──
-        var reqServiceMap = BuildRequirementServiceMap(context.Requirements, context.DomainModel);
+        // ── Step 0: INVEST quality scoring gate ──
+        var workingRequirements = context.Requirements.Select(CloneRequirement).ToList();
+        List<RequirementQualityScore> qualityScores = [];
+        var readyRequirements = new List<Requirement>();
+        var investIterationsUsed = 0;
+
+        for (var pass = 0; pass <= MaxInvestImprovementIterations; pass++)
+        {
+            qualityScores = RequirementQualityScorer.ScoreAll(workingRequirements);
+            var readyRequirementIds = qualityScores
+                .Where(s => s.IsReady)
+                .Select(s => s.RequirementId)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            readyRequirements = workingRequirements
+                .Where(r => readyRequirementIds.Contains(r.Id))
+                .ToList();
+
+            if (readyRequirements.Count > 0)
+            {
+                investIterationsUsed = pass;
+                break;
+            }
+
+            if (pass == MaxInvestImprovementIterations)
+            {
+                investIterationsUsed = pass;
+                break;
+            }
+
+            workingRequirements = ImproveRequirementsForInvest(workingRequirements, qualityScores, pass + 1);
+            if (context.ReportProgress is not null)
+                await context.ReportProgress(Type, $"INVEST auto-improvement pass {pass + 1}/{MaxInvestImprovementIterations} completed — retrying quality gate");
+        }
+
+        // Persist improved requirement content into context so downstream agents and DB snapshots use it.
+        context.Requirements = workingRequirements;
+
+        var failed = qualityScores.Where(s => !s.IsReady).ToList();
+        foreach (var fail in failed.Take(50))
+        {
+            context.Findings.Add(new ReviewFinding
+            {
+                Category = "RequirementQuality",
+                Severity = ReviewSeverity.Warning,
+                Message = $"Requirement {fail.RequirementId} not INVEST-ready (score {fail.Score}/100): {string.Join(" | ", fail.Notes.Take(3))}",
+                FilePath = "docs/requirements",
+                Suggestion = "Refine this requirement using INVEST and Given/When/Then acceptance criteria before expansion."
+            });
+        }
+
+        var scorecardLines = qualityScores.Select(s =>
+            $"- {s.RequirementId} | Score={s.Score} | Ready={s.IsReady} | I={s.Independent} N={s.Negotiable} V={s.Valuable} E={s.Estimable} S={s.Small} T={s.Testable}");
+        context.Artifacts.Add(new CodeArtifact
+        {
+            Layer = ArtifactLayer.Documentation,
+            RelativePath = "Requirements/requirement-quality-scorecard.md",
+            FileName = "requirement-quality-scorecard.md",
+            Namespace = "Hms.Requirements",
+            ProducedBy = Type,
+            Content = "# Requirement Quality Scorecard (INVEST)\n\n"
+                      + $"Total: {qualityScores.Count} | Ready: {qualityScores.Count(s => s.IsReady)} | Blocked: {failed.Count} | Improvement Passes: {investIterationsUsed}\n\n"
+                      + string.Join("\n", scorecardLines)
+        });
+
         if (context.ReportProgress is not null)
-            await context.ReportProgress(Type, $"Mapped {context.Requirements.Count} requirements to {reqServiceMap.Values.SelectMany(v => v).Distinct().Count()} microservices");
+            await context.ReportProgress(Type, $"Requirement quality gate: {qualityScores.Count(s => s.IsReady)}/{qualityScores.Count} ready for expansion");
+
+        if (readyRequirements.Count == 0)
+        {
+            readyRequirements = workingRequirements;
+            context.Findings.Add(new ReviewFinding
+            {
+                Category = "RequirementQuality",
+                Severity = ReviewSeverity.Warning,
+                Message = $"RequirementsExpander could not reach INVEST-ready state after {MaxInvestImprovementIterations} improvement passes. Proceeding with improved draft requirements to avoid pipeline failure.",
+                FilePath = "docs/requirements",
+                Suggestion = "Review requirement-quality-scorecard.md and refine low-scoring requirements for higher-fidelity expansion."
+            });
+
+            if (context.ReportProgress is not null)
+                await context.ReportProgress(Type, $"INVEST gate still not satisfied after {MaxInvestImprovementIterations} passes — proceeding with improved draft requirements");
+        }
+
+        // ── Step 1: Build requirement→service mapping ──
+        var reqServiceMap = BuildRequirementServiceMap(readyRequirements, context.DomainModel);
+        if (context.ReportProgress is not null)
+            await context.ReportProgress(Type, $"Mapped {readyRequirements.Count} quality-approved requirements to {reqServiceMap.Values.SelectMany(v => v).Distinct().Count()} microservices");
 
         // ── Step 2: Build requirement dependency graph ──
-        var reqDeps = BuildRequirementDependencies(context.Requirements, reqServiceMap);
+        var reqDeps = BuildRequirementDependencies(readyRequirements, reqServiceMap);
         if (context.ReportProgress is not null)
         {
             var totalDeps = reqDeps.Values.Sum(d => d.Count);
@@ -53,7 +137,7 @@ public sealed class RequirementsExpanderAgent : IAgent
         }
 
         // ── Step 3: Group by module and expand ──
-        var byModule = context.Requirements
+        var byModule = readyRequirements
             .GroupBy(r => string.IsNullOrEmpty(r.Module) ? "General" : r.Module)
             .ToList();
 
@@ -113,22 +197,85 @@ public sealed class RequirementsExpanderAgent : IAgent
                     will use DIRECTLY. Each item must contain enough detail to generate code without
                     further clarification.
                     
-                    Output EXACTLY in this format — one item per line:
-                    EPIC|<id>|<title>|<description>|<priority 1-3>|<services_csv>|<depends_on_ids_csv>
-                    STORY|<id>|<parent_id>|<title>|<acceptance_criteria_semicolon_sep>|<priority 1-3>|<services_csv>|<depends_on_ids_csv>|<detailed_spec>
-                    USECASE|<id>|<parent_id>|<title>|<actor>|<preconditions>|<main_flow_steps_numbered>|<alt_flows>|<postconditions>|<services_csv>
-                    TASK|<id>|<parent_id>|<title>|<tags_csv>|<priority 1-3>|<services_csv>|<detailed_spec>
+                    Every item must satisfy INVEST criteria:
+                    - Independent: Each story/task can be developed without waiting on others (except explicit deps)
+                    - Negotiable: Detail the WHAT and WHY, not prescriptive HOW
+                    - Valuable: Every item must deliver measurable user or business value
+                    - Estimable: Include enough context that a developer can estimate effort
+                    - Small: A single User Story should fit within one sprint (~5 story points max); split larger work into multiple stories
+                    - Testable: Every item has clear acceptance criteria or a definition of done
                     
-                    Rules for IDs: Use module prefixes (EPIC-PAT-001, STORY-PAT-001-01, TASK-PAT-001-01-DB).
+                    ─── OUTPUT FORMAT ──────────────────────────────────────────────
+                    Output EXACTLY in this pipe-delimited format — one item per line.
+                    Use semicolons to separate list items within a field. Use numbered
+                    prefixes (1. 2. 3.) for ordered steps.
                     
-                    Rules for <detailed_spec>:
+                    1. EPIC TEMPLATE
+                    EPIC|<id>|<title>|<summary>|<business_value>|<success_criteria_semicolon_sep>|<scope>|<priority 1-3>|<services_csv>|<depends_on_ids_csv>
+                    
+                    Fields:
+                    - id: e.g. E-PAT-001
+                    - title: [E-NNN] Short descriptive title
+                    - summary: Elevator pitch of what this epic achieves
+                    - business_value: Why are we doing this? (e.g., increase retention, security compliance)
+                    - success_criteria: Measurable outcomes separated by semicolons
+                    - scope: What is included AND what is NOT included
+                    - priority: 1 (critical), 2 (high), 3 (medium)
+                    
+                    2. USER STORY TEMPLATE
+                    STORY|<id>|<parent_id>|<title>|<acceptance_criteria_semicolon_sep>|<story_points>|<labels_csv>|<priority 1-3>|<services_csv>|<depends_on_ids_csv>|<detailed_spec>
+                    
+                    Fields:
+                    - title: MUST follow "As a [Type of User], I want to [Action] so that [Value/Benefit]"
+                    - acceptance_criteria: Each in Given/When/Then format separated by semicolons
+                      e.g. "Given a user enters the wrong password, when they click submit, then an error message appears"
+                    - story_points: 1, 2, 3, 5, or 8
+                    - labels: e.g. Frontend, API, Database, Design, Security
+                    
+                    3. USE CASE TEMPLATE
+                    USECASE|<id>|<parent_id>|<title>|<actor>|<preconditions>|<main_flow_steps_semicolon_sep>|<alt_flows>|<postconditions>|<services_csv>
+                    
+                    Fields:
+                    - title: Verb-noun form (e.g. "Reset Forgotten Password")
+                    - actor: Who initiates (e.g. "Registered User", "Nurse", "Admin")
+                    - preconditions: What must be true before this use case starts
+                    - main_flow_steps: Numbered steps separated by semicolons
+                      e.g. "1. User clicks Forgot Password;2. System prompts for email;3. User enters valid email"
+                    - alt_flows: Exception/alternative paths
+                    - postconditions: System state after successful completion
+                    
+                    4. TASK TEMPLATE
+                    TASK|<id>|<parent_id>|<title>|<description>|<technical_notes>|<definition_of_done_semicolon_sep>|<tags_csv>|<priority 1-3>|<services_csv>|<detailed_spec>
+                    
+                    Fields:
+                    - title: [T-NNN] Verb-noun technical action (e.g. "Create POST /auth/reset endpoint")
+                    - description: What to implement (developer-facing)
+                    - technical_notes: Implementation hints (e.g. "Use Redis for token storage, 15-min TTL")
+                    - definition_of_done: Checklist items separated by semicolons
+                      e.g. "Unit tests passed;Documentation updated in Swagger;Code reviewed by peer"
+                    
+                    5. BUG REPORT TEMPLATE
+                    BUG|<id>|<parent_id>|<title>|<severity>|<environment>|<steps_to_reproduce_semicolon_sep>|<expected_result>|<actual_result>|<services_csv>
+                    
+                    Fields:
+                    - title: [BUG] Short description of failure
+                    - severity: Blocker, Critical, Major, or Minor
+                    - environment: Where the bug occurs (e.g. ".NET 8, PostgreSQL 16, Docker")
+                    - steps_to_reproduce: Numbered steps separated by semicolons
+                    - expected_result: What should happen
+                    - actual_result: What actually happens
+                    
+                    ─── ID RULES ──────────────────────────────────────────────────
+                    Use module prefixes: E-PAT-001, US-PAT-001-01, UC-PAT-001-01, T-PAT-001-01-DB, BUG-PAT-001.
+                    
+                    ─── DETAILED SPEC RULES ───────────────────────────────────────
                     - For database tasks: entity names, fields with types, indexes, constraints, FK relationships
                     - For service tasks: method signatures, validation rules, business logic, error handling
                     - For API tasks: HTTP method, route, request/response DTO shapes, status codes
                     - For test tasks: test scenarios, setup data, expected outcomes, edge cases
                     - For all: HIPAA implications, multi-tenant isolation, audit requirements
                     
-                    Rules for dependencies:
+                    ─── DEPENDENCY RULES ──────────────────────────────────────────
                     - Database tasks before service tasks, service before API, API before UI
                     - Cross-service: PatientService before EncounterService, etc.
                     - Reference specific task IDs when ordering is required
@@ -149,11 +296,17 @@ public sealed class RequirementsExpanderAgent : IAgent
                     === OPEN FINDINGS ({existingFindings.Count}) ===
                     {string.Join("\n", existingFindings)}
                     
-                    Generate Epics, User Stories with acceptance criteria, Use Cases with actor/flow detail,
-                    and Tasks with full specifications. Each item must include:
+                    Generate work items following ALL five templates where appropriate:
+                    1. Epics — high-level strategic goals with business value and success criteria
+                    2. User Stories — "As a [user], I want..." with Given/When/Then acceptance criteria and story points
+                    3. Use Cases — step-by-step actor/system interactions with pre/post conditions
+                    4. Tasks — developer-facing to-do items with technical notes and Definition of Done
+                    5. Bug Reports — ONLY if open findings indicate reproducible failures
+                    
+                    Every User Story MUST satisfy INVEST criteria. Each item must include:
                     1. Which microservice(s) it affects
                     2. Dependencies on other items
-                    3. Detailed spec for code generation
+                    3. Enough detail for direct code generation
                     
                     Focus on gaps — don't repeat work for existing artifacts.
                     """,
@@ -163,11 +316,12 @@ public sealed class RequirementsExpanderAgent : IAgent
             };
 
             var response = await _llm.GenerateAsync(prompt, ct);
+            List<ExpandedRequirement> moduleItems;
             if (response.Success)
             {
-                var items = ParseExpansionResponse(response.Content, module, iteration);
+                moduleItems = ParseExpansionResponse(response.Content, module, iteration);
                 // Enrich items with service mappings from requirements
-                foreach (var item in items)
+                foreach (var item in moduleItems)
                 {
                     if (item.AffectedServices.Count == 0)
                     {
@@ -178,21 +332,26 @@ public sealed class RequirementsExpanderAgent : IAgent
                             item.AffectedServices.AddRange(svcs);
                     }
                 }
-                expanded.AddRange(items);
-                _logger.LogInformation("Expanded {Module}: {Count} work items from LLM", module, items.Count);
+                _logger.LogInformation("Expanded {Module}: {Count} work items from LLM", module, moduleItems.Count);
                 if (context.ReportProgress is not null)
                 {
-                    var epics = items.Count(i => i.ItemType == WorkItemType.Epic);
-                    var stories = items.Count(i => i.ItemType == WorkItemType.UserStory);
-                    var tasks = items.Count(i => i.ItemType == WorkItemType.Task);
-                    await context.ReportProgress(Type, $"Module '{module}' expanded: {epics} epics, {stories} stories, {tasks} tasks — LLM generated {items.Count} work items");
+                    var epics = moduleItems.Count(i => i.ItemType == WorkItemType.Epic);
+                    var stories = moduleItems.Count(i => i.ItemType == WorkItemType.UserStory);
+                    var tasks = moduleItems.Count(i => i.ItemType == WorkItemType.Task);
+                    await context.ReportProgress(Type, $"Module '{module}' expanded: {epics} epics, {stories} stories, {tasks} tasks — LLM generated {moduleItems.Count} work items");
                 }
             }
             else
             {
                 _logger.LogWarning("LLM expansion failed for {Module}: {Error}", module, response.Error);
-                expanded.AddRange(CreateFallbackItems(reqs, module, iteration, reqServiceMap, reqDeps));
+                moduleItems = CreateFallbackItems(reqs, module, iteration, reqServiceMap, reqDeps);
             }
+
+            var addedUseCases = EnsureUseCasesForModuleItems(moduleItems, module, iteration);
+            if (addedUseCases > 0 && context.ReportProgress is not null)
+                await context.ReportProgress(Type, $"Module '{module}' enforcement: synthesized {addedUseCases} use case(s) to satisfy template coverage");
+
+            expanded.AddRange(moduleItems);
         }
 
         // ── Step 4: Resolve dependency chains across all expanded items ──
@@ -424,59 +583,80 @@ public sealed class RequirementsExpanderAgent : IAgent
             var kind = parts[0].Trim().ToUpperInvariant();
             switch (kind)
             {
-                case "EPIC" when parts.Length >= 5:
+                case "EPIC" when parts.Length >= 10:
                     items.Add(new ExpandedRequirement
                     {
                         Id = SanitizeId(parts[1]),
                         ItemType = WorkItemType.Epic,
                         Title = parts[2].Trim(),
-                        Description = parts[3].Trim(),
+                        Summary = parts[3].Trim(),
+                        BusinessValue = parts[4].Trim(),
+                        SuccessCriteria = ParseSemicolonList(parts[5]),
+                        Scope = parts[6].Trim(),
+                        Description = $"Summary: {parts[3].Trim()}\nBusiness Value: {parts[4].Trim()}\nScope: {parts[6].Trim()}",
                         Module = module,
-                        Priority = ParsePriority(parts[4]),
+                        Priority = ParsePriority(parts[7]),
                         Iteration = iteration,
-                        AffectedServices = parts.Length > 5
-                            ? [.. parts[5].Trim().Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)]
+                        AffectedServices = parts.Length > 8
+                            ? [.. parts[8].Trim().Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)]
                             : [],
-                        DependsOn = parts.Length > 6
-                            ? [.. parts[6].Trim().Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)]
+                        DependsOn = parts.Length > 9
+                            ? [.. parts[9].Trim().Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)]
                             : [],
                         Status = WorkItemStatus.New,
                         ProducedBy = "RequirementsExpander"
                     });
                     break;
 
-                case "STORY" when parts.Length >= 6:
+                case "STORY" when parts.Length >= 11:
+                    var rawStoryTitle = parts[3].Trim();
+                    var normalizedStoryTitle = EnsureUserStoryTemplate(rawStoryTitle, parts[10].Trim());
+                    var normalizedCriteria = EnsureGivenWhenThenCriteria(ParseSemicolonList(parts[4]));
+                    var normalizedStoryPoints = ParseStoryPoints(parts[5]);
+                    var normalizedLabels = ParseLabels(parts[6]);
                     items.Add(new ExpandedRequirement
                     {
                         Id = SanitizeId(parts[1]),
                         ParentId = SanitizeId(parts[2]),
                         ItemType = WorkItemType.UserStory,
-                        Title = parts[3].Trim(),
-                        Description = parts[4].Trim(),
+                        Title = normalizedStoryTitle,
+                        Description = parts[10].Trim(),
                         Module = module,
-                        Priority = ParsePriority(parts[5]),
+                        Priority = ParsePriority(parts[7]),
                         Iteration = iteration,
-                        AcceptanceCriteria = parts[4].Trim().Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList(),
-                        AffectedServices = parts.Length > 6
-                            ? [.. parts[6].Trim().Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)]
+                        AcceptanceCriteria = normalizedCriteria,
+                        StoryPoints = normalizedStoryPoints,
+                        Labels = normalizedLabels,
+                        AffectedServices = parts.Length > 8
+                            ? [.. parts[8].Trim().Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)]
                             : [],
-                        DependsOn = parts.Length > 7
-                            ? [.. parts[7].Trim().Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)]
+                        DependsOn = parts.Length > 9
+                            ? [.. parts[9].Trim().Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)]
                             : [],
-                        DetailedSpec = parts.Length > 8 ? parts[8].Trim() : "",
+                        DetailedSpec = parts[10].Trim(),
                         Status = WorkItemStatus.New,
                         ProducedBy = "RequirementsExpander"
                     });
                     break;
 
-                case "USECASE" when parts.Length >= 8:
+                case "USECASE" when parts.Length >= 10:
+                    var normalizedUseCaseTitle = EnsureUseCaseTitle(parts[3].Trim(), module);
+                    var normalizedActor = EnsureActor(parts[4].Trim());
+                    var normalizedPreconditions = EnsurePreconditions(parts[5].Trim());
+                    var normalizedMainFlow = EnsureMainFlow(ParseSemicolonList(parts[6]), normalizedUseCaseTitle);
+                    var normalizedPostconditions = EnsurePostconditions(parts[8].Trim());
                     items.Add(new ExpandedRequirement
                     {
                         Id = SanitizeId(parts[1]),
                         ParentId = SanitizeId(parts[2]),
                         ItemType = WorkItemType.UseCase,
-                        Title = parts[3].Trim(),
-                        Description = $"Actor: {parts[4].Trim()}\nPreconditions: {parts[5].Trim()}\nMain Flow: {parts[6].Trim()}\nAlternative Flows: {(parts.Length > 7 ? parts[7].Trim() : "N/A")}\nPostconditions: {(parts.Length > 8 ? parts[8].Trim() : "N/A")}",
+                        Title = normalizedUseCaseTitle,
+                        Actor = normalizedActor,
+                        Preconditions = normalizedPreconditions,
+                        MainFlow = normalizedMainFlow,
+                        AlternativeFlows = parts[7].Trim(),
+                        Postconditions = normalizedPostconditions,
+                        Description = $"Actor: {normalizedActor}\nPreconditions: {normalizedPreconditions}\nMain Flow: {string.Join("; ", normalizedMainFlow)}\nAlternative Flows: {parts[7].Trim()}\nPostconditions: {normalizedPostconditions}",
                         Module = module,
                         Priority = 2,
                         Iteration = iteration,
@@ -488,21 +668,62 @@ public sealed class RequirementsExpanderAgent : IAgent
                     });
                     break;
 
-                case "TASK" when parts.Length >= 6:
+                case "TASK" when parts.Length >= 11:
+                    var rawTaskTags = parts[7].Trim().Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+                    var normalizedTaskTags = EnsureTaskTags(rawTaskTags, parts[3]);
+                    var normalizedTaskTitle = EnsureTaskTitle(parts[3].Trim(), parts[1].Trim());
+                    var normalizedTaskDescription = EnsureTaskDescription(parts[4].Trim(), normalizedTaskTitle);
+                    var normalizedTechnicalNotes = EnsureTechnicalNotes(parts[5].Trim(), normalizedTaskTags);
+                    var normalizedDod = EnsureTaskDefinitionOfDone(ParseSemicolonList(parts[6]));
                     items.Add(new ExpandedRequirement
                     {
                         Id = SanitizeId(parts[1]),
                         ParentId = SanitizeId(parts[2]),
                         ItemType = WorkItemType.Task,
-                        Title = parts[3].Trim(),
+                        Title = normalizedTaskTitle,
+                        Description = normalizedTaskDescription,
                         Module = module,
-                        Priority = ParsePriority(parts[5]),
+                        Priority = ParsePriority(parts[8]),
                         Iteration = iteration,
-                        Tags = [.. parts[4].Trim().Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)],
-                        AffectedServices = parts.Length > 6
-                            ? [.. parts[6].Trim().Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)]
+                        TechnicalNotes = normalizedTechnicalNotes,
+                        DefinitionOfDone = normalizedDod,
+                        Tags = [.. normalizedTaskTags],
+                        AffectedServices = parts.Length > 9
+                            ? [.. parts[9].Trim().Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)]
                             : [],
-                        DetailedSpec = parts.Length > 7 ? parts[7].Trim() : "",
+                        DetailedSpec = parts.Length > 10 ? parts[10].Trim() : "",
+                        Status = WorkItemStatus.New,
+                        ProducedBy = "RequirementsExpander"
+                    });
+                    break;
+
+                case "BUG" when parts.Length >= 10:
+                    var normalizedBugTitle = EnsureBugTitle(parts[3].Trim());
+                    var normalizedBugSeverity = EnsureBugSeverity(parts[4].Trim());
+                    var normalizedBugEnvironment = EnsureBugEnvironment(parts[5].Trim());
+                    var normalizedBugSteps = EnsureBugSteps(ParseSemicolonList(parts[6]));
+                    var normalizedExpected = EnsureBugExpected(parts[7].Trim());
+                    var normalizedActual = EnsureBugActual(parts[8].Trim());
+                    var normalizedAttachments = EnsureBugAttachments(string.Empty);
+                    items.Add(new ExpandedRequirement
+                    {
+                        Id = SanitizeId(parts[1]),
+                        ParentId = SanitizeId(parts[2]),
+                        ItemType = WorkItemType.Bug,
+                        Title = normalizedBugTitle,
+                        Severity = normalizedBugSeverity,
+                        Environment = normalizedBugEnvironment,
+                        StepsToReproduce = normalizedBugSteps,
+                        ExpectedResult = normalizedExpected,
+                        ActualResult = normalizedActual,
+                        Description = $"Severity: {normalizedBugSeverity}\nEnvironment: {normalizedBugEnvironment}\nSteps to Reproduce:\n{string.Join("\n", normalizedBugSteps)}\nExpected Result: {normalizedExpected}\nActual Result: {normalizedActual}\nAttachments: {normalizedAttachments}",
+                        Module = module,
+                        Priority = 1,
+                        Iteration = iteration,
+                        Tags = ["bugfix"],
+                        AffectedServices = parts.Length > 9
+                            ? [.. parts[9].Trim().Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)]
+                            : [],
                         Status = WorkItemStatus.New,
                         ProducedBy = "RequirementsExpander"
                     });
@@ -534,6 +755,12 @@ public sealed class RequirementsExpanderAgent : IAgent
                 SourceRequirementId = req.Id, Title = req.Title,
                 Description = req.Description, Module = module,
                 Priority = 2, Iteration = iteration,
+                Summary = req.Description,
+                BusinessValue = "Improves delivery of core business capability for this module.",
+                SuccessCriteria = req.AcceptanceCriteria.Count > 0
+                    ? [.. req.AcceptanceCriteria.Take(5)]
+                    : ["Feature delivered and validated against acceptance criteria"],
+                Scope = "Includes implementation of the described requirement within this module; excludes unrelated module refactors.",
                 AffectedServices = [.. services],
                 DependsOn = [.. deps],
                 Status = WorkItemStatus.New,
@@ -546,8 +773,11 @@ public sealed class RequirementsExpanderAgent : IAgent
                 Id = storyId, ParentId = epicId,
                 ItemType = WorkItemType.UserStory,
                 SourceRequirementId = req.Id,
-                Title = $"Implement core functionality: {req.Title}",
+                Title = $"As a clinical user, I want {req.Title.ToLowerInvariant()} so that patient workflows remain safe and efficient",
                 AcceptanceCriteria = [.. req.AcceptanceCriteria],
+                StoryPoints = req.AcceptanceCriteria.Count switch { <= 2 => 2, <= 4 => 3, <= 6 => 5, _ => 8 },
+                Labels = ["Backend", "API", "Healthcare"],
+                Description = req.Description,
                 Module = module, Priority = 2, Iteration = iteration,
                 AffectedServices = [.. services],
                 Status = WorkItemStatus.New,
@@ -560,10 +790,13 @@ public sealed class RequirementsExpanderAgent : IAgent
             {
                 Id = dbTaskId, ParentId = storyId,
                 ItemType = WorkItemType.Task,
-                Title = $"Database schema for {req.Title}",
+                Title = $"[T-{seq:D3}-DB] Create database schema for {req.Title}",
+                Description = $"Implement the backend schema and persistence model for {req.Title}.",
                 Module = module, Priority = 3, Iteration = iteration,
                 Tags = ["database"],
                 AffectedServices = [.. services],
+                TechnicalNotes = "Use normalized schema, indexes on lookup keys, and tenant-safe constraints.",
+                DefinitionOfDone = ["[ ] Unit tests passed.", "[ ] Documentation updated in Swagger.", "[ ] Code reviewed by peer."],
                 DetailedSpec = $"Create entities and migrations for: {Truncate(req.Description, 200)}",
                 Status = WorkItemStatus.New,
                 ProducedBy = "RequirementsExpander"
@@ -573,11 +806,14 @@ public sealed class RequirementsExpanderAgent : IAgent
             {
                 Id = $"TASK-{module}-{seq:D3}-01-SVC", ParentId = storyId,
                 ItemType = WorkItemType.Task,
-                Title = $"Service implementation for {req.Title}",
+                Title = $"[T-{seq:D3}-SVC] Implement service layer for {req.Title}",
+                Description = $"Implement service logic, validation, and integration for {req.Title}.",
                 Module = module, Priority = 3, Iteration = iteration,
                 Tags = ["service"],
                 AffectedServices = [.. services],
                 DependsOn = [dbTaskId],
+                TechnicalNotes = "Follow clean architecture boundaries and emit domain events where relevant.",
+                DefinitionOfDone = ["[ ] Unit tests passed.", "[ ] Documentation updated in Swagger.", "[ ] Code reviewed by peer."],
                 DetailedSpec = $"Implement service with CRUD, validation, domain events for: {Truncate(req.Description, 200)}",
                 Status = WorkItemStatus.New,
                 ProducedBy = "RequirementsExpander"
@@ -587,11 +823,14 @@ public sealed class RequirementsExpanderAgent : IAgent
             {
                 Id = $"TASK-{module}-{seq:D3}-01-TEST", ParentId = storyId,
                 ItemType = WorkItemType.Task,
-                Title = $"Unit tests for {req.Title}",
+                Title = $"[T-{seq:D3}-TEST] Add automated tests for {req.Title}",
+                Description = $"Add unit/integration tests for {req.Title} behavior and edge cases.",
                 Module = module, Priority = 3, Iteration = iteration,
                 Tags = ["testing"],
                 AffectedServices = [.. services],
                 DependsOn = [$"TASK-{module}-{seq:D3}-01-SVC"],
+                TechnicalNotes = "Cover happy path, validation errors, auth failures, and boundary cases.",
+                DefinitionOfDone = ["[ ] Unit tests passed.", "[ ] Documentation updated in Swagger.", "[ ] Code reviewed by peer."],
                 DetailedSpec = $"Test scenarios: happy path, validation errors, edge cases for: {Truncate(req.Description, 200)}",
                 Status = WorkItemStatus.New,
                 ProducedBy = "RequirementsExpander"
@@ -620,6 +859,415 @@ public sealed class RequirementsExpanderAgent : IAgent
     private static int ParsePriority(string s) =>
         int.TryParse(s.Trim(), out var p) ? Math.Clamp(p, 1, 3) : 2;
 
+    private static int ParseStoryPoints(string s)
+    {
+        if (!int.TryParse(s.Trim(), out var sp)) return 3;
+        return sp is 1 or 2 or 3 or 5 or 8 ? sp : 3;
+    }
+
+    private static List<string> ParseLabels(string s)
+    {
+        var labels = s.Trim()
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .ToList();
+
+        return labels.Count > 0 ? labels : ["API", "Backend"];
+    }
+
+    private static string EnsureUserStoryTemplate(string title, string fallbackContext)
+    {
+        var t = title.Trim();
+        if (Regex.IsMatch(t, @"^As a\s+.+,\s*I want to\s+.+\s+so that\s+.+\.?$", RegexOptions.IgnoreCase))
+            return t;
+
+        var action = string.IsNullOrWhiteSpace(t) ? "complete the requested workflow" : ToSentenceFragment(t);
+        var value = string.IsNullOrWhiteSpace(fallbackContext)
+            ? "patient care workflows are safe and efficient"
+            : ToSentenceFragment(fallbackContext);
+
+        return $"As a clinical user, I want to {action} so that {value}.";
+    }
+
+    private static List<string> EnsureGivenWhenThenCriteria(List<string> criteria)
+    {
+        if (criteria.Count == 0)
+        {
+            return ["Given the user is authorized, when they submit a valid request, then the system processes it and records an auditable result."];
+        }
+
+        return criteria.Select(c =>
+        {
+            var trimmed = c.Trim();
+            if (trimmed.Contains("given", StringComparison.OrdinalIgnoreCase) &&
+                trimmed.Contains("when", StringComparison.OrdinalIgnoreCase) &&
+                trimmed.Contains("then", StringComparison.OrdinalIgnoreCase))
+            {
+                return trimmed;
+            }
+
+            return $"Given the user is authorized, when they {ToSentenceFragment(trimmed)}, then the expected outcome is produced and auditable.";
+        }).ToList();
+    }
+
+    private static string ToSentenceFragment(string value)
+    {
+        var v = value.Trim().Trim('.', ';', ':', ',');
+        if (string.IsNullOrWhiteSpace(v)) return "complete the requested operation";
+        return char.ToLowerInvariant(v[0]) + v[1..];
+    }
+
+    private static List<string> ParseSemicolonList(string s) =>
+        s.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+
+    private static int EnsureUseCasesForModuleItems(List<ExpandedRequirement> items, string module, int iteration)
+    {
+        var added = 0;
+        var useCaseSeed = items.Count(i => i.ItemType == WorkItemType.UseCase);
+
+        var epics = items.Where(i => i.ItemType == WorkItemType.Epic).ToList();
+        if (epics.Count == 0)
+        {
+            var stories = items.Where(i => i.ItemType == WorkItemType.UserStory).ToList();
+            foreach (var story in stories)
+            {
+                if (items.Any(i => i.ItemType == WorkItemType.UseCase && i.ParentId == story.ParentId))
+                    continue;
+
+                useCaseSeed++;
+                items.Add(CreateTemplateUseCase(module, iteration, useCaseSeed, story.ParentId, story.Title));
+                added++;
+            }
+            return added;
+        }
+
+        foreach (var epic in epics)
+        {
+            if (items.Any(i => i.ItemType == WorkItemType.UseCase && i.ParentId == epic.Id))
+                continue;
+
+            useCaseSeed++;
+            items.Add(CreateTemplateUseCase(module, iteration, useCaseSeed, epic.Id, epic.Title));
+            added++;
+        }
+
+        return added;
+    }
+
+    private static ExpandedRequirement CreateTemplateUseCase(string module, int iteration, int seed, string parentId, string epicTitle)
+    {
+        var title = EnsureUseCaseTitle(epicTitle, module);
+        var mainFlow = EnsureMainFlow([], title);
+        var actor = "Registered User";
+        var preconditions = "User is on the relevant page and has network connectivity.";
+        var postconditions = "Data changes are persisted and the workflow outcome is auditable.";
+
+        return new ExpandedRequirement
+        {
+            Id = $"UC-{module}-{seed:D3}-AUTO",
+            ParentId = parentId,
+            ItemType = WorkItemType.UseCase,
+            Title = title,
+            Actor = actor,
+            Preconditions = preconditions,
+            MainFlow = mainFlow,
+            AlternativeFlows = "Handle validation and authorization failures with user-safe messaging.",
+            Postconditions = postconditions,
+            Description = $"Actor: {actor}\nPreconditions: {preconditions}\nMain Flow: {string.Join("; ", mainFlow)}\nPostconditions: {postconditions}",
+            Module = module,
+            Priority = 2,
+            Iteration = iteration,
+            Status = WorkItemStatus.New,
+            ProducedBy = "RequirementsExpander"
+        };
+    }
+
+    private static string EnsureUseCaseTitle(string title, string module)
+    {
+        var t = title.Trim();
+        if (!string.IsNullOrWhiteSpace(t)) return t;
+        return $"Execute {module} Workflow";
+    }
+
+    private static string EnsureActor(string actor)
+    {
+        var a = actor.Trim();
+        return string.IsNullOrWhiteSpace(a) ? "Registered User" : a;
+    }
+
+    private static string EnsurePreconditions(string preconditions)
+    {
+        var p = preconditions.Trim();
+        return string.IsNullOrWhiteSpace(p)
+            ? "User is on the relevant page and has network connectivity."
+            : p;
+    }
+
+    private static List<string> EnsureMainFlow(List<string> mainFlow, string useCaseTitle)
+    {
+        if (mainFlow.Count >= 3)
+            return RenumberMainFlow(mainFlow);
+
+        var action = ToSentenceFragment(useCaseTitle);
+        return
+        [
+            "1. User initiates the requested workflow.",
+            "2. System prompts for required information.",
+            $"3. User submits valid details to {action}.",
+            "4. System validates and processes the request.",
+            "5. System confirms completion to the user."
+        ];
+    }
+
+    private static List<string> RenumberMainFlow(List<string> steps)
+    {
+        var output = new List<string>(steps.Count);
+        for (var i = 0; i < steps.Count; i++)
+        {
+            var cleaned = Regex.Replace(steps[i].Trim(), "^\\d+\\.\\s*", string.Empty);
+            output.Add($"{i + 1}. {cleaned}");
+        }
+        return output;
+    }
+
+    private static string EnsurePostconditions(string postconditions)
+    {
+        var p = postconditions.Trim();
+        return string.IsNullOrWhiteSpace(p)
+            ? "Data changes are persisted and the workflow outcome is auditable."
+            : p;
+    }
+
+    private static string EnsureTaskTitle(string title, string idHint)
+    {
+        var t = title.Trim();
+        if (Regex.IsMatch(t, @"^\[T-[^\]]+\]\s+.+$", RegexOptions.IgnoreCase))
+            return t;
+
+        var normalizedId = SanitizeId(idHint);
+        var token = string.IsNullOrWhiteSpace(normalizedId) ? "T-001" : normalizedId;
+        return $"[{token}] {t}";
+    }
+
+    private static string EnsureTaskDescription(string description, string title)
+    {
+        var d = description.Trim();
+        if (!string.IsNullOrWhiteSpace(d)) return d;
+        return $"Implement the technical work required for: {title}";
+    }
+
+    private static string EnsureTechnicalNotes(string notes, List<string> tags)
+    {
+        var n = notes.Trim();
+        if (!string.IsNullOrWhiteSpace(n)) return n;
+
+        if (tags.Any(t => t.Equals("database", StringComparison.OrdinalIgnoreCase)))
+            return "Use PostgreSQL-friendly schema design, indexes, and tenant-safe constraints.";
+        if (tags.Any(t => t.Equals("api", StringComparison.OrdinalIgnoreCase) || t.Equals("service", StringComparison.OrdinalIgnoreCase)))
+            return "Implement validation, robust error handling, and auditable business operations.";
+        if (tags.Any(t => t.Equals("testing", StringComparison.OrdinalIgnoreCase)))
+            return "Cover positive, negative, and boundary scenarios with repeatable tests.";
+
+        return "Follow project coding standards and ensure observability and error handling are included.";
+    }
+
+    private static List<string> EnsureTaskDefinitionOfDone(List<string> dod)
+    {
+        if (dod.Count >= 3) return dod;
+
+        return
+        [
+            "[ ] Unit tests passed.",
+            "[ ] Documentation updated in Swagger.",
+            "[ ] Code reviewed by peer."
+        ];
+    }
+
+    private static List<string> EnsureTaskTags(List<string> tags, string title)
+    {
+        if (tags.Count > 0) return tags;
+
+        var t = title.ToLowerInvariant();
+        if (t.Contains("database") || t.Contains("schema") || t.Contains("migration")) return ["database"];
+        if (t.Contains("test")) return ["testing"];
+        if (t.Contains("api") || t.Contains("endpoint")) return ["api", "service"];
+        return ["service"];
+    }
+
+    private static string EnsureBugTitle(string title)
+    {
+        var t = title.Trim();
+        if (string.IsNullOrWhiteSpace(t))
+            t = "Unspecified failure in workflow";
+
+        return t.StartsWith("[BUG]", StringComparison.OrdinalIgnoreCase)
+            ? t
+            : $"[BUG] {t}";
+    }
+
+    private static string EnsureBugSeverity(string severity)
+    {
+        var s = severity.Trim();
+        if (s.Equals("Blocker", StringComparison.OrdinalIgnoreCase)) return "Blocker";
+        if (s.Equals("Critical", StringComparison.OrdinalIgnoreCase) || s.Equals("High", StringComparison.OrdinalIgnoreCase)) return "Critical";
+        if (s.Equals("Major", StringComparison.OrdinalIgnoreCase) || s.Equals("Medium", StringComparison.OrdinalIgnoreCase)) return "Major";
+        if (s.Equals("Minor", StringComparison.OrdinalIgnoreCase) || s.Equals("Low", StringComparison.OrdinalIgnoreCase)) return "Minor";
+        return "Major";
+    }
+
+    private static string EnsureBugEnvironment(string environment)
+    {
+        var e = environment.Trim();
+        return string.IsNullOrWhiteSpace(e) ? ".NET 8, PostgreSQL 16, Local" : e;
+    }
+
+    private static List<string> EnsureBugSteps(List<string> steps)
+    {
+        if (steps.Count == 0)
+        {
+            return
+            [
+                "1. Navigate to the impacted screen or API endpoint.",
+                "2. Execute the failing action using valid preconditions.",
+                "3. Observe the failure behavior and capture logs."
+            ];
+        }
+
+        var normalized = new List<string>(steps.Count);
+        for (var i = 0; i < steps.Count; i++)
+        {
+            var cleaned = Regex.Replace(steps[i].Trim(), "^\\d+\\.\\s*", string.Empty);
+            normalized.Add($"{i + 1}. {cleaned}");
+        }
+        return normalized;
+    }
+
+    private static string EnsureBugExpected(string expected)
+    {
+        var e = expected.Trim();
+        return string.IsNullOrWhiteSpace(e)
+            ? "The system should handle the action gracefully and return a valid response."
+            : e;
+    }
+
+    private static string EnsureBugActual(string actual)
+    {
+        var a = actual.Trim();
+        return string.IsNullOrWhiteSpace(a)
+            ? "The system fails to complete the action and produces an invalid or unstable outcome."
+            : a;
+    }
+
+    private static string EnsureBugAttachments(string attachments)
+    {
+        var a = attachments.Trim();
+        return string.IsNullOrWhiteSpace(a)
+            ? "[Screenshot pending / Log snippet pending]"
+            : a;
+    }
+
     private static string Truncate(string? s, int max) =>
         string.IsNullOrEmpty(s) ? "" : s.Length <= max ? s : s[..max] + "…";
+
+    private static Requirement CloneRequirement(Requirement req) => new()
+    {
+        Id = req.Id,
+        SourceFile = req.SourceFile,
+        Section = req.Section,
+        HeadingLevel = req.HeadingLevel,
+        Title = req.Title,
+        Description = req.Description,
+        Module = req.Module,
+        Tags = [.. req.Tags],
+        AcceptanceCriteria = [.. req.AcceptanceCriteria],
+        DependsOn = [.. req.DependsOn]
+    };
+
+    private static List<Requirement> ImproveRequirementsForInvest(
+        List<Requirement> requirements,
+        List<RequirementQualityScore> scores,
+        int pass)
+    {
+        var scoreById = scores.ToDictionary(s => s.RequirementId, StringComparer.OrdinalIgnoreCase);
+        var improved = new List<Requirement>(requirements.Count);
+
+        foreach (var req in requirements)
+        {
+            if (!scoreById.TryGetValue(req.Id, out var score) || score.IsReady)
+            {
+                improved.Add(req);
+                continue;
+            }
+
+            var title = req.Title;
+            if (title.Length < 6)
+                title = $"{req.Module} requirement {req.Id}";
+
+            var description = req.Description;
+            if (description.Length < 40)
+            {
+                description = $"{req.Title}. This requirement must deliver measurable value, preserve safety constraints, and support traceable implementation and testing in the {req.Module} module.";
+            }
+
+            var criteria = req.AcceptanceCriteria
+                .Where(c => !string.IsNullOrWhiteSpace(c))
+                .Take(7)
+                .ToList();
+
+            if (criteria.Count == 0)
+            {
+                criteria =
+                [
+                    "Given a valid request context, when the user performs the required action, then the system completes it successfully and persists the result.",
+                    "Given invalid or incomplete input, when the action is attempted, then the system rejects the request with a clear validation message.",
+                    "Given an authorized actor executes the flow, when an update occurs, then an audit record is captured with timestamp and actor identity."
+                ];
+            }
+            else
+            {
+                criteria = criteria.Select(NormalizeGivenWhenThen).ToList();
+                if (criteria.Count < 2)
+                {
+                    criteria.Add("Given a downstream dependency is unavailable, when the request is processed, then the system returns a deterministic recoverable error and records telemetry.");
+                }
+            }
+
+            improved.Add(new Requirement
+            {
+                Id = req.Id,
+                SourceFile = req.SourceFile,
+                Section = req.Section,
+                HeadingLevel = req.HeadingLevel,
+                Title = title,
+                Description = description,
+                Module = req.Module,
+                Tags = [.. req.Tags],
+                AcceptanceCriteria = [.. criteria],
+                DependsOn = [.. req.DependsOn]
+            });
+        }
+
+        return improved;
+    }
+
+    private static string NormalizeGivenWhenThen(string criterion)
+    {
+        var trimmed = criterion.Trim();
+        var lower = trimmed.ToLowerInvariant();
+
+        if (lower.Contains("given") && lower.Contains("when") && lower.Contains("then"))
+            return trimmed;
+
+        var sentence = trimmed.TrimEnd('.', ';');
+        if (string.IsNullOrWhiteSpace(sentence))
+            sentence = "the requested workflow is executed";
+
+        return $"Given the preconditions are satisfied, when {ToLowerFirst(sentence)}, then the expected outcome is produced and can be validated.";
+    }
+
+    private static string ToLowerFirst(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return value;
+        if (value.Length == 1) return value.ToLowerInvariant();
+        return char.ToLowerInvariant(value[0]) + value[1..];
+    }
 }

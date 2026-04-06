@@ -1,4 +1,5 @@
 using HmsAgents.Agents.AccessControl;
+using HmsAgents.Agents.Architecture;
 using HmsAgents.Agents.Backlog;
 using HmsAgents.Agents.Build;
 using HmsAgents.Agents.BugFix;
@@ -13,6 +14,7 @@ using HmsAgents.Agents.Monitor;
 using HmsAgents.Agents.Observability;
 using HmsAgents.Agents.Orchestrator;
 using HmsAgents.Agents.Performance;
+using HmsAgents.Agents.Platform;
 using HmsAgents.Agents.Requirements;
 using HmsAgents.Agents.Review;
 using HmsAgents.Agents.Security;
@@ -51,6 +53,8 @@ builder.Services.AddSingleton<IPipelineEventSink, SignalRPipelineEventSink>();
 
 // Core pipeline agents
 builder.Services.AddSingleton<IAgent, RequirementsReaderAgent>();
+builder.Services.AddSingleton<IAgent, ArchitectAgent>();
+builder.Services.AddSingleton<IAgent, PlatformBuilderAgent>();
 builder.Services.AddSingleton<IAgent, DatabaseAgent>();
 builder.Services.AddSingleton<IAgent, ServiceLayerAgent>();
 builder.Services.AddSingleton<IAgent, ApplicationAgent>();

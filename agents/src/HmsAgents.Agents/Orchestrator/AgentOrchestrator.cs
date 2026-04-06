@@ -31,13 +31,15 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
     private static readonly Dictionary<AgentType, AgentType[]> s_dependencies = new()
     {
         [AgentType.RequirementsReader]    = [],
+        [AgentType.Architect]             = [AgentType.RequirementsReader],
+        [AgentType.PlatformBuilder]       = [AgentType.Architect],
         [AgentType.RequirementsExpander]  = [AgentType.RequirementsReader],
-        [AgentType.Backlog]               = [AgentType.RequirementsReader],
-        [AgentType.Database]              = [AgentType.RequirementsReader],
-        [AgentType.ServiceLayer]          = [AgentType.RequirementsReader],
-        [AgentType.Application]           = [AgentType.RequirementsReader],
-        [AgentType.Integration]           = [AgentType.RequirementsReader],
-        [AgentType.Testing]              = [AgentType.Database, AgentType.ServiceLayer],
+        [AgentType.Backlog]               = [AgentType.RequirementsExpander],
+        [AgentType.Database]              = [AgentType.PlatformBuilder],
+        [AgentType.ServiceLayer]          = [AgentType.PlatformBuilder],
+        [AgentType.Application]           = [AgentType.PlatformBuilder],
+        [AgentType.Integration]           = [AgentType.PlatformBuilder],
+        [AgentType.Testing]               = [AgentType.Database, AgentType.ServiceLayer, AgentType.PlatformBuilder],
         [AgentType.Review]               = [AgentType.Database, AgentType.ServiceLayer, AgentType.Application, AgentType.Integration, AgentType.Testing],
         // Enrichment — only need Requirements
         [AgentType.Security]             = [AgentType.RequirementsReader],
@@ -103,6 +105,8 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
 
     // Queue for mid-pipeline requirement injection
     private readonly ConcurrentQueue<List<Requirement>> _pendingRequirements = new();
+    // Task completion fan-out tracker: taskId -> set(agentName)
+    private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, byte>> _taskCompletedBy = new(StringComparer.OrdinalIgnoreCase);
 
     public AgentOrchestrator(
         IEnumerable<IAgent> agents,
@@ -122,7 +126,11 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
 
     public AgentContext? GetCurrentContext() => _current;
 
-    public void ResetContext() => _current = null;
+    public void ResetContext()
+    {
+        _current = null;
+        _taskCompletedBy.Clear();
+    }
 
     // ─── Mid-Pipeline Requirement Injection ────────────────────────
     public async Task AddRequirementsAsync(List<Requirement> newRequirements, CancellationToken ct = default)
@@ -217,6 +225,7 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
             OutputBasePath = config.OutputPath,
             PipelineConfig = config
         };
+        _taskCompletedBy.Clear();
         _current = context;
 
         if (!string.IsNullOrWhiteSpace(config.OrchestratorInstructions))
@@ -436,7 +445,18 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
             _logger.LogInformation("[Daemon] Processing {Count} injected requirements", newReqs.Count);
 
             // Re-queue the core build agents to process new requirements
-            var agentsToRerun = new[] { AgentType.Database, AgentType.ServiceLayer, AgentType.Application, AgentType.Testing };
+            var agentsToRerun = new[]
+            {
+                AgentType.RequirementsExpander,
+                AgentType.Backlog,
+                AgentType.Architect,
+                AgentType.PlatformBuilder,
+                AgentType.Database,
+                AgentType.ServiceLayer,
+                AgentType.Application,
+                AgentType.Integration,
+                AgentType.Testing
+            };
             foreach (var at in agentsToRerun)
             {
                 if (!pendingAgents.Contains(at))
@@ -487,9 +507,13 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
 
                 case "EXPAND_NEW":
                 case "REFRESH_BACKLOG":
-                    // These are picked up by the target agent in its own ExecuteAsync
-                    // Re-enqueue so the agent can see it
-                    context.DirectiveQueue.Enqueue(directive);
+                    // Schedule the target agent for a fresh run; do not re-enqueue
+                    // otherwise the same directives loop forever in the daemon.
+                    if (s_dependencies.ContainsKey(directive.To) && !pendingAgents.Contains(directive.To))
+                    {
+                        completedAgents.TryRemove(directive.To, out _);
+                        pendingAgents.Add(directive.To);
+                    }
                     break;
             }
         }
@@ -1133,7 +1157,8 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
     private static List<ExpandedRequirement> GetClaimableItems(AgentContext context, AgentType agentType)
     {
         var result = new List<ExpandedRequirement>();
-        foreach (var item in context.ExpandedRequirements)
+        var snapshot = context.ExpandedRequirements.ToList();
+        foreach (var item in snapshot)
         {
             if (item.Status != WorkItemStatus.InQueue && item.Status != WorkItemStatus.New) continue;
             if (!string.IsNullOrEmpty(item.AssignedAgent)) continue;
@@ -1148,13 +1173,39 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
     /// <summary>Check if a backlog item matches an agent type.</summary>
     private static bool MatchesAgent(ExpandedRequirement item, AgentType agentType)
     {
-        if (item.ItemType == WorkItemType.Task && s_agentTags.TryGetValue(agentType, out var tags))
-            return item.Tags.Any(t => tags.Contains(t));
+        if (item.ItemType == WorkItemType.Task)
+            return GetRelevantTaskAgents(item).Contains(agentType.ToString());
         if (item.ItemType is WorkItemType.Epic or WorkItemType.UserStory && s_epicAgents.Contains(agentType))
             return true;
         if (item.ItemType == WorkItemType.UseCase && s_agentTags.ContainsKey(agentType))
             return true;
         return false;
+    }
+
+    private static List<string> GetRelevantTaskAgents(ExpandedRequirement item)
+    {
+        var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var tag in item.Tags)
+        {
+            if (s_tagToAgent.TryGetValue(tag, out var mapped))
+                result.Add(mapped.ToString());
+        }
+
+        // Fallback from title text when tags are weak/missing
+        var title = item.Title ?? string.Empty;
+        if (result.Count == 0)
+        {
+            if (title.Contains("database", StringComparison.OrdinalIgnoreCase) || title.Contains("migration", StringComparison.OrdinalIgnoreCase))
+                result.Add(AgentType.Database.ToString());
+            else if (title.Contains("test", StringComparison.OrdinalIgnoreCase))
+                result.Add(AgentType.Testing.ToString());
+            else if (title.Contains("integration", StringComparison.OrdinalIgnoreCase))
+                result.Add(AgentType.Integration.ToString());
+            else
+                result.Add(AgentType.ServiceLayer.ToString());
+        }
+
+        return result.OrderBy(x => x).ToList();
     }
 
     /// <summary>Claim matching InQueue backlog items for this agent → set UnderDev + AssignedAgent.</summary>
@@ -1163,9 +1214,24 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
         var agentName = agentType.ToString();
         var claimed = new List<string>();
 
-        foreach (var item in context.ExpandedRequirements)
+        var snapshot = context.ExpandedRequirements.ToList();
+        foreach (var item in snapshot)
         {
             if (item.Status != WorkItemStatus.InQueue && item.Status != WorkItemStatus.New) continue;
+
+            if (item.ItemType == WorkItemType.Task)
+            {
+                var relevantAgents = GetRelevantTaskAgents(item);
+                if (!relevantAgents.Contains(agentName, StringComparer.OrdinalIgnoreCase))
+                    continue;
+
+                item.AssignedAgent = string.Join(",", relevantAgents);
+                item.Status = WorkItemStatus.UnderDev;
+                item.StartedAt ??= DateTimeOffset.UtcNow;
+                claimed.Add(item.Title);
+                continue;
+            }
+
             if (!string.IsNullOrEmpty(item.AssignedAgent)) continue;
 
             if (MatchesAgent(item, agentType))
@@ -1192,10 +1258,32 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
         var agentName = agentType.ToString();
         var completedCount = 0;
 
-        foreach (var item in context.ExpandedRequirements)
+        var snapshot = context.ExpandedRequirements.ToList();
+        foreach (var item in snapshot)
         {
-            if (item.AssignedAgent != agentName) continue;
             if (item.Status == WorkItemStatus.Completed) continue;
+
+            if (item.ItemType == WorkItemType.Task)
+            {
+                var relevantAgents = GetRelevantTaskAgents(item);
+                if (!relevantAgents.Contains(agentName, StringComparer.OrdinalIgnoreCase))
+                    continue;
+
+                var doneSet = _taskCompletedBy.GetOrAdd(item.Id, _ => new ConcurrentDictionary<string, byte>(StringComparer.OrdinalIgnoreCase));
+                doneSet[agentName] = 1;
+
+                var allDone = relevantAgents.All(a => doneSet.ContainsKey(a));
+                if (allDone)
+                {
+                    item.Status = WorkItemStatus.Completed;
+                    item.CompletedAt = DateTimeOffset.UtcNow;
+                    item.AssignedAgent = string.Join(",", relevantAgents);
+                    completedCount++;
+                }
+                continue;
+            }
+
+            if (item.AssignedAgent != agentName) continue;
 
             item.Status = WorkItemStatus.Completed;
             item.CompletedAt = DateTimeOffset.UtcNow;

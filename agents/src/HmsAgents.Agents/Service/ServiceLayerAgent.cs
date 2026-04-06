@@ -29,6 +29,8 @@ public sealed class ServiceLayerAgent : IAgent
         _logger.LogInformation("ServiceLayerAgent starting — domain-model-driven generation");
 
         var artifacts = new List<CodeArtifact>();
+        var scopedServices = ResolveTargetServices(context);
+        var guidance = GetGuidanceSummary(context);
 
         try
         {
@@ -42,7 +44,10 @@ public sealed class ServiceLayerAgent : IAgent
             if (context.ReportProgress is not null)
                 await context.ReportProgress(Type, $"Domain model loaded: {model.Entities.Count} entities ({model.Entities.Count(e => e.Fields.Count > 0)} with field definitions)");
 
-            foreach (var svc in MicroserviceCatalog.All)
+            if (context.ReportProgress is not null && !string.IsNullOrWhiteSpace(guidance))
+                await context.ReportProgress(Type, $"Applying architecture/platform guidance: {guidance}");
+
+            foreach (var svc in scopedServices)
             {
                 _logger.LogInformation("Generating service layer for {Service}", svc.Name);
                 if (context.ReportProgress is not null)
@@ -77,11 +82,11 @@ public sealed class ServiceLayerAgent : IAgent
             return new AgentResult
             {
                 Agent = Type, Success = true,
-                Summary = $"Generated {artifacts.Count} service-layer artifacts across {MicroserviceCatalog.All.Length} microservices (domain-model-driven, complete implementations)",
+                Summary = $"Generated {artifacts.Count} service-layer artifacts across {scopedServices.Count} scoped microservices (domain-model-driven, complete implementations)",
                 Artifacts = artifacts,
                 Messages = [new AgentMessage { From = Type, To = AgentType.Orchestrator,
                     Subject = "Service layer ready",
-                    Body = $"{artifacts.Count} artifacts: complete DTOs with full field mapping, service implementations with repo persistence, Kafka event publishing." }],
+                    Body = $"{artifacts.Count} artifacts: complete DTOs with full field mapping, service implementations with repo persistence, Kafka event publishing. Scoped services: {string.Join(", ", scopedServices.Select(s => s.Name))}." }],
                 Duration = sw.Elapsed
             };
         }
@@ -91,6 +96,43 @@ public sealed class ServiceLayerAgent : IAgent
             _logger.LogError(ex, "ServiceLayerAgent failed");
             return new AgentResult { Agent = Type, Success = false, Errors = [ex.Message], Duration = sw.Elapsed };
         }
+    }
+
+    private static List<MicroserviceDefinition> ResolveTargetServices(AgentContext context)
+    {
+        var archInstruction = context.OrchestratorInstructions
+            .FirstOrDefault(i => i.StartsWith("[ARCH]", StringComparison.OrdinalIgnoreCase));
+
+        if (string.IsNullOrWhiteSpace(archInstruction))
+            return MicroserviceCatalog.All.ToList();
+
+        var marker = "TARGET_SERVICES=";
+        var start = archInstruction.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+        if (start < 0)
+            return MicroserviceCatalog.All.ToList();
+
+        start += marker.Length;
+        var end = archInstruction.IndexOf(';', start);
+        var csv = end >= 0 ? archInstruction[start..end] : archInstruction[start..];
+
+        var services = csv
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(MicroserviceCatalog.ByName)
+            .Where(s => s is not null)
+            .Cast<MicroserviceDefinition>()
+            .ToList();
+
+        return services.Count > 0 ? services : MicroserviceCatalog.All.ToList();
+    }
+
+    private static string GetGuidanceSummary(AgentContext context)
+    {
+        var guidance = context.OrchestratorInstructions
+            .Where(i => i.StartsWith("[ARCH]", StringComparison.OrdinalIgnoreCase)
+                     || i.StartsWith("[PLATFORM]", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        return guidance.Count == 0 ? string.Empty : string.Join(" | ", guidance);
     }
 
     // ─── DTO (domain-model-driven — maps ALL entity fields) ────────────────
