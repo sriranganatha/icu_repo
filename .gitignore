@@ -43,6 +43,7 @@ Desktop.ini
 
 # Pipeline config (may contain passwords)
 pipeline-config.json
+appsettings.json
 
 # Docker volumes
 pgdata/
