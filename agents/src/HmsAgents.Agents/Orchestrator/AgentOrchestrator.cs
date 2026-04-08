@@ -300,6 +300,11 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
             // Process inter-agent directives
             ProcessDirectives(context, pendingAgents, completedAgents);
 
+            // Re-evaluate blocked work items — unblock items whose deps are now Completed
+            var unblocked = ReevaluateBlockedItems(context);
+            if (unblocked > 0)
+                _logger.LogInformation("[Daemon] Unblocked {Count} work item(s) whose dependencies are now complete", unblocked);
+
             // Find agents whose dependencies are all satisfied
             var readyBatch = pendingAgents
                 .Where(a => GetDependencies(a).All(dep => completedAgents.ContainsKey(dep)))
@@ -1231,6 +1236,40 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
         AgentType.RequirementsReader, AgentType.RequirementsExpander, AgentType.Backlog,
         AgentType.Review, AgentType.Supervisor, AgentType.RequirementAnalyzer
     ];
+
+    /// <summary>
+    /// Re-evaluate all Blocked work items. If all DependsOn items are now Completed (or missing),
+    /// move the item back to InQueue so agents can claim it.
+    /// Called every daemon-loop iteration so items unblock as soon as dependencies finish.
+    /// </summary>
+    private static int ReevaluateBlockedItems(AgentContext context)
+    {
+        var unblocked = 0;
+        foreach (var item in context.ExpandedRequirements.ToList())
+        {
+            if (item.Status != WorkItemStatus.Blocked) continue;
+            if (item.DependsOn.Count == 0)
+            {
+                // No deps but marked Blocked — shouldn't happen, fix it
+                item.Status = WorkItemStatus.InQueue;
+                unblocked++;
+                continue;
+            }
+
+            var allDepsComplete = item.DependsOn.All(depId =>
+            {
+                var dep = context.ExpandedRequirements.FirstOrDefault(e => e.Id == depId);
+                return dep is null || dep.Status == WorkItemStatus.Completed;
+            });
+
+            if (allDepsComplete)
+            {
+                item.Status = WorkItemStatus.InQueue;
+                unblocked++;
+            }
+        }
+        return unblocked;
+    }
 
     /// <summary>Get items this agent would claim (read-only peek for dispatch logging).</summary>
     private static List<ExpandedRequirement> GetClaimableItems(AgentContext context, AgentType agentType)
