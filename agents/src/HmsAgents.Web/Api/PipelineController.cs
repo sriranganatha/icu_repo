@@ -59,6 +59,24 @@ public sealed class PipelineController : ControllerBase
         if (!Directory.Exists(request.RequirementsPath))
             return BadRequest(new { error = $"Requirements path not found: {request.RequirementsPath}" });
 
+        if (request.ResetInMemoryContextBeforeRun)
+            _orchestrator.ResetContext();
+
+        if (request.ClearGeneratedUserRequirementFilesBeforeRun)
+        {
+            foreach (var path in Directory.EnumerateFiles(request.RequirementsPath, "user-requirements-*.md", SearchOption.TopDirectoryOnly))
+            {
+                try
+                {
+                    System.IO.File.Delete(path);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to delete stale user requirement file: {Path}", path);
+                }
+            }
+        }
+
         // Ensure output directory exists
         Directory.CreateDirectory(request.OutputPath);
 
@@ -544,10 +562,12 @@ public sealed class PipelineController : ControllerBase
     public IActionResult GetBacklog()
     {
         var ctx = _orchestrator.GetCurrentContext();
-        if (ctx is not null && ctx.ExpandedRequirements.Count > 0)
+        if (ctx is not null)
         {
             return Ok(new
             {
+                runId = ctx.RunId,
+                source = "active",
                 devIteration = ctx.DevIteration,
                 totalItems = ctx.ExpandedRequirements.Count,
                 items = ctx.ExpandedRequirements.Select(e => new
@@ -1133,6 +1153,8 @@ public sealed class PipelineRunRequest
 {
     public string RequirementsPath { get; init; } = string.Empty;
     public string OutputPath { get; init; } = string.Empty;
+    public bool ResetInMemoryContextBeforeRun { get; init; } = true;
+    public bool ClearGeneratedUserRequirementFilesBeforeRun { get; init; } = true;
     public string? SolutionNamespace { get; init; }
     public string? DockerContainerName { get; init; }
     public string? DbHost { get; init; }

@@ -64,8 +64,16 @@ public sealed class DeployAgent : IAgent
             }
 
             // ── Step 1: Locate solution file ──
-            var slnFiles = Directory.GetFiles(outputPath, "*.sln", SearchOption.TopDirectoryOnly);
-            var solutionPath = slnFiles.Length > 0 ? slnFiles[0] : null;
+            var slnFiles = Directory.GetFiles(outputPath, "*.sln", SearchOption.AllDirectories)
+                .Where(p => !p.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase)
+                            && !p.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+            var csprojFiles = Directory.GetFiles(outputPath, "*.csproj", SearchOption.AllDirectories)
+                .Where(p => !p.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase)
+                            && !p.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+            var solutionPath = slnFiles.FirstOrDefault();
+            var restoreBuildTarget = solutionPath ?? csprojFiles.FirstOrDefault();
 
             report.AppendLine("## Step 1: Solution Discovery");
             if (solutionPath is not null)
@@ -80,11 +88,21 @@ public sealed class DeployAgent : IAgent
                 report.AppendLine("- No .sln file found; will build individual projects.");
                 _logger.LogWarning("No .sln found in {Output}", outputPath);
             }
+
+            if (string.IsNullOrWhiteSpace(restoreBuildTarget))
+            {
+                errors.Add($"No .sln or .csproj found under output path: {outputPath}");
+                report.AppendLine("- No restore/build target found (.sln/.csproj missing).\n");
+                context.AgentStatuses[Type] = AgentStatus.Failed;
+                artifacts.Add(MakeReportArtifact(report));
+                context.Artifacts.AddRange(artifacts);
+                return Fail("Build target not found — cannot deploy", errors, sw.Elapsed, artifacts, messages);
+            }
             report.AppendLine();
 
             // ── Step 2: NuGet Restore ──
             report.AppendLine("## Step 2: NuGet Restore");
-            var restoreTarget = solutionPath ?? outputPath;
+            var restoreTarget = restoreBuildTarget;
             if (context.ReportProgress is not null)
                 await context.ReportProgress(Type, $"Step 2: Running NuGet restore on {Path.GetFileName(restoreTarget)}");
             var (restoreOk, restoreOut) = await RunProcessAsync("dotnet", $"restore \"{restoreTarget}\"", outputPath, ct);
@@ -96,7 +114,7 @@ public sealed class DeployAgent : IAgent
 
             // ── Step 3: Build ──
             report.AppendLine("## Step 3: Build");
-            var buildTarget = solutionPath ?? outputPath;
+            var buildTarget = restoreBuildTarget;
             if (context.ReportProgress is not null)
                 await context.ReportProgress(Type, "Step 3: Building solution in Release configuration");
             var (buildOk, buildOut) = await RunProcessAsync("dotnet", $"build \"{buildTarget}\" -c Release --no-restore", outputPath, ct);

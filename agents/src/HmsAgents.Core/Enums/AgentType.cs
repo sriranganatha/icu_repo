@@ -34,5 +34,8 @@ public enum AgentType
     Refactoring,
     Configuration,
     UiUx,
-    LoadTest
+    LoadTest,
+    GapAnalysis,
+    Planning,
+    CodeReasoning
 }

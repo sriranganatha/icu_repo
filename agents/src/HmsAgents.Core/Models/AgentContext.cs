@@ -9,7 +9,7 @@ public sealed class AgentContext
     public string RequirementsBasePath { get; init; } = string.Empty;
     public string OutputBasePath { get; init; } = string.Empty;
     public List<Requirement> Requirements { get; set; } = [];
-    public List<ExpandedRequirement> ExpandedRequirements { get; set; } = [];
+    public SynchronizedList<ExpandedRequirement> ExpandedRequirements { get; set; } = new();
     public ConcurrentBag<CodeArtifact> Artifacts { get; set; } = [];
     public ConcurrentBag<ReviewFinding> Findings { get; set; } = [];
     public ConcurrentBag<AgentMessage> Messages { get; set; } = [];
@@ -32,4 +32,6 @@ public sealed class AgentContext
     public DateTimeOffset? CompletedAt { get; set; }
     /// <summary>Set to true after the first DDL approval in this run — prevents re-prompting on agent re-dispatch.</summary>
     public bool DdlApprovedForRun { get; set; }
+    /// <summary>Structured implementation plan created by PlanningAgent — guides downstream code-gen agents.</summary>
+    public ImplementationPlan? ImplementationPlan { get; set; }
 }

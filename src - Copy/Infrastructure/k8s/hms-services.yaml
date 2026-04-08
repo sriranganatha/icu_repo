@@ -1,7 +1,0 @@
-// AI-Generated: Infrastructure as Code
-// Container: Multi-stage Dockerfile, non-root user, distroless base
-// Orchestration: Kubernetes Deployment + HPA + PDB + NetworkPolicy
-// Helm chart: Values per environment (dev/staging/prod)
-// Database: PostgreSQL with connection pooling (PgBouncer), read replicas
-// Messaging: Kafka cluster with 3 brokers, topic auto-creation disabled
-// Secrets: External Secrets Operator → Azure Key Vault / AWS Secrets Manager

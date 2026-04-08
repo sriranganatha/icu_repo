@@ -157,8 +157,8 @@ public class OrchestratorTests
         bugFixCalled.Should().BeTrue("BugFix should run in heal cycle to fix root cause");
         perfCalled.Should().BeTrue("Performance should check the fix");
         reviewCalled.Should().BeTrue("Review should validate the fix");
-        // Self-healing marks exhausted agents as Completed so pipeline continues
-        result.AgentStatuses[AgentType.Database].Should().Be(AgentStatus.Completed);
+        // Self-healing marks exhausted agents as Failed so items can be re-queued
+        result.AgentStatuses[AgentType.Database].Should().Be(AgentStatus.Failed);
     }
 
     [Fact]

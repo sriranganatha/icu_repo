@@ -564,6 +564,13 @@
             @await Html.PartialAsync("_AgentCard", new HmsAgents.Web.Pages.AgentCardModel { Name = "API Documentation", Icon = "bi-journal-code", AgentKey = "ApiDocumentation", Description = "OpenAPI specs, Swagger, endpoint docs" })
         </div>
     </div>
+    <!-- Agent Cards: Gap Analysis -->
+    <h5 class="mb-2"><i class="bi bi-clipboard-data text-info me-1"></i> Gap Analysis</h5>
+    <div class="row mb-3 g-3">
+        <div class="col-md-4 col-lg-3" id="card-GapAnalysis">
+            @await Html.PartialAsync("_AgentCard", new HmsAgents.Web.Pages.AgentCardModel { Name = "Gap Analysis", Icon = "bi-clipboard-data", AgentKey = "GapAnalysis", Description = "Scans artifacts, identifies implementation gaps, feeds back to backlog" })
+        </div>
+    </div>
     <!-- Agent Cards: Deployment -->
     <h5 class="mb-2"><i class="bi bi-rocket-takeoff text-primary me-1"></i> Deployment</h5>
     <div class="row mb-4 g-3">
@@ -889,28 +896,28 @@
             "Review","Testing","Supervisor","BugFix","Performance","Security","HipaaCompliance","Soc2Compliance",
             "AccessControl","Observability","Infrastructure","ApiDocumentation","RequirementsExpander","Backlog","Deploy",
             "RequirementAnalyzer","Build","Monitor","Migration","CodeQuality","DependencyAudit","Refactoring",
-            "Configuration","UiUx","LoadTest"
+            "Configuration","UiUx","LoadTest","GapAnalysis"
         ];
         const ALL_AGENT_LABELS = [
             "Orchestrator","Reqs Reader","Architect","Platform Builder","Database","Service","Application","Integration",
             "Review","Testing","Supervisor","BugFix","Performance","Security","HIPAA","SOC2",
             "AccessCtrl","Observability","Infra","API Docs","Reqs Expander","Backlog","Deploy",
             "Req Analyzer","Build","Monitor","Migration","Code Quality","Dependency Audit","Refactoring",
-            "Configuration","UI/UX","Load Test"
+            "Configuration","UI/UX","Load Test","Gap Analysis"
         ];
         const ALL_AGENT_ICONS = [
             "bi-diagram-3","bi-file-earmark-text","bi-diagram-3-fill","bi-hdd-stack","bi-database","bi-layers","bi-window-stack","bi-plug",
             "bi-shield-check","bi-check2-circle","bi-eye","bi-bug","bi-speedometer2","bi-shield-lock","bi-heart-pulse","bi-file-earmark-lock",
             "bi-key","bi-binoculars","bi-cloud-arrow-up","bi-journal-code","bi-diagram-2","bi-kanban","bi-rocket-takeoff",
             "bi-search","bi-hammer","bi-activity","bi-arrow-left-right","bi-stars","bi-shield-exclamation","bi-bezier2",
-            "bi-sliders","bi-palette","bi-graph-up"
+            "bi-sliders","bi-palette","bi-graph-up","bi-clipboard-data"
         ];
         const ALL_AGENT_COLORS = [
             "#78909c","#42a5f5","#1e88e5","#3949ab","#66bb6a","#ffa726","#ef5350","#ab47bc",
             "#26c6da","#8d6e63","#e91e63","#ff7043","#29b6f6","#ec407a","#66bb6a","#5c6bc0",
             "#ffca28","#26a69a","#7e57c2","#8d6e63","#7cb342","#9575cd","#1e88e5",
             "#00897b","#6d4c41","#00acc1","#546e7a","#8e24aa","#c62828","#5d4037",
-            "#3949ab","#ff8f00","#2e7d32"
+            "#3949ab","#ff8f00","#2e7d32","#00838f"
         ];
         // Keep backward compat aliases
         const AGENTS = ALL_AGENTS;

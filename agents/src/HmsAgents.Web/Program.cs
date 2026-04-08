@@ -3,24 +3,35 @@ using HmsAgents.Agents.Architecture;
 using HmsAgents.Agents.Backlog;
 using HmsAgents.Agents.Build;
 using HmsAgents.Agents.BugFix;
+using HmsAgents.Agents.CodeQuality;
+using HmsAgents.Agents.CodeReasoning;
 using HmsAgents.Agents.Compliance;
+using HmsAgents.Agents.Configuration;
+using HmsAgents.Agents.ContextBrokering;
 using HmsAgents.Agents.Database;
+using HmsAgents.Agents.DependencyAudit;
 using HmsAgents.Agents.Deploy;
 using HmsAgents.Agents.Documentation;
+using HmsAgents.Agents.GapAnalysis;
 using HmsAgents.Agents.Infrastructure;
 using HmsAgents.Agents.Integration;
 using HmsAgents.Agents.Llm;
+using HmsAgents.Agents.LoadTest;
+using HmsAgents.Agents.Migration;
 using HmsAgents.Agents.Monitor;
 using HmsAgents.Agents.Observability;
 using HmsAgents.Agents.Orchestrator;
 using HmsAgents.Agents.Performance;
+using HmsAgents.Agents.Planning;
 using HmsAgents.Agents.Platform;
+using HmsAgents.Agents.Refactoring;
 using HmsAgents.Agents.Requirements;
 using HmsAgents.Agents.Review;
 using HmsAgents.Agents.Security;
 using HmsAgents.Agents.Service;
 using HmsAgents.Agents.Supervisor;
 using HmsAgents.Agents.Testing;
+using HmsAgents.Agents.UiUx;
 using HmsAgents.Core.Interfaces;
 using HmsAgents.Web.Hubs;
 using HmsAgents.Web.Services;
@@ -79,6 +90,7 @@ builder.Services.AddSingleton<IAgent, ApiDocumentationAgent>();
 // Iterative agents (requirements expansion, gap analysis, backlog management)
 builder.Services.AddSingleton<IAgent, RequirementsExpanderAgent>();
 builder.Services.AddSingleton<IAgent, RequirementAnalyzerAgent>();
+builder.Services.AddSingleton<IAgent, GapAnalysisAgent>();
 builder.Services.AddSingleton<IAgent, BacklogAgent>();
 
 // Deployment agent
@@ -87,6 +99,20 @@ builder.Services.AddSingleton<IAgent, DeployAgent>();
 // Build & Monitor agents
 builder.Services.AddSingleton<IAgent, BuildAgent>();
 builder.Services.AddSingleton<IAgent, MonitorAgent>();
+
+// Reasoning & context brokering
+builder.Services.AddSingleton<IContextBroker, ContextBroker>();
+builder.Services.AddSingleton<IAgent, PlanningAgent>();
+builder.Services.AddSingleton<IAgent, CodeReasoningAgent>();
+
+// Previously unregistered agents
+builder.Services.AddSingleton<IAgent, MigrationAgent>();
+builder.Services.AddSingleton<IAgent, CodeQualityAgent>();
+builder.Services.AddSingleton<IAgent, DependencyAgent>();
+builder.Services.AddSingleton<IAgent, RefactoringAgent>();
+builder.Services.AddSingleton<IAgent, ConfigurationAgent>();
+builder.Services.AddSingleton<IAgent, UiUxAgent>();
+builder.Services.AddSingleton<IAgent, LoadTestAgent>();
 
 builder.Services.AddSingleton<IAgentOrchestrator, AgentOrchestrator>();
 

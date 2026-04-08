@@ -545,7 +545,7 @@ public sealed class RequirementAnalyzerAgent : IAgent
     }
 
     // ─── Dependency Chain Resolution ───────────────────────────────────
-    private static void ResolveDependencyChains(List<ExpandedRequirement> existing,
+    private static void ResolveDependencyChains(IList<ExpandedRequirement> existing,
         List<ExpandedRequirement> newItems, ParsedDomainModel? domainModel)
     {
         var all = existing.Concat(newItems).ToList();

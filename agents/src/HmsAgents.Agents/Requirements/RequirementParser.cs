@@ -137,7 +137,7 @@ public sealed partial class RequirementParser : IRequirementsReader
             return false;
 
         var body = string.Join('\n', bodyLines).Trim();
-        var bulletCount = bodyLines.Count(l => l.TrimStart().StartsWith("- "));
+        var bulletCount = bodyLines.Count(l => ListBulletRegex().IsMatch(l.TrimStart()));
         var hasContent = body.Length >= 40 || bulletCount > 0;
         if (!hasContent)
             return false;
@@ -152,11 +152,7 @@ public sealed partial class RequirementParser : IRequirementsReader
         int level, string title, List<string> bodyLines, List<string> tags)
     {
         var body = string.Join('\n', bodyLines).Trim();
-        var criteria = bodyLines
-            .Where(l => l.TrimStart().StartsWith("- "))
-            .Select(l => l.TrimStart()[2..].Trim())
-            .Where(c => c.Length > 10)
-            .ToList();
+        var criteria = ExtractAcceptanceCriteria(bodyLines);
 
         return new Requirement
         {
@@ -170,6 +166,64 @@ public sealed partial class RequirementParser : IRequirementsReader
             Tags = tags,
             AcceptanceCriteria = criteria
         };
+    }
+
+    private static List<string> ExtractAcceptanceCriteria(List<string> bodyLines)
+    {
+        var criteria = new List<string>();
+        var current = string.Empty;
+
+        foreach (var rawLine in bodyLines)
+        {
+            var line = rawLine.Trim();
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                if (!string.IsNullOrWhiteSpace(current))
+                {
+                    criteria.Add(current.Trim());
+                    current = string.Empty;
+                }
+                continue;
+            }
+
+            var bulletMatch = ListBulletRegex().Match(line);
+            if (bulletMatch.Success)
+            {
+                if (!string.IsNullOrWhiteSpace(current))
+                    criteria.Add(current.Trim());
+
+                current = bulletMatch.Groups[1].Value.Trim();
+                continue;
+            }
+
+            if (!string.IsNullOrWhiteSpace(current))
+            {
+                // Preserve wrapped bullet/list content so one criterion is not fragmented by line breaks.
+                current += " " + line;
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(current))
+            criteria.Add(current.Trim());
+
+        criteria = criteria
+            .Select(c => c.Trim())
+            .Where(c => c.Length > 10)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(10)
+            .ToList();
+
+        if (criteria.Count > 0)
+            return criteria;
+
+        var body = string.Join(' ', bodyLines).Trim();
+        var fallback = SentenceRegex().Split(body)
+            .Select(s => s.Trim())
+            .Where(s => s.Length > 25 && s_requirementSignals.Any(sig => s.Contains(sig, StringComparison.OrdinalIgnoreCase)))
+            .Take(5)
+            .ToList();
+
+        return fallback;
     }
 
     private static string InferModule(string fileName)
@@ -208,6 +262,12 @@ public sealed partial class RequirementParser : IRequirementsReader
 
     [GeneratedRegex(@"^(#{1,6})\s+(.+)$")]
     private static partial Regex HeadingRegex();
+
+    [GeneratedRegex(@"^(?:[-*]|\d+[\.)])\s+(.+)$")]
+    private static partial Regex ListBulletRegex();
+
+    [GeneratedRegex(@"[.!?]+\s+")]
+    private static partial Regex SentenceRegex();
 
     [GeneratedRegex(@"^\d+(\.\d+)*\.?\s*(purpose|scope|references?|definitions?|glossary|revision history|table of contents)$", RegexOptions.IgnoreCase)]
     private static partial Regex NumberedStructuralHeadingRegex();

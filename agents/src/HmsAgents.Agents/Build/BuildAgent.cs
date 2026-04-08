@@ -53,14 +53,24 @@ public sealed class BuildAgent : IAgent
             }
 
             // ── Step 1: Find solution/projects ──
-            var slnFiles = Directory.GetFiles(outputPath, "*.sln", SearchOption.TopDirectoryOnly);
+            var slnFiles = Directory.GetFiles(outputPath, "*.sln", SearchOption.AllDirectories)
+                .Where(p => !p.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase)
+                            && !p.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase))
+                .ToArray();
             var csprojFiles = Directory.GetFiles(outputPath, "*.csproj", SearchOption.AllDirectories);
             report.AppendLine("## Discovery");
             report.AppendLine($"- Solutions: {slnFiles.Length}");
             report.AppendLine($"- Projects: {csprojFiles.Length}");
             report.AppendLine();
 
-            var buildTarget = slnFiles.Length > 0 ? slnFiles[0] : outputPath;
+            var buildTarget = slnFiles.FirstOrDefault() ?? csprojFiles.FirstOrDefault();
+            if (string.IsNullOrWhiteSpace(buildTarget))
+            {
+                context.AgentStatuses[Type] = AgentStatus.Failed;
+                errors.Add("No .sln or .csproj files found under output path.");
+                report.AppendLine("- Build target: NOT FOUND (.sln/.csproj missing)");
+                return Fail("No build target discovered", errors, sw.Elapsed);
+            }
 
             // ── Step 2: Restore ──
             report.AppendLine("## NuGet Restore");

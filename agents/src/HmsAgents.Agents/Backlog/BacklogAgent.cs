@@ -275,7 +275,7 @@ public sealed class BacklogAgent : IAgent
             else if (item.ItemType == WorkItemType.Epic || item.ItemType == WorkItemType.UserStory)
                 hasArtifact = artifactModules.Contains(item.Module);
 
-            if (hasArtifact && item.Status == WorkItemStatus.InQueue)
+            if (hasArtifact && item.Status is WorkItemStatus.InQueue or WorkItemStatus.New)
             {
                 item.Status = WorkItemStatus.UnderDev;
                 item.StartedAt = DateTimeOffset.UtcNow;
@@ -290,10 +290,13 @@ public sealed class BacklogAgent : IAgent
                     item.Status = WorkItemStatus.Completed;
                     item.CompletedAt = DateTimeOffset.UtcNow;
                 }
-                else if (children.Any(c => c.Status == WorkItemStatus.UnderDev))
+                else if (children.Any(c => c.Status is WorkItemStatus.UnderDev or WorkItemStatus.Completed))
                 {
-                    item.Status = WorkItemStatus.UnderDev;
-                    item.StartedAt ??= DateTimeOffset.UtcNow;
+                    if (item.Status is WorkItemStatus.New or WorkItemStatus.InQueue)
+                    {
+                        item.Status = WorkItemStatus.UnderDev;
+                        item.StartedAt ??= DateTimeOffset.UtcNow;
+                    }
                 }
             }
 
@@ -358,15 +361,36 @@ public sealed class BacklogAgent : IAgent
 
     private void IdentifyBlockedItems(AgentContext context)
     {
-        foreach (var item in context.ExpandedRequirements.Where(e => e.Status == WorkItemStatus.InQueue))
+        foreach (var item in context.ExpandedRequirements)
         {
-            foreach (var dep in item.DependsOn)
+            if (item.DependsOn.Count == 0) continue;
+
+            if (item.Status == WorkItemStatus.InQueue || item.Status == WorkItemStatus.New)
             {
-                var depItem = context.ExpandedRequirements.FirstOrDefault(e => e.Id == dep);
-                if (depItem is not null && depItem.Status != WorkItemStatus.Completed)
+                // Check if any dependency is incomplete → block
+                foreach (var dep in item.DependsOn)
                 {
-                    item.Status = WorkItemStatus.Blocked;
-                    break;
+                    var depItem = context.ExpandedRequirements.FirstOrDefault(e => e.Id == dep);
+                    if (depItem is not null && depItem.Status != WorkItemStatus.Completed)
+                    {
+                        item.Status = WorkItemStatus.Blocked;
+                        break;
+                    }
+                }
+            }
+            else if (item.Status == WorkItemStatus.Blocked)
+            {
+                // Re-evaluate: if ALL dependencies are now Completed → unblock
+                var allDepsComplete = item.DependsOn.All(dep =>
+                {
+                    var depItem = context.ExpandedRequirements.FirstOrDefault(e => e.Id == dep);
+                    return depItem is null || depItem.Status == WorkItemStatus.Completed;
+                });
+
+                if (allDepsComplete)
+                {
+                    item.Status = WorkItemStatus.InQueue;
+                    _logger.LogInformation("[Backlog] Unblocked {ItemId} — all dependencies now complete", item.Id);
                 }
             }
         }

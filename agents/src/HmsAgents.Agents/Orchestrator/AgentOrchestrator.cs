@@ -24,6 +24,7 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
     private AgentContext? _current;
 
     private const int MaxAgentRetries = 2;
+    private const int MaxClaimBatchSize = 50;
     private static readonly TimeSpan RetryDelay = TimeSpan.FromSeconds(1);
     private static readonly TimeSpan DaemonPollInterval = TimeSpan.FromMilliseconds(500);
 
@@ -62,6 +63,26 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
         [AgentType.Build]                = [AgentType.Database, AgentType.ServiceLayer, AgentType.Application, AgentType.Integration, AgentType.Testing, AgentType.Review, AgentType.BugFix],
         // Monitor — runs after Deploy to check containers and service health
         [AgentType.Monitor]              = [AgentType.Deploy],
+        // GapAnalysis — runs after code generation + review + analyzer to find implementation gaps
+        [AgentType.GapAnalysis]          = [AgentType.RequirementAnalyzer, AgentType.Integration, AgentType.Review],
+        // Planning — reasoning agent that creates implementation plans before code-gen
+        [AgentType.Planning]             = [AgentType.RequirementsExpander, AgentType.Architect],
+        // CodeReasoning — holistic post-generation analysis before Review
+        [AgentType.CodeReasoning]        = [AgentType.Database, AgentType.ServiceLayer, AgentType.Application, AgentType.Integration],
+        // Migration — after Database to handle schema migrations
+        [AgentType.Migration]            = [AgentType.Database],
+        // CodeQuality — after all code-gen
+        [AgentType.CodeQuality]          = [AgentType.Database, AgentType.ServiceLayer, AgentType.Application, AgentType.Integration],
+        // DependencyAudit — after PlatformBuilder sets up project references
+        [AgentType.DependencyAudit]      = [AgentType.PlatformBuilder],
+        // Refactoring — after Review identifies refactoring opportunities
+        [AgentType.Refactoring]          = [AgentType.Review],
+        // Configuration — after PlatformBuilder sets up project structure
+        [AgentType.Configuration]        = [AgentType.PlatformBuilder],
+        // UiUx — after Application layer generates endpoints
+        [AgentType.UiUx]                 = [AgentType.Application],
+        // LoadTest — after Deploy for performance validation
+        [AgentType.LoadTest]             = [AgentType.Deploy],
     };
 
     // Finding → remediation dispatch
@@ -99,7 +120,7 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
 
     // Heal-cycle agents skip the BugFix→Performance→Review loop themselves
     private static readonly HashSet<AgentType> s_healCycleAgents =
-        [AgentType.BugFix, AgentType.Performance, AgentType.Review, AgentType.Supervisor, AgentType.Backlog, AgentType.RequirementsExpander, AgentType.Deploy, AgentType.Build, AgentType.Monitor];
+        [AgentType.BugFix, AgentType.Performance, AgentType.Review, AgentType.Supervisor, AgentType.Backlog, AgentType.RequirementsExpander, AgentType.Deploy, AgentType.Build, AgentType.Monitor, AgentType.Planning, AgentType.CodeReasoning];
 
     private const int MaxBuildFixCycles = 3; // Max build→fix→rebuild iterations
 
@@ -107,6 +128,10 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
     private readonly ConcurrentQueue<List<Requirement>> _pendingRequirements = new();
     // Task completion fan-out tracker: taskId -> set(agentName)
     private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, byte>> _taskCompletedBy = new(StringComparer.OrdinalIgnoreCase);
+    // Shared task tracker bridging the lifecycle policy and multi-agent completion
+    private readonly ConcurrentTaskTracker _taskTracker = new();
+    // Lifecycle policy enforcing Received → InProgress → Completed/Failed stages for all agents
+    private readonly WorkItemLifecyclePolicy _lifecycle;
 
     public AgentOrchestrator(
         IEnumerable<IAgent> agents,
@@ -122,6 +147,11 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
         _audit = audit;
         _humanGate = humanGate;
         _logger = logger;
+        _lifecycle = new WorkItemLifecyclePolicy(msg => _logger.LogInformation("{Message}", msg))
+        {
+            MaxItemRetries = MaxAgentRetries + 1,  // 3 retries per item before backlog
+            BatchSize = MaxClaimBatchSize
+        };
     }
 
     public AgentContext? GetCurrentContext() => _current;
@@ -130,6 +160,9 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
     {
         _current = null;
         _taskCompletedBy.Clear();
+        _taskTracker.Clear();
+        // Drain mid-pipeline requirement injection queue
+        while (_pendingRequirements.TryDequeue(out _)) { }
     }
 
     // ─── Mid-Pipeline Requirement Injection ────────────────────────
@@ -377,14 +410,15 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
 
         // ── Build → Fix → Rebuild automated loop ───────────────────
         var buildAgent = _agents.FirstOrDefault(a => a.Type == AgentType.Build);
+        var buildPassed = true;
         if (buildAgent is not null)
         {
-            await RunBuildFixCycleAsync(context, buildAgent, ct);
+            buildPassed = await RunBuildFixCycleAsync(context, buildAgent, ct);
         }
 
-        // ── Deploy → Monitor → Fix feedback loop ───────────────────
+        // ── Deploy → Monitor → Fix feedback loop (only if build passed) ──
         var deployAgent = _agents.FirstOrDefault(a => a.Type == AgentType.Deploy);
-        if (deployAgent is not null)
+        if (deployAgent is not null && buildPassed)
         {
             await RunAgentWithHealingAsync(context, deployAgent, ct);
 
@@ -393,6 +427,12 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
             {
                 await RunMonitorFixCycleAsync(context, monitorAgent, deployAgent, ct);
             }
+        }
+        else if (deployAgent is not null && !buildPassed)
+        {
+            _logger.LogWarning("[Daemon] Skipping deployment — build failed after {Max} cycles", MaxBuildFixCycles);
+            await PublishEvent(context, AgentType.Deploy, AgentStatus.Failed,
+                "Deployment SKIPPED — build has unresolved errors. Fix build before deploying.", ct: ct);
         }
 
         // ── Final: Supervisor report ────────────────────────────────
@@ -421,10 +461,13 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
             artifactCount: context.Artifacts.Count, findingCount: context.Findings.Count, ct: ct);
 
         // ── Audit: pipeline completed
+        var pipelineDuration = context.CompletedAt.HasValue && context.StartedAt != default
+            ? $"{(context.CompletedAt.Value - context.StartedAt).TotalSeconds:F0}s"
+            : "unknown";
         await _audit.LogAsync(AgentType.Orchestrator, context.RunId, AuditAction.PipelineCompleted,
             $"Pipeline {context.RunId} completed — {context.Artifacts.Count} artifacts, {context.Findings.Count} findings",
             $"Backlog: {context.ExpandedRequirements.Count}, TestDiagnostics: {context.TestDiagnostics.Count}, " +
-            $"Duration: {(context.CompletedAt!.Value - DateTimeOffset.Parse(context.RunId.Split('-').First())).TotalSeconds:F0}s",
+            $"Duration: {pipelineDuration}",
             severity: AuditSeverity.Info, ct: ct);
 
         // ── Post-pipeline instructions ──────────────────────────────
@@ -506,6 +549,7 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                     break;
 
                 case "EXPAND_NEW":
+                case "EXPAND_GAPS":
                 case "REFRESH_BACKLOG":
                     // Schedule the target agent for a fresh run; do not re-enqueue
                     // otherwise the same directives loop forever in the daemon.
@@ -609,10 +653,19 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
             }
 
             AgentResult result;
+            List<ExpandedRequirement> claimedBatch;
             try
             {
-                // ── Assign matching backlog items to this agent ──
-                await ClaimBacklogItems(context, agent.Type);
+                // ── Stage 1: CLAIM — New/InQueue → Received ──
+                var agentName = agent.Type.ToString();
+                claimedBatch = _lifecycle.Claim(
+                    context.ExpandedRequirements,
+                    agentName,
+                    item => GetRelevantTaskAgents(item),
+                    item => MatchesAgent(item, agent.Type));
+
+                // ── Stage 2: START — Received → InProgress ──
+                _lifecycle.Start(claimedBatch, agentName);
 
                 result = await agent.ExecuteAsync(context, ct);
             }
@@ -641,9 +694,27 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                 result.Artifacts.Count, result.Findings.Count,
                 sw.Elapsed.TotalMilliseconds, result.TestDiagnostics, ct);
 
-            // ── Complete backlog items assigned to this agent ──
             if (result.Success)
-                await CompleteBacklogItems(context, agent.Type);
+            {
+                // ── Stage 3a: COMPLETE — InProgress → Completed ──
+                _lifecycle.Complete(
+                    context.ExpandedRequirements,
+                    agent.Type.ToString(),
+                    item => GetRelevantTaskAgents(item),
+                    _taskTracker);
+            }
+            else
+            {
+                // ── Stage 3b: FAIL — InProgress → retry (InQueue) or backlog (New) ──
+                var (retriable, backlogged) = _lifecycle.Fail(
+                    context.ExpandedRequirements,
+                    agent.Type.ToString(),
+                    _taskTracker);
+
+                if (retriable > 0)
+                    _logger.LogInformation("[Self-Heal] {Agent} attempt {Attempt}: {Retriable} items queued for retry",
+                        agent.Name, attempt + 1, retriable);
+            }
 
             // ── Audit: agent completed/failed with details
             await _audit.LogAsync(agent.Type, context.RunId,
@@ -736,26 +807,27 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
             }
         }
 
-        // Exhausted retries — mark completed so downstream doesn't block
-        _logger.LogWarning("[Self-Heal] {Agent} FAILED after {Max} attempts — skipping", agent.Name, MaxAgentRetries + 1);
+        // Exhausted retries — mark failed and re-queue uncompleted items via lifecycle policy
+        _logger.LogWarning("[Self-Heal] {Agent} FAILED after {Max} attempts — re-queuing backlog items", agent.Name, MaxAgentRetries + 1);
         context.TestDiagnostics.Add(new TestDiagnostic
         {
             TestName = $"SelfHeal_{agent.Type}_Skipped",
             AgentUnderTest = agent.Type.ToString(),
             Outcome = TestOutcome.Failed,
             Diagnostic = $"Exhausted {MaxAgentRetries + 1} attempts: {lastError}",
-            Remediation = "Agent skipped — pipeline continued without it",
+            Remediation = "Agent failed — uncompleted backlog items re-queued via lifecycle policy",
             Category = "SelfHealing",
             DurationMs = 0,
             AttemptNumber = MaxAgentRetries + 1
         });
-        context.AgentStatuses[agent.Type] = AgentStatus.Completed;
+        _lifecycle.Fail(context.ExpandedRequirements, agent.Type.ToString(), _taskTracker);
+        context.AgentStatuses[agent.Type] = AgentStatus.Failed;
         return false;
     }
 
     // ─── Build → Fix → Rebuild Cycle ────────────────────────────────
 
-    private async Task RunBuildFixCycleAsync(AgentContext context, IAgent buildAgent, CancellationToken ct)
+    private async Task<bool> RunBuildFixCycleAsync(AgentContext context, IAgent buildAgent, CancellationToken ct)
     {
         for (var cycle = 0; cycle < MaxBuildFixCycles; cycle++)
         {
@@ -781,7 +853,7 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                     $"Build succeeded on cycle {cycle + 1}/{MaxBuildFixCycles}",
                     $"Errors: 0, Findings: {buildResult.Findings.Count}",
                     severity: AuditSeverity.Info, ct: ct);
-                return;
+                return true;
             }
 
             // Build failed — collect error findings and dispatch to BugFix
@@ -815,11 +887,17 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
 
             if (cycle + 1 >= MaxBuildFixCycles)
             {
-                _logger.LogWarning("[Build-Fix] Exhausted {Max} build-fix cycles — build still failing", MaxBuildFixCycles);
-                await PublishEvent(context, AgentType.Orchestrator, AgentStatus.Running,
-                    $"Build-Fix cycle exhausted ({MaxBuildFixCycles} attempts) — build errors remain, proceeding to deployment anyway", ct: ct);
+                _logger.LogWarning("[Build-Fix] Exhausted {Max} build-fix cycles — build still failing — BLOCKING deployment", MaxBuildFixCycles);
+                await PublishEvent(context, AgentType.Orchestrator, AgentStatus.Failed,
+                    $"Build-Fix cycle exhausted ({MaxBuildFixCycles} attempts) — build errors remain, DEPLOYMENT BLOCKED", ct: ct);
+
+                await _audit.LogAsync(AgentType.Build, context.RunId, AuditAction.AgentFailed,
+                    $"Build exhausted {MaxBuildFixCycles} cycles — deployment blocked for safety",
+                    severity: AuditSeverity.Critical, ct: ct);
+                return false;
             }
         }
+        return false;
     }
 
     // ─── Monitor → Fix → Redeploy Cycle ────────────────────────────
@@ -1140,6 +1218,7 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
         ["observability"]  = AgentType.Observability,
         ["infrastructure"] = AgentType.Infrastructure,
         ["documentation"]  = AgentType.ApiDocumentation,
+        ["gap-analysis"]   = AgentType.GapAnalysis,
     };
 
     /// <summary>Maps agent type → the tags it can claim (reverse of s_tagToAgent).</summary>
@@ -1160,6 +1239,8 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
         var snapshot = context.ExpandedRequirements.ToList();
         foreach (var item in snapshot)
         {
+            if (result.Count >= MaxClaimBatchSize) break;
+
             if (item.Status != WorkItemStatus.InQueue && item.Status != WorkItemStatus.New) continue;
             if (!string.IsNullOrEmpty(item.AssignedAgent)) continue;
             if (MatchesAgent(item, agentType))
@@ -1208,110 +1289,4 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
         return result.OrderBy(x => x).ToList();
     }
 
-    /// <summary>Claim matching InQueue backlog items for this agent → set UnderDev + AssignedAgent.</summary>
-    private async Task ClaimBacklogItems(AgentContext context, AgentType agentType)
-    {
-        var agentName = agentType.ToString();
-        var claimed = new List<string>();
-
-        var snapshot = context.ExpandedRequirements.ToList();
-        foreach (var item in snapshot)
-        {
-            if (item.Status != WorkItemStatus.InQueue && item.Status != WorkItemStatus.New) continue;
-
-            if (item.ItemType == WorkItemType.Task)
-            {
-                var relevantAgents = GetRelevantTaskAgents(item);
-                if (!relevantAgents.Contains(agentName, StringComparer.OrdinalIgnoreCase))
-                    continue;
-
-                item.AssignedAgent = string.Join(",", relevantAgents);
-                item.Status = WorkItemStatus.UnderDev;
-                item.StartedAt ??= DateTimeOffset.UtcNow;
-                claimed.Add(item.Title);
-                continue;
-            }
-
-            if (!string.IsNullOrEmpty(item.AssignedAgent)) continue;
-
-            if (MatchesAgent(item, agentType))
-            {
-                item.AssignedAgent = agentName;
-                item.Status = WorkItemStatus.UnderDev;
-                item.StartedAt ??= DateTimeOffset.UtcNow;
-                claimed.Add(item.Title);
-            }
-        }
-
-        if (claimed.Count > 0)
-        {
-            _logger.LogInformation("[Backlog] {Agent} claimed {Count} backlog items", agentName, claimed.Count);
-            await PublishEvent(context, agentType, AgentStatus.Running,
-                $"Picked up {claimed.Count} backlog items: {string.Join(", ", claimed.Take(4).Select(t => Truncate(t, 45)))}{(claimed.Count > 4 ? $" (+{claimed.Count - 4} more)" : "")}",
-                0, ct: CancellationToken.None);
-        }
-    }
-
-    /// <summary>Mark all items assigned to this agent as Completed.</summary>
-    private async Task CompleteBacklogItems(AgentContext context, AgentType agentType)
-    {
-        var agentName = agentType.ToString();
-        var completedCount = 0;
-
-        var snapshot = context.ExpandedRequirements.ToList();
-        foreach (var item in snapshot)
-        {
-            if (item.Status == WorkItemStatus.Completed) continue;
-
-            if (item.ItemType == WorkItemType.Task)
-            {
-                var relevantAgents = GetRelevantTaskAgents(item);
-                if (!relevantAgents.Contains(agentName, StringComparer.OrdinalIgnoreCase))
-                    continue;
-
-                var doneSet = _taskCompletedBy.GetOrAdd(item.Id, _ => new ConcurrentDictionary<string, byte>(StringComparer.OrdinalIgnoreCase));
-                doneSet[agentName] = 1;
-
-                var allDone = relevantAgents.All(a => doneSet.ContainsKey(a));
-                if (allDone)
-                {
-                    item.Status = WorkItemStatus.Completed;
-                    item.CompletedAt = DateTimeOffset.UtcNow;
-                    item.AssignedAgent = string.Join(",", relevantAgents);
-                    completedCount++;
-                }
-                continue;
-            }
-
-            if (item.AssignedAgent != agentName) continue;
-
-            item.Status = WorkItemStatus.Completed;
-            item.CompletedAt = DateTimeOffset.UtcNow;
-            completedCount++;
-        }
-
-        // Also propagate: if all children of a parent are Completed, complete the parent
-        foreach (var parent in context.ExpandedRequirements
-            .Where(e => e.ItemType is WorkItemType.Epic or WorkItemType.UserStory))
-        {
-            if (parent.Status == WorkItemStatus.Completed) continue;
-            var children = context.ExpandedRequirements.Where(c => c.ParentId == parent.Id).ToList();
-            if (children.Count > 0 && children.All(c => c.Status == WorkItemStatus.Completed))
-            {
-                parent.Status = WorkItemStatus.Completed;
-                parent.CompletedAt = DateTimeOffset.UtcNow;
-                if (string.IsNullOrEmpty(parent.AssignedAgent))
-                    parent.AssignedAgent = agentName;
-                completedCount++;
-            }
-        }
-
-        if (completedCount > 0)
-        {
-            _logger.LogInformation("[Backlog] {Agent} completed {Count} backlog items", agentName, completedCount);
-            await PublishEvent(context, agentType, AgentStatus.Running,
-                $"Completed {completedCount} backlog items",
-                0, ct: CancellationToken.None);
-        }
-    }
 }

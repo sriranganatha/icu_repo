@@ -19,6 +19,8 @@ public sealed class RequirementsExpanderAgent : IAgent
     private readonly ILlmProvider _llm;
     private readonly ILogger<RequirementsExpanderAgent> _logger;
     private const int MaxInvestImprovementIterations = 10;
+    private const double MinInvestReadyRatio = 0.35;
+    private const int MinInvestReadyCount = 10;
 
     public AgentType Type => AgentType.RequirementsExpander;
     public string Name => "Requirements Expander";
@@ -57,7 +59,13 @@ public sealed class RequirementsExpanderAgent : IAgent
                 .Where(r => readyRequirementIds.Contains(r.Id))
                 .ToList();
 
-            if (readyRequirements.Count > 0)
+            var readyRatio = workingRequirements.Count == 0
+                ? 0
+                : (double)readyRequirements.Count / workingRequirements.Count;
+            var readyCountThreshold = Math.Min(MinInvestReadyCount, workingRequirements.Count);
+            var gateSatisfied = readyRequirements.Count >= readyCountThreshold && readyRatio >= MinInvestReadyRatio;
+
+            if (gateSatisfied)
             {
                 investIterationsUsed = pass;
                 break;
@@ -107,20 +115,21 @@ public sealed class RequirementsExpanderAgent : IAgent
         if (context.ReportProgress is not null)
             await context.ReportProgress(Type, $"Requirement quality gate: {qualityScores.Count(s => s.IsReady)}/{qualityScores.Count} ready for expansion");
 
-        if (readyRequirements.Count == 0)
+        var minimumReadyForSelectiveExpansion = Math.Max(5, workingRequirements.Count / 5);
+        if (readyRequirements.Count < minimumReadyForSelectiveExpansion)
         {
             readyRequirements = workingRequirements;
             context.Findings.Add(new ReviewFinding
             {
                 Category = "RequirementQuality",
                 Severity = ReviewSeverity.Warning,
-                Message = $"RequirementsExpander could not reach INVEST-ready state after {MaxInvestImprovementIterations} improvement passes. Proceeding with improved draft requirements to avoid pipeline failure.",
+                Message = $"RequirementsExpander produced only {qualityScores.Count(s => s.IsReady)}/{qualityScores.Count} INVEST-ready requirements after {investIterationsUsed} improvement pass(es). Proceeding with improved draft requirements to avoid starvation.",
                 FilePath = "docs/requirements",
                 Suggestion = "Review requirement-quality-scorecard.md and refine low-scoring requirements for higher-fidelity expansion."
             });
 
             if (context.ReportProgress is not null)
-                await context.ReportProgress(Type, $"INVEST gate still not satisfied after {MaxInvestImprovementIterations} passes — proceeding with improved draft requirements");
+                await context.ReportProgress(Type, $"INVEST ready set is too small for selective expansion — proceeding with all improved requirements");
         }
 
         // ── Step 1: Build requirement→service mapping ──
@@ -319,7 +328,23 @@ public sealed class RequirementsExpanderAgent : IAgent
             List<ExpandedRequirement> moduleItems;
             if (response.Success)
             {
+                _logger.LogInformation("LLM response for module '{Module}': Model={Model}, Len={Len}, Preview={Preview}",
+                    module, response.Model, response.Content.Length,
+                    response.Content.Length > 300 ? response.Content[..300] : response.Content);
                 moduleItems = ParseExpansionResponse(response.Content, module, iteration);
+                if (moduleItems.Count == 0)
+                {
+                    _logger.LogWarning("LLM expansion for {Module} returned unparseable/empty content. Using deterministic fallback.", module);
+                    moduleItems = CreateFallbackItems(reqs, module, iteration, reqServiceMap, reqDeps);
+                    context.Findings.Add(new ReviewFinding
+                    {
+                        Category = "RequirementExpansion",
+                        Severity = ReviewSeverity.Warning,
+                        Message = $"LLM returned 0 parseable work items for module '{module}'. Fallback expansion generated {moduleItems.Count} items.",
+                        FilePath = "Requirements/requirements-expander",
+                        Suggestion = "Inspect LLM output format for this module and ensure pipe-delimited templates are respected."
+                    });
+                }
                 // Enrich items with service mappings from requirements
                 foreach (var item in moduleItems)
                 {
@@ -573,7 +598,16 @@ public sealed class RequirementsExpanderAgent : IAgent
     private static List<ExpandedRequirement> ParseExpansionResponse(string content, string module, int iteration)
     {
         var items = new List<ExpandedRequirement>();
-        var lines = content.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+        // Strip markdown code fences that Gemini often wraps around output
+        var cleaned = content;
+        if (cleaned.Contains("```"))
+        {
+            cleaned = Regex.Replace(cleaned, @"```[a-zA-Z]*\s*\n?", "");
+            cleaned = cleaned.Replace("```", "");
+        }
+
+        var lines = cleaned.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
         foreach (var line in lines)
         {

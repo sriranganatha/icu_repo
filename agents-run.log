@@ -1,0 +1,12 @@
+nohup: ignoring input
+Using launch settings from agents/src/HmsAgents.Web/Properties/launchSettings.json...
+info: Microsoft.Hosting.Lifetime[14]
+      Now listening on: http://localhost:5018
+info: Microsoft.Hosting.Lifetime[0]
+      Application started. Press Ctrl+C to shut down.
+info: Microsoft.Hosting.Lifetime[0]
+      Hosting environment: Development
+info: Microsoft.Hosting.Lifetime[0]
+      Content root path: /media/gokula_admin/0ab333d6-0a1e-431d-8d3f-55117120947b/GitRepo/icu_repo/agents/src/HmsAgents.Web
+info: Microsoft.Hosting.Lifetime[0]
+      Application is shutting down...

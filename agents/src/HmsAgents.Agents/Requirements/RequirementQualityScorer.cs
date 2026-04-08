@@ -35,10 +35,14 @@ internal static class RequirementQualityScorer
         if (!small)
             notes.Add("Likely too large; split into smaller stories/tasks.");
 
-        var testable = req.AcceptanceCriteria.Count > 0 &&
-                       req.AcceptanceCriteria.All(ac => ContainsAny(ac.ToLowerInvariant(), "given", "when", "then"));
+        var criteriaCount = req.AcceptanceCriteria.Count;
+        var criteriaWithGivenWhenThen = req.AcceptanceCriteria.Count(HasGivenWhenThen);
+        var criteriaWithOutcome = req.AcceptanceCriteria.Count(HasOutcomeLanguage);
+        var testable = criteriaCount > 0 &&
+                       (criteriaWithGivenWhenThen >= Math.Max(1, criteriaCount / 2) ||
+                        criteriaWithOutcome == criteriaCount);
         if (!testable)
-            notes.Add("Acceptance criteria should use Given/When/Then and be pass/fail testable.");
+            notes.Add("Acceptance criteria should be pass/fail testable; prefer Given/When/Then phrasing.");
 
         var score = 0;
         score += independent ? 16 : 0;
@@ -70,4 +74,10 @@ internal static class RequirementQualityScorer
 
     private static bool ContainsAny(string source, params string[] needles)
         => needles.Any(n => source.Contains(n, StringComparison.OrdinalIgnoreCase));
+
+    private static bool HasGivenWhenThen(string criterion)
+        => ContainsAny(criterion, "given") && ContainsAny(criterion, "when") && ContainsAny(criterion, "then");
+
+    private static bool HasOutcomeLanguage(string criterion)
+        => ContainsAny(criterion, "then", "must", "should", "returns", "response", "reject", "accept", "created", "updated", "deleted");
 }

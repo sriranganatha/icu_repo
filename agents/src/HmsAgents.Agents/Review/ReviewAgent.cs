@@ -25,7 +25,7 @@ public sealed class ReviewAgent : IAgent
         // Remove previous Review findings to prevent duplication on re-runs
         context.Findings.RemoveAll(f => f.Category is "Traceability" or "MultiTenant" or "Audit" or "Conventions"
             or "Coverage" or "Security" or "NFR-CODE-01" or "NFR-CODE-02" or "NFR-TEST-01"
-            or "Implementation" or "FeatureCoverage");
+            or "Implementation" or "FeatureCoverage" or "TestCoverage");
 
         _logger.LogInformation("ReviewAgent starting — {ArtifactCount} artifacts, {ReqCount} requirements",
             context.Artifacts.Count, context.Requirements.Count);

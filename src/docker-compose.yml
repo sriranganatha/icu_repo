@@ -1,0 +1,189 @@
+version: '3.9'
+
+services:
+  # ─── Infrastructure ─────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: hms
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-hms_dev_pw}
+      POSTGRES_DB: hms
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports: ["5432:5432"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hms"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  kafka:
+    image: apache/kafka:3.7.0
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      CLUSTER_ID: "MkU3OEVBNTcwNTJENDM2Qk"
+    ports: ["9092:9092"]
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+
+  prometheus:
+    image: prom/prometheus:v2.51.0
+    volumes:
+      - ./infrastructure/prometheus:/etc/prometheus
+    ports: ["9090:9090"]
+
+  grafana:
+    image: grafana/grafana:10.4.0
+    volumes:
+      - ./infrastructure/grafana:/etc/grafana/provisioning/dashboards
+    ports: ["3000:3000"]
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+
+  # ─── HMS Microservices ──────────────────────────────
+  patientservice:
+    build:
+      context: .
+      dockerfile: src/Hms.PatientService/Dockerfile
+    ports: ["5101:5101"]
+    environment:
+      - ConnectionStrings__Default=Host=postgres;Database=hms;Username=hms;Password=${POSTGRES_PASSWORD:-hms_dev_pw}
+      - Kafka__BootstrapServers=kafka:9092
+      - Redis__ConnectionString=redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+  encounterservice:
+    build:
+      context: .
+      dockerfile: src/Hms.EncounterService/Dockerfile
+    ports: ["5102:5102"]
+    environment:
+      - ConnectionStrings__Default=Host=postgres;Database=hms;Username=hms;Password=${POSTGRES_PASSWORD:-hms_dev_pw}
+      - Kafka__BootstrapServers=kafka:9092
+      - Redis__ConnectionString=redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+  inpatientservice:
+    build:
+      context: .
+      dockerfile: src/Hms.InpatientService/Dockerfile
+    ports: ["5103:5103"]
+    environment:
+      - ConnectionStrings__Default=Host=postgres;Database=hms;Username=hms;Password=${POSTGRES_PASSWORD:-hms_dev_pw}
+      - Kafka__BootstrapServers=kafka:9092
+      - Redis__ConnectionString=redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+  emergencyservice:
+    build:
+      context: .
+      dockerfile: src/Hms.EmergencyService/Dockerfile
+    ports: ["5104:5104"]
+    environment:
+      - ConnectionStrings__Default=Host=postgres;Database=hms;Username=hms;Password=${POSTGRES_PASSWORD:-hms_dev_pw}
+      - Kafka__BootstrapServers=kafka:9092
+      - Redis__ConnectionString=redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+  diagnosticsservice:
+    build:
+      context: .
+      dockerfile: src/Hms.DiagnosticsService/Dockerfile
+    ports: ["5105:5105"]
+    environment:
+      - ConnectionStrings__Default=Host=postgres;Database=hms;Username=hms;Password=${POSTGRES_PASSWORD:-hms_dev_pw}
+      - Kafka__BootstrapServers=kafka:9092
+      - Redis__ConnectionString=redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+  revenueservice:
+    build:
+      context: .
+      dockerfile: src/Hms.RevenueService/Dockerfile
+    ports: ["5106:5106"]
+    environment:
+      - ConnectionStrings__Default=Host=postgres;Database=hms;Username=hms;Password=${POSTGRES_PASSWORD:-hms_dev_pw}
+      - Kafka__BootstrapServers=kafka:9092
+      - Redis__ConnectionString=redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+  auditservice:
+    build:
+      context: .
+      dockerfile: src/Hms.AuditService/Dockerfile
+    ports: ["5107:5107"]
+    environment:
+      - ConnectionStrings__Default=Host=postgres;Database=hms;Username=hms;Password=${POSTGRES_PASSWORD:-hms_dev_pw}
+      - Kafka__BootstrapServers=kafka:9092
+      - Redis__ConnectionString=redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+  aiservice:
+    build:
+      context: .
+      dockerfile: src/Hms.AiService/Dockerfile
+    ports: ["5108:5108"]
+    environment:
+      - ConnectionStrings__Default=Host=postgres;Database=hms;Username=hms;Password=${POSTGRES_PASSWORD:-hms_dev_pw}
+      - Kafka__BootstrapServers=kafka:9092
+      - Redis__ConnectionString=redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+  apigateway:
+    build:
+      context: .
+      dockerfile: src/Hms.ApiGateway/Dockerfile
+    ports: ["5100:5100"]
+    environment:
+      - ConnectionStrings__Default=Host=postgres;Database=hms;Username=hms;Password=${POSTGRES_PASSWORD:-hms_dev_pw}
+      - Kafka__BootstrapServers=kafka:9092
+      - Redis__ConnectionString=redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+
+volumes:
+  pgdata:
