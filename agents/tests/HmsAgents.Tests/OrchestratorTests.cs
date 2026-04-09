@@ -259,4 +259,25 @@ public class OrchestratorTests
         var orchestrator = new AgentOrchestrator(agents, _writerMock.Object, _sinkMock.Object, _auditMock.Object, _humanGateMock.Object, _loggerMock.Object);
         orchestrator.GetCurrentContext().Should().BeNull();
     }
+
+    [Fact]
+    public void RelevantTaskAgents_UsesDescriptionText_ForRouting()
+    {
+        var item = new ExpandedRequirement
+        {
+            Id = "TASK-001",
+            ItemType = WorkItemType.Task,
+            Title = "Implement persistence",
+            Description = "Create SQL migration and update DbContext mappings for admissions",
+            Tags = []
+        };
+
+        var method = typeof(AgentOrchestrator).GetMethod("GetRelevantTaskAgents", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        method.Should().NotBeNull();
+
+        var result = method!.Invoke(null, [item]) as List<string>;
+
+        result.Should().NotBeNull();
+        result!.Should().Contain(AgentType.Database.ToString());
+    }
 }

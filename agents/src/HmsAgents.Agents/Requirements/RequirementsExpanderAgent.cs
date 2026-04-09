@@ -39,6 +39,8 @@ public sealed class RequirementsExpanderAgent : IAgent
         _logger.LogInformation("RequirementsExpander starting — {Count} base requirements, iteration {Iter}",
             context.Requirements.Count, context.DevIteration);
 
+        try
+        {
         var expanded = new List<ExpandedRequirement>();
         var iteration = context.DevIteration;
 
@@ -111,6 +113,44 @@ public sealed class RequirementsExpanderAgent : IAgent
                       + $"Total: {qualityScores.Count} | Ready: {qualityScores.Count(s => s.IsReady)} | Blocked: {failed.Count} | Improvement Passes: {investIterationsUsed}\n\n"
                       + string.Join("\n", scorecardLines)
         });
+
+        var ambiguousRequirements = qualityScores
+            .Where(s => s.ClarifyingQuestions.Count > 0)
+            .ToList();
+        if (ambiguousRequirements.Count > 0)
+        {
+            var clarificationLines = ambiguousRequirements.SelectMany(s =>
+            {
+                var header = $"## {s.RequirementId} - {s.Title}";
+                var questions = s.ClarifyingQuestions.Select((q, i) => $"{i + 1}. {q}");
+                return new[] { header, "" }.Concat(questions).Concat([""]); 
+            });
+
+            context.Artifacts.Add(new CodeArtifact
+            {
+                Layer = ArtifactLayer.Documentation,
+                RelativePath = "Requirements/clarification-questions.md",
+                FileName = "clarification-questions.md",
+                Namespace = "Hms.Requirements",
+                ProducedBy = Type,
+                Content = "# Requirement Clarification Questions\n\n"
+                          + "These requirements contain ambiguous language and need explicit answers before implementation.\n\n"
+                          + string.Join("\n", clarificationLines)
+            });
+
+            foreach (var item in ambiguousRequirements.Take(50))
+            {
+                context.Findings.Add(new ReviewFinding
+                {
+                    Category = "RequirementAmbiguity",
+                    Severity = ReviewSeverity.Warning,
+                    Message = $"Requirement {item.RequirementId} needs clarification before implementation readiness.",
+                    FilePath = "docs/requirements",
+                    Suggestion = item.ClarifyingQuestions.FirstOrDefault()
+                                 ?? "Answer the clarification questions in Requirements/clarification-questions.md."
+                });
+            }
+        }
 
         if (context.ReportProgress is not null)
             await context.ReportProgress(Type, $"Requirement quality gate: {qualityScores.Count(s => s.IsReady)}/{qualityScores.Count} ready for expansion");
@@ -418,6 +458,19 @@ public sealed class RequirementsExpanderAgent : IAgent
             Summary = $"Expanded: {expanded.Count} items ({epicCount} epics, {storyCount} stories, {ucCount} use cases, {taskCount} tasks) with dependency chains + specs",
             Duration = sw.Elapsed
         };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "RequirementsExpander failed — {ExType}: {Message}", ex.GetType().Name, ex.Message);
+            context.AgentStatuses[Type] = AgentStatus.Failed;
+            return new AgentResult
+            {
+                Agent = Type, Success = false,
+                Errors = [ex.ToString()],
+                Summary = $"RequirementsExpander failed: {ex.GetType().Name}: {ex.Message}",
+                Duration = sw.Elapsed
+            };
+        }
     }
 
     // ─── Requirement→Service Mapping ───────────────────────────────────

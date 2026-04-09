@@ -53,28 +53,38 @@ public sealed class BuildAgent : IAgent
             }
 
             // ── Step 1: Find solution/projects ──
-            var slnFiles = Directory.GetFiles(outputPath, "*.sln", SearchOption.AllDirectories)
-                .Where(p => !p.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase)
-                            && !p.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase))
-                .ToArray();
-            var csprojFiles = Directory.GetFiles(outputPath, "*.csproj", SearchOption.AllDirectories);
+            var discoveryRoots = BuildDiscoveryRoots(outputPath, context);
+            var slnFiles = EnumerateBuildFiles(discoveryRoots, "*.sln").ToArray();
+            var csprojFiles = EnumerateBuildFiles(discoveryRoots, "*.csproj").ToArray();
             report.AppendLine("## Discovery");
+            report.AppendLine($"- Scan roots: {string.Join(", ", discoveryRoots)}");
             report.AppendLine($"- Solutions: {slnFiles.Length}");
             report.AppendLine($"- Projects: {csprojFiles.Length}");
             report.AppendLine();
 
-            var buildTarget = slnFiles.FirstOrDefault() ?? csprojFiles.FirstOrDefault();
+            var buildTarget = SelectBestBuildTarget(slnFiles, csprojFiles, outputPath);
             if (string.IsNullOrWhiteSpace(buildTarget))
             {
                 context.AgentStatuses[Type] = AgentStatus.Failed;
-                errors.Add("No .sln or .csproj files found under output path.");
+                errors.Add($"No .sln or .csproj files found. Discovery roots: {string.Join(", ", discoveryRoots)}");
                 report.AppendLine("- Build target: NOT FOUND (.sln/.csproj missing)");
+                findings.Add(new ReviewFinding
+                {
+                    Category = "Build",
+                    Severity = ReviewSeverity.Error,
+                    Message = "Build target discovery failed. No .sln or .csproj found in discovery roots.",
+                    FilePath = outputPath,
+                    Suggestion = $"Check output path and ensure generated solution exists. Roots scanned: {string.Join(", ", discoveryRoots)}"
+                });
+                context.Findings.AddRange(findings);
                 return Fail("No build target discovered", errors, sw.Elapsed);
             }
+            report.AppendLine($"- Build target: {buildTarget}");
+            var buildWorkDir = Path.GetDirectoryName(buildTarget) ?? outputPath;
 
             // ── Step 2: Restore ──
             report.AppendLine("## NuGet Restore");
-            var (restoreOk, restoreOut) = await RunAsync("dotnet", $"restore \"{buildTarget}\"", outputPath, ct);
+            var (restoreOk, restoreOut) = await RunAsync("dotnet", $"restore \"{buildTarget}\"", buildWorkDir, ct);
             report.AppendLine(restoreOk ? "- **SUCCESS**" : $"- **FAILED**: {Truncate(restoreOut, 300)}");
             if (!restoreOk) errors.Add($"Restore failed: {Truncate(restoreOut, 200)}");
             report.AppendLine();
@@ -82,7 +92,7 @@ public sealed class BuildAgent : IAgent
             // ── Step 3: Build ──
             report.AppendLine("## Compilation");
             var (buildOk, buildOut) = await RunAsync("dotnet",
-                $"build \"{buildTarget}\" -c Release --no-restore -v normal", outputPath, ct, 300_000);
+                $"build \"{buildTarget}\" -c Release --no-restore -v normal", buildWorkDir, ct, 300_000);
 
             var buildErrors = ParseBuildErrors(buildOut);
             var buildWarnings = ParseBuildWarnings(buildOut);
@@ -151,7 +161,7 @@ public sealed class BuildAgent : IAgent
                 if (testProjects.Length > 0)
                 {
                     var (testOk, testOut) = await RunAsync("dotnet",
-                        $"test \"{buildTarget}\" --no-build -c Release --verbosity normal", outputPath, ct, 300_000);
+                        $"test \"{buildTarget}\" --no-build -c Release --verbosity normal", buildWorkDir, ct, 300_000);
                     var testSummary = ParseTestSummary(testOut);
                     report.AppendLine($"- Result: **{(testOk ? "PASSED" : "FAILED")}**");
                     report.AppendLine($"- {testSummary}");
@@ -189,6 +199,10 @@ public sealed class BuildAgent : IAgent
             context.Artifacts.AddRange(artifacts);
             context.Findings.AddRange(findings);
             context.AgentStatuses[Type] = buildOk ? AgentStatus.Completed : AgentStatus.Failed;
+
+            // Agent completes its own claimed work items
+            foreach (var item in context.CurrentClaimedItems)
+                context.CompleteWorkItem?.Invoke(item);
 
             return new AgentResult
             {
@@ -256,6 +270,72 @@ public sealed class BuildAgent : IAgent
         }
         catch (OperationCanceledException) { return (false, $"Timed out after {timeoutMs}ms"); }
         catch (Exception ex) { return (false, ex.Message); }
+    }
+
+    private static IEnumerable<string> BuildDiscoveryRoots(string outputPath, AgentContext context)
+    {
+        var roots = new List<string>();
+        void AddRoot(string? path)
+        {
+            if (string.IsNullOrWhiteSpace(path)) return;
+            var full = Path.GetFullPath(path);
+            if (!Directory.Exists(full)) return;
+            if (!roots.Contains(full, StringComparer.OrdinalIgnoreCase)) roots.Add(full);
+        }
+
+        AddRoot(outputPath);
+        AddRoot(Directory.GetCurrentDirectory());
+        AddRoot(context.RequirementsBasePath);
+
+        var parent = Directory.GetParent(outputPath)?.FullName;
+        for (var i = 0; i < 3 && !string.IsNullOrWhiteSpace(parent); i++)
+        {
+            AddRoot(parent);
+            parent = Directory.GetParent(parent!)?.FullName;
+        }
+
+        return roots;
+    }
+
+    private static IEnumerable<string> EnumerateBuildFiles(IEnumerable<string> roots, string pattern)
+    {
+        foreach (var root in roots)
+        {
+            foreach (var file in Directory.GetFiles(root, pattern, SearchOption.AllDirectories))
+            {
+                if (file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase) ||
+                    file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase))
+                    continue;
+                yield return file;
+            }
+        }
+    }
+
+    private static string? SelectBestBuildTarget(IReadOnlyCollection<string> slnFiles, IReadOnlyCollection<string> csprojFiles, string outputPath)
+    {
+        if (slnFiles.Count > 0)
+        {
+            var preferredSln = slnFiles.FirstOrDefault(s =>
+                Path.GetFileName(s).Equals("HmsAgents.sln", StringComparison.OrdinalIgnoreCase));
+            if (!string.IsNullOrWhiteSpace(preferredSln)) return preferredSln;
+
+            return slnFiles
+                .OrderBy(s => Path.GetRelativePath(outputPath, s).Count(c => c == Path.DirectorySeparatorChar))
+                .First();
+        }
+
+        if (csprojFiles.Count > 0)
+        {
+            var preferredWeb = csprojFiles.FirstOrDefault(p =>
+                Path.GetFileName(p).Equals("HmsAgents.Web.csproj", StringComparison.OrdinalIgnoreCase));
+            if (!string.IsNullOrWhiteSpace(preferredWeb)) return preferredWeb;
+
+            return csprojFiles
+                .OrderBy(p => Path.GetRelativePath(outputPath, p).Count(c => c == Path.DirectorySeparatorChar))
+                .First();
+        }
+
+        return null;
     }
 
     private static AgentResult Fail(string msg, List<string> errs, TimeSpan d) => new()

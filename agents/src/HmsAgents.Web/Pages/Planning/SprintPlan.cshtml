@@ -1,0 +1,134 @@
+@page
+@{
+    ViewData["Title"] = "Sprint Planning";
+}
+
+<div class="container-fluid px-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2><i class="bi bi-kanban me-2"></i>Sprint Planning</h2>
+        <span class="badge bg-primary fs-6" id="sprintCount">0 sprints</span>
+    </div>
+
+    <!-- Summary Cards -->
+    <div class="row g-3 mb-4" id="summaryCards">
+        <div class="col-md-3">
+            <div class="card text-center">
+                <div class="card-body">
+                    <i class="bi bi-list-task fs-2 text-primary"></i>
+                    <h4 class="mt-2" id="totalItems">0</h4>
+                    <small class="text-muted">Total Items</small>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-center">
+                <div class="card-body">
+                    <i class="bi bi-lightning fs-2 text-warning"></i>
+                    <h4 class="mt-2" id="totalPoints">0</h4>
+                    <small class="text-muted">Total Points</small>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-center">
+                <div class="card-body">
+                    <i class="bi bi-calendar-week fs-2 text-success"></i>
+                    <h4 class="mt-2" id="sprintTotal">0</h4>
+                    <small class="text-muted">Sprints</small>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-center">
+                <div class="card-body">
+                    <i class="bi bi-speedometer fs-2 text-info"></i>
+                    <h4 class="mt-2" id="avgUtil">0%</h4>
+                    <small class="text-muted">Avg Utilization</small>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Sprint Cards -->
+    <div id="sprintList" class="row g-3">
+        <div class="col-12 text-center text-muted py-5">
+            <i class="bi bi-hourglass-split fs-1"></i>
+            <p class="mt-2">No sprint plans yet. Run the pipeline to generate plans.</p>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+<script src="https://cdn.jsdelivr.net/npm/microsoft/signalr@8.0.0/dist/browser/signalr.min.js"></script>
+<script>
+    let sprints = [];
+    let items = [];
+
+    const connection = new signalR.HubConnectionBuilder()
+        .withUrl("/hubs/pipeline")
+        .withAutomaticReconnect()
+        .build();
+
+    connection.on("PipelineState", (state) => {
+        sprints = state.sprintPlans || [];
+        items = state.expandedRequirements || [];
+        render();
+    });
+
+    connection.start().catch(console.error);
+
+    function render() {
+        document.getElementById('sprintCount').textContent = `${sprints.length} sprint(s)`;
+        document.getElementById('sprintTotal').textContent = sprints.length;
+        document.getElementById('totalItems').textContent = items.length;
+
+        const totalPts = sprints.reduce((s, p) => s + p.allocatedPoints, 0);
+        document.getElementById('totalPoints').textContent = totalPts;
+
+        const avgUtil = sprints.length > 0
+            ? (sprints.reduce((s, p) => s + p.utilizationPercent, 0) / sprints.length).toFixed(0)
+            : 0;
+        document.getElementById('avgUtil').textContent = avgUtil + '%';
+
+        if (sprints.length === 0) {
+            document.getElementById('sprintList').innerHTML =
+                '<div class="col-12 text-center text-muted py-5"><i class="bi bi-hourglass-split fs-1"></i><p class="mt-2">No sprint plans yet.</p></div>';
+            return;
+        }
+
+        document.getElementById('sprintList').innerHTML = sprints.map(sp => {
+            const utilColor = sp.utilizationPercent > 90 ? 'danger' : sp.utilizationPercent > 70 ? 'warning' : 'success';
+            const sprintItems = sp.itemIds.map(id => items.find(i => i.id === id)).filter(Boolean);
+
+            return `
+            <div class="col-md-6 col-lg-4">
+                <div class="card h-100">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span class="fw-bold"><i class="bi bi-calendar3 me-1"></i>Sprint ${sp.sprintNumber}</span>
+                        <span class="badge bg-${utilColor}">${sp.utilizationPercent.toFixed(0)}% utilized</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="progress mb-3" style="height: 8px;">
+                            <div class="progress-bar bg-${utilColor}" style="width: ${Math.min(sp.utilizationPercent, 100)}%"></div>
+                        </div>
+                        <div class="d-flex justify-content-between mb-2">
+                            <small class="text-muted">${sp.allocatedPoints} / ${sp.capacityPoints} pts</small>
+                            <small class="text-muted">${sp.itemIds.length} items</small>
+                        </div>
+                        <div class="list-group list-group-flush" style="max-height: 250px; overflow-y: auto;">
+                            ${sprintItems.map(item => `
+                                <div class="list-group-item px-0 py-1 border-0 small">
+                                    <div class="d-flex justify-content-between">
+                                        <span class="text-truncate" style="max-width: 200px">${item?.title || item?.id}</span>
+                                        <span class="badge bg-light text-dark">${item?.storyPoints || '?'} pts</span>
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                </div>
+            </div>`;
+        }).join('');
+    }
+</script>
+}

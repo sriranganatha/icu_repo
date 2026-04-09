@@ -240,6 +240,19 @@ public sealed class PipelineController : ControllerBase
                 var findingCount = context?.Findings.Count ?? 0;
                 var testDiagCount = context?.TestDiagnostics.Count ?? 0;
 
+                // Mark orchestrator as stopped
+                if (context is not null)
+                {
+                    context.CompletedAt ??= DateTimeOffset.UtcNow;
+                    context.AgentStatuses[AgentType.Orchestrator] = AgentStatus.Completed;
+                    // Stop any agents stuck in Running state
+                    foreach (var kv in context.AgentStatuses)
+                    {
+                        if (kv.Value == AgentStatus.Running)
+                            context.AgentStatuses[kv.Key] = AgentStatus.Completed;
+                    }
+                }
+
                 if (!string.IsNullOrWhiteSpace(context?.RunId))
                 {
                     try { db.FailRun(context.RunId, "Pipeline was stopped by user."); } catch { }
@@ -292,7 +305,7 @@ public sealed class PipelineController : ControllerBase
                 s_runCts.Cancel();
         }
 
-        return Ok(new { stopped = true, message = "Stop requested. Active agents are being cancelled." });
+        return Ok(new { stopped = true, message = "Stop requested. Orchestrator and all active agents are being stopped." });
     }
 
     [HttpGet("status")]
@@ -600,8 +613,12 @@ public sealed class PipelineController : ControllerBase
                     useCases = ctx.ExpandedRequirements.Count(e => e.ItemType == WorkItemType.UseCase),
                     tasks = ctx.ExpandedRequirements.Count(e => e.ItemType == WorkItemType.Task),
                     newCount = ctx.ExpandedRequirements.Count(e => e.Status == WorkItemStatus.New),
+                    readyBacklog = ctx.ExpandedRequirements.Count(e => e.Status == WorkItemStatus.InQueue),
+                    activeQueue = ctx.ExpandedRequirements.Count(e => e.Status == WorkItemStatus.Received),
+                    inDev = ctx.ExpandedRequirements.Count(e => e.Status == WorkItemStatus.InProgress && IsActionableItemType(e.ItemType.ToString())),
+                    // Legacy aliases for existing dashboard consumers
                     inQueue = ctx.ExpandedRequirements.Count(e => e.Status == WorkItemStatus.InQueue),
-                    underDev = ctx.ExpandedRequirements.Count(e => e.Status == WorkItemStatus.UnderDev),
+                    underDev = ctx.ExpandedRequirements.Count(e => e.Status == WorkItemStatus.InProgress && IsActionableItemType(e.ItemType.ToString())),
                     completed = ctx.ExpandedRequirements.Count(e => e.Status == WorkItemStatus.Completed),
                     blocked = ctx.ExpandedRequirements.Count(e => e.Status == WorkItemStatus.Blocked),
                 }
@@ -649,8 +666,12 @@ public sealed class PipelineController : ControllerBase
                         useCases = items.Count(e => e.ItemType == "UseCase"),
                         tasks = items.Count(e => e.ItemType == "Task"),
                         newCount = items.Count(e => e.Status == "New"),
+                        readyBacklog = items.Count(e => e.Status == "InQueue"),
+                        activeQueue = items.Count(e => e.Status == "Received"),
+                        inDev = items.Count(e => e.Status is "InProgress" or "UnderDev" && IsActionableItemType(e.ItemType)),
+                        // Legacy aliases for existing dashboard consumers
                         inQueue = items.Count(e => e.Status == "InQueue"),
-                        underDev = items.Count(e => e.Status == "UnderDev"),
+                        underDev = items.Count(e => e.Status is "InProgress" or "UnderDev" && IsActionableItemType(e.ItemType)),
                         completed = items.Count(e => e.Status == "Completed"),
                         blocked = items.Count(e => e.Status == "Blocked"),
                     }
@@ -658,7 +679,94 @@ public sealed class PipelineController : ControllerBase
             }
         }
 
-        return Ok(new { totalItems = 0, items = Array.Empty<object>(), stats = new { epics = 0, stories = 0, useCases = 0, tasks = 0, newCount = 0, inQueue = 0, underDev = 0, completed = 0, blocked = 0 } });
+        return Ok(new
+        {
+            totalItems = 0,
+            items = Array.Empty<object>(),
+            stats = new
+            {
+                epics = 0,
+                stories = 0,
+                useCases = 0,
+                tasks = 0,
+                newCount = 0,
+                readyBacklog = 0,
+                activeQueue = 0,
+                inDev = 0,
+                inQueue = 0,
+                underDev = 0,
+                completed = 0,
+                blocked = 0
+            }
+        });
+    }
+
+    [HttpGet("backlog/blocker-hotspots")]
+    public IActionResult GetBlockerHotspots([FromQuery] int top = 20)
+    {
+        top = Math.Clamp(top, 1, 100);
+
+        var ctx = _orchestrator.GetCurrentContext();
+        if (ctx is not null)
+        {
+            var items = ctx.ExpandedRequirements.Select(e => new BacklogNode
+            {
+                Id = e.Id,
+                ItemType = e.ItemType.ToString(),
+                Status = e.Status.ToString(),
+                Title = e.Title,
+                Priority = e.Priority,
+                AssignedAgent = e.AssignedAgent,
+                DependsOn = e.DependsOn,
+                Tags = e.Tags
+            });
+
+            var hotspots = BuildBlockerHotspots(items, top);
+            return Ok(new
+            {
+                source = "active",
+                runId = ctx.RunId,
+                totalItems = ctx.ExpandedRequirements.Count,
+                blockedItems = ctx.ExpandedRequirements.Count(e => e.Status == WorkItemStatus.Blocked),
+                hotspotCount = hotspots.Count,
+                hotspots
+            });
+        }
+
+        var latestRun = _db.GetLatestRun();
+        if (latestRun is not null)
+        {
+            var rows = _db.GetBacklogItems(latestRun.RunId);
+            var items = rows.Select(e => new BacklogNode
+            {
+                Id = e.Id,
+                ItemType = e.ItemType,
+                Status = e.Status,
+                Title = e.Title,
+                Priority = e.Priority,
+                AssignedAgent = e.AssignedAgent,
+                DependsOn = e.DependsOn ?? [],
+                Tags = e.Tags ?? []
+            });
+
+            var hotspots = BuildBlockerHotspots(items, top);
+            return Ok(new
+            {
+                source = "db",
+                runId = latestRun.RunId,
+                totalItems = rows.Count,
+                blockedItems = rows.Count(e => string.Equals(e.Status, "Blocked", StringComparison.OrdinalIgnoreCase)),
+                hotspotCount = hotspots.Count,
+                hotspots
+            });
+        }
+
+        return Ok(new
+        {
+            source = "none",
+            hotspotCount = 0,
+            hotspots = Array.Empty<object>()
+        });
     }
 
     /// <summary>Update priority, status, assignedAgent, or iteration for a single backlog item.</summary>
@@ -672,7 +780,7 @@ public sealed class PipelineController : ControllerBase
             return NotFound(new { error = "No pipeline run found" });
 
         // Validate status if provided
-        string[]? validStatuses = ["New", "InQueue", "UnderDev", "Completed", "Blocked"];
+        string[]? validStatuses = ["New", "InQueue", "Received", "InProgress", "UnderDev", "Completed", "Blocked", "Failed"];
         if (patch.Status is not null && !validStatuses.Contains(patch.Status))
             return BadRequest(new { error = $"Invalid status. Must be one of: {string.Join(", ", validStatuses)}" });
 
@@ -721,12 +829,477 @@ public sealed class PipelineController : ControllerBase
         return Ok(new { success = true, updatedCount, total = items.Count });
     }
 
+    [HttpPost("backlog/rebalance")]
+    public IActionResult RebalanceBacklogStatuses([FromQuery] int? maxQueue = null)
+    {
+        var ctx = _orchestrator.GetCurrentContext();
+        if (ctx is not null)
+        {
+            var queueCap = maxQueue.GetValueOrDefault(ctx.PipelineConfig?.MaxQueueItems > 0 ? ctx.PipelineConfig.MaxQueueItems : 50);
+            var changed = RebalanceStatusesInMemory(ctx.ExpandedRequirements, queueCap);
+            return Ok(new
+            {
+                source = "active",
+                runId = ctx.RunId,
+                changed,
+                queueCap,
+                stats = new
+                {
+                    newCount = ctx.ExpandedRequirements.Count(e => e.Status == WorkItemStatus.New),
+                    inQueue = ctx.ExpandedRequirements.Count(e => e.Status == WorkItemStatus.InQueue),
+                    inDev = ctx.ExpandedRequirements.Count(e => e.Status == WorkItemStatus.InProgress && IsActionableItemType(e.ItemType.ToString())),
+                    blocked = ctx.ExpandedRequirements.Count(e => e.Status == WorkItemStatus.Blocked)
+                }
+            });
+        }
+
+        var latestRun = _db.GetLatestRun();
+        if (latestRun is null)
+            return NotFound(new { error = "No pipeline run found" });
+
+        var items = _db.GetBacklogItems(latestRun.RunId);
+        var cap = maxQueue.GetValueOrDefault(10);
+        var (changedCount, stats) = RebalanceStatusesInDb(items, latestRun.RunId, cap, _db);
+        return Ok(new
+        {
+            source = "db",
+            runId = latestRun.RunId,
+            changed = changedCount,
+            queueCap = cap,
+            stats
+        });
+    }
+
     public sealed class BacklogItemPatchDto
     {
         public int? Priority { get; set; }
         public string? Status { get; set; }
         public string? AssignedAgent { get; set; }
         public int? Iteration { get; set; }
+    }
+
+    private static List<BlockerHotspotDto> BuildBlockerHotspots(IEnumerable<BacklogNode> items, int top)
+    {
+        var all = items.ToList();
+        var byId = all
+            .Where(i => !string.IsNullOrWhiteSpace(i.Id))
+            .GroupBy(i => i.Id, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+
+        var dependents = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var item in all)
+        {
+            foreach (var depId in item.DependsOn)
+            {
+                if (!byId.ContainsKey(depId))
+                    continue;
+
+                if (!dependents.TryGetValue(depId, out var list))
+                {
+                    list = [];
+                    dependents[depId] = list;
+                }
+
+                list.Add(item.Id);
+            }
+        }
+
+        var blockedIds = all
+            .Where(i => IsBlocked(i.Status))
+            .Select(i => i.Id)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var candidateBlockers = all
+            .Where(i => IsBlocked(i.Status))
+            .SelectMany(i => i.DependsOn)
+            .Where(depId => byId.TryGetValue(depId, out var dep) && !IsCompleted(dep.Status))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var directBlockedByCandidate = new List<(string blockerId, int directBlocked)>();
+        foreach (var blockerId in candidateBlockers)
+        {
+            var directDependents = dependents.TryGetValue(blockerId, out var direct) ? direct : [];
+            var directBlocked = directDependents.Count(d => blockedIds.Contains(d));
+            directBlockedByCandidate.Add((blockerId, directBlocked));
+        }
+
+        var preselectedCandidates = directBlockedByCandidate
+            .OrderByDescending(x => x.directBlocked)
+            .ThenBy(x => byId.TryGetValue(x.blockerId, out var item) ? item.Priority : int.MaxValue)
+            .Select(x => x.blockerId)
+            .Take(Math.Max(top * 5, 50))
+            .ToList();
+
+        var hotspots = new List<BlockerHotspotDto>();
+        foreach (var blockerId in preselectedCandidates)
+        {
+            if (!byId.TryGetValue(blockerId, out var blocker))
+                continue;
+
+            var directDependents = dependents.TryGetValue(blockerId, out var direct) ? direct : [];
+            var directBlocked = directDependents.Count(d => blockedIds.Contains(d));
+            var blockedDescendants = CountBlockedDescendants(blockerId, dependents, blockedIds, maxVisited: 5000);
+            var totalDescendants = CountDescendants(blockerId, dependents, maxVisited: 5000);
+            var unresolvedDeps = blocker.DependsOn.Count(depId => byId.TryGetValue(depId, out var dep) && !IsCompleted(dep.Status));
+
+            hotspots.Add(new BlockerHotspotDto
+            {
+                Id = blocker.Id,
+                Title = blocker.Title,
+                ItemType = blocker.ItemType,
+                Status = blocker.Status,
+                Priority = blocker.Priority,
+                AssignedAgent = blocker.AssignedAgent,
+                Tags = blocker.Tags,
+                DirectBlockedDependents = directBlocked,
+                BlockedDescendants = blockedDescendants,
+                TotalDescendants = totalDescendants,
+                UnresolvedDependencies = unresolvedDeps
+            });
+        }
+
+        return hotspots
+            .OrderByDescending(h => h.BlockedDescendants)
+            .ThenByDescending(h => h.DirectBlockedDependents)
+            .ThenByDescending(h => h.TotalDescendants)
+            .ThenBy(h => h.Priority)
+            .Take(top)
+            .ToList();
+    }
+
+    private static int RebalanceStatusesInMemory(IList<ExpandedRequirement> items, int queueCap)
+    {
+        RollupParentStatusesInMemory(items);
+
+        var changed = 0;
+        var candidates = new List<ExpandedRequirement>();
+        foreach (var item in items)
+        {
+            if (item.Status == WorkItemStatus.Completed)
+                continue;
+
+            if (!IsActionableItemType(item.ItemType.ToString()))
+                continue;
+
+            // Recovery: orphaned active items cannot complete/fail because lifecycle attribution is missing.
+            if (item.Status is WorkItemStatus.InProgress or WorkItemStatus.Received)
+            {
+                if (string.IsNullOrWhiteSpace(item.AssignedAgent))
+                {
+                    item.Status = WorkItemStatus.New;
+                    changed++;
+                    candidates.Add(item);
+                }
+                continue;
+            }
+
+            candidates.Add(item);
+        }
+
+        var byId = items
+            .Where(i => !string.IsNullOrWhiteSpace(i.Id))
+            .GroupBy(i => i.Id, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+
+        var downstreamDependents = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var item in items)
+        {
+            foreach (var depId in item.DependsOn)
+            {
+                if (!byId.ContainsKey(depId)) continue;
+                downstreamDependents.TryGetValue(depId, out var count);
+                downstreamDependents[depId] = count + 1;
+            }
+        }
+
+        var ready = candidates
+            .Where(item => item.DependsOn.Count == 0 || item.DependsOn.All(depId =>
+            {
+                if (!byId.TryGetValue(depId, out var dep)) return true;
+                if (!IsActionableItemType(dep.ItemType.ToString())) return true;
+                return dep.Status == WorkItemStatus.Completed;
+            }))
+            .OrderByDescending(item => downstreamDependents.TryGetValue(item.Id, out var c) ? c : 0)
+            .ThenBy(item => item.Priority)
+            .ThenBy(item => item.CreatedAt)
+            .ThenBy(item => item.Id, StringComparer.OrdinalIgnoreCase)
+            .Select(item => item.Id)
+            .Take(queueCap)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var item in candidates)
+        {
+            var target = ready.Contains(item.Id) ? WorkItemStatus.InQueue : WorkItemStatus.New;
+            if (item.Status != target)
+            {
+                item.Status = target;
+                changed++;
+            }
+        }
+
+        return changed;
+    }
+
+    private static (int changedCount, object stats) RebalanceStatusesInDb(
+        IList<BacklogItemRow> items,
+        string runId,
+        int queueCap,
+        AgentPipelineDb db)
+    {
+        var rollupChanges = RollupParentStatusesInDb(items, runId, db);
+
+        var changed = 0;
+        var candidates = new List<BacklogItemRow>();
+        foreach (var item in items)
+        {
+            if (item.Status == "Completed")
+                continue;
+
+            if (!IsActionableItemType(item.ItemType))
+                continue;
+
+            // Recovery for persisted orphan active items.
+            if (item.Status is "InProgress" or "UnderDev" or "Received")
+            {
+                if (string.IsNullOrWhiteSpace(item.AssignedAgent))
+                {
+                    item.Status = "New";
+                    if (db.UpdateBacklogItem(runId, item.Id, null, "New", item.AssignedAgent, item.Iteration))
+                        changed++;
+                    candidates.Add(item);
+                }
+                continue;
+            }
+
+            candidates.Add(item);
+        }
+
+        var byId = items
+            .Where(i => !string.IsNullOrWhiteSpace(i.Id))
+            .GroupBy(i => i.Id, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+
+        var downstreamDependents = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var item in items)
+        {
+            foreach (var depId in item.DependsOn ?? [])
+            {
+                if (!byId.ContainsKey(depId)) continue;
+                downstreamDependents.TryGetValue(depId, out var count);
+                downstreamDependents[depId] = count + 1;
+            }
+        }
+
+        var ready = candidates
+            .Where(item => (item.DependsOn ?? []).Count == 0 || (item.DependsOn ?? []).All(depId =>
+            {
+                if (!byId.TryGetValue(depId, out var dep)) return true;
+                if (!IsActionableItemType(dep.ItemType)) return true;
+                return string.Equals(dep.Status, "Completed", StringComparison.OrdinalIgnoreCase);
+            }))
+            .OrderByDescending(item => downstreamDependents.TryGetValue(item.Id, out var c) ? c : 0)
+            .ThenBy(item => item.Priority)
+            .ThenBy(item => item.CreatedAt)
+            .ThenBy(item => item.Id, StringComparer.OrdinalIgnoreCase)
+            .Select(item => item.Id)
+            .Take(queueCap)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var item in candidates)
+        {
+            var target = ready.Contains(item.Id) ? "InQueue" : "New";
+            if (!string.Equals(item.Status, target, StringComparison.OrdinalIgnoreCase))
+            {
+                item.Status = target;
+                if (db.UpdateBacklogItem(runId, item.Id, null, target, item.AssignedAgent, item.Iteration))
+                    changed++;
+            }
+        }
+
+        var stats = new
+        {
+            newCount = items.Count(i => string.Equals(i.Status, "New", StringComparison.OrdinalIgnoreCase)),
+            inQueue = items.Count(i => string.Equals(i.Status, "InQueue", StringComparison.OrdinalIgnoreCase)),
+            inDev = items.Count(i => i.Status is "InProgress" or "UnderDev" && IsActionableItemType(i.ItemType)),
+            blocked = items.Count(i => string.Equals(i.Status, "Blocked", StringComparison.OrdinalIgnoreCase))
+        };
+
+        return (changed + rollupChanges, stats);
+    }
+
+    private static bool IsActionableItemType(string? itemType) =>
+        string.Equals(itemType, WorkItemType.Task.ToString(), StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(itemType, WorkItemType.Bug.ToString(), StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(itemType, WorkItemType.UseCase.ToString(), StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsParentContainerType(string? itemType) =>
+        string.Equals(itemType, WorkItemType.Epic.ToString(), StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(itemType, WorkItemType.UserStory.ToString(), StringComparison.OrdinalIgnoreCase);
+
+    private static int RollupParentStatusesInMemory(IList<ExpandedRequirement> items)
+    {
+        var changed = 0;
+        var byParent = items
+            .Where(c => !string.IsNullOrWhiteSpace(c.ParentId))
+            .GroupBy(c => c.ParentId, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.ToList(), StringComparer.OrdinalIgnoreCase);
+
+        foreach (var parent in items.Where(i => IsParentContainerType(i.ItemType.ToString())))
+        {
+            if (!byParent.TryGetValue(parent.Id, out var children) || children.Count == 0)
+                continue;
+
+            var target = children.All(c => c.Status == WorkItemStatus.Completed)
+                ? WorkItemStatus.Completed
+                : WorkItemStatus.InProgress;
+
+            if (parent.Status != target)
+            {
+                parent.Status = target;
+                changed++;
+            }
+
+            if (target == WorkItemStatus.Completed)
+                parent.CompletedAt ??= DateTimeOffset.UtcNow;
+            else
+                parent.CompletedAt = null;
+
+            if (!string.IsNullOrWhiteSpace(parent.AssignedAgent))
+            {
+                parent.AssignedAgent = string.Empty;
+                changed++;
+            }
+        }
+
+        return changed;
+    }
+
+    private static int RollupParentStatusesInDb(IList<BacklogItemRow> items, string runId, AgentPipelineDb db)
+    {
+        var changed = 0;
+        var byParent = items
+            .Where(c => !string.IsNullOrWhiteSpace(c.ParentId))
+            .GroupBy(c => c.ParentId!, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.ToList(), StringComparer.OrdinalIgnoreCase);
+
+        foreach (var parent in items.Where(i => IsParentContainerType(i.ItemType)))
+        {
+            if (!byParent.TryGetValue(parent.Id, out var children) || children.Count == 0)
+                continue;
+
+            var target = children.All(c => string.Equals(c.Status, WorkItemStatus.Completed.ToString(), StringComparison.OrdinalIgnoreCase))
+                ? WorkItemStatus.Completed.ToString()
+                : WorkItemStatus.InProgress.ToString();
+
+            if (string.Equals(parent.Status, target, StringComparison.OrdinalIgnoreCase) && string.IsNullOrWhiteSpace(parent.AssignedAgent))
+                continue;
+
+            parent.Status = target;
+            parent.AssignedAgent = string.Empty;
+            if (db.UpdateBacklogItem(runId, parent.Id, null, target, string.Empty, parent.Iteration))
+                changed++;
+        }
+
+        return changed;
+    }
+
+    private static bool IsBlocked(string status) =>
+        string.Equals(status, WorkItemStatus.Blocked.ToString(), StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsCompleted(string status) =>
+        string.Equals(status, WorkItemStatus.Completed.ToString(), StringComparison.OrdinalIgnoreCase);
+
+    private static int CountBlockedDescendants(
+        string rootId,
+        IReadOnlyDictionary<string, List<string>> dependents,
+        ISet<string> blockedIds,
+        int maxVisited)
+    {
+        if (!dependents.TryGetValue(rootId, out var first))
+            return 0;
+
+        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var queue = new Queue<string>(first);
+        var blockedCount = 0;
+
+        while (queue.Count > 0)
+        {
+            var current = queue.Dequeue();
+            if (!visited.Add(current))
+                continue;
+
+            if (visited.Count >= maxVisited)
+                break;
+
+            if (blockedIds.Contains(current))
+                blockedCount++;
+
+            if (!dependents.TryGetValue(current, out var children))
+                continue;
+
+            foreach (var child in children)
+                queue.Enqueue(child);
+        }
+
+        return blockedCount;
+    }
+
+    private static int CountDescendants(
+        string rootId,
+        IReadOnlyDictionary<string, List<string>> dependents,
+        int maxVisited)
+    {
+        if (!dependents.TryGetValue(rootId, out var first))
+            return 0;
+
+        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var queue = new Queue<string>(first);
+
+        while (queue.Count > 0)
+        {
+            var current = queue.Dequeue();
+            if (!visited.Add(current))
+                continue;
+
+            if (visited.Count >= maxVisited)
+                break;
+
+            if (!dependents.TryGetValue(current, out var children))
+                continue;
+
+            foreach (var child in children)
+                queue.Enqueue(child);
+        }
+
+        return visited.Count;
+    }
+
+    private sealed class BacklogNode
+    {
+        public string Id { get; init; } = string.Empty;
+        public string ItemType { get; init; } = string.Empty;
+        public string Status { get; init; } = string.Empty;
+        public string Title { get; init; } = string.Empty;
+        public int Priority { get; init; }
+        public string AssignedAgent { get; init; } = string.Empty;
+        public List<string> DependsOn { get; init; } = [];
+        public List<string> Tags { get; init; } = [];
+    }
+
+    private sealed class BlockerHotspotDto
+    {
+        public string Id { get; init; } = string.Empty;
+        public string Title { get; init; } = string.Empty;
+        public string ItemType { get; init; } = string.Empty;
+        public string Status { get; init; } = string.Empty;
+        public int Priority { get; init; }
+        public string AssignedAgent { get; init; } = string.Empty;
+        public List<string> Tags { get; init; } = [];
+        public int DirectBlockedDependents { get; init; }
+        public int BlockedDescendants { get; init; }
+        public int TotalDescendants { get; init; }
+        public int UnresolvedDependencies { get; init; }
     }
 
     public sealed class BacklogPriorityDto
@@ -979,6 +1552,55 @@ public sealed class PipelineController : ControllerBase
         return Accepted(new { message = "Deployment started", outputPath });
     }
 
+    // ── Rerun Failed Agents ──────────────────────────────────────────
+    [HttpPost("rerun-failed")]
+    public IActionResult RerunFailedAgents(
+        [FromServices] IHostApplicationLifetime lifetime)
+    {
+        var ctx = _orchestrator.GetCurrentContext();
+        if (ctx is null)
+            return BadRequest(new { error = "No pipeline context. Run a pipeline first." });
+
+        var failedAgents = ctx.AgentStatuses
+            .Where(kv => kv.Value == AgentStatus.Failed)
+            .Select(kv => kv.Key)
+            .ToList();
+
+        if (failedAgents.Count == 0)
+            return Ok(new { message = "No failed agents to rerun." });
+
+        var config = ctx.PipelineConfig ?? new PipelineConfig();
+        var orchestrator = _orchestrator;
+        var logger = _logger;
+        var appCt = lifetime.ApplicationStopping;
+
+        _ = Task.Run(async () =>
+        {
+            foreach (var agentType in failedAgents)
+            {
+                logger.LogInformation("[Rerun] Re-running failed agent: {Agent}", agentType);
+
+                try
+                {
+                    await orchestrator.RunSingleAgentAsync(config, agentType, appCt);
+                    var newStatus = ctx.AgentStatuses.GetValueOrDefault(agentType, AgentStatus.Failed);
+                    logger.LogInformation("[Rerun] {Agent} finished with status: {Status}", agentType, newStatus);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "[Rerun] {Agent} failed again", agentType);
+                    ctx.AgentStatuses[agentType] = AgentStatus.Failed;
+                }
+            }
+        }, appCt);
+
+        return Accepted(new
+        {
+            message = $"Re-running {failedAgents.Count} failed agent(s)",
+            agents = failedAgents.Select(a => a.ToString())
+        });
+    }
+
     [HttpGet("deploy/status")]
     public IActionResult GetDeployStatus()
     {
@@ -1090,7 +1712,7 @@ public sealed class PipelineController : ControllerBase
 
     // ─── Reset Project ─────────────────────────────────────────
     [HttpPost("reset")]
-    public IActionResult ResetProject([FromBody] ResetRequest? request)
+    public async Task<IActionResult> ResetProject([FromBody] ResetRequest? request)
     {
         try
         {
@@ -1120,9 +1742,44 @@ public sealed class PipelineController : ControllerBase
                 outputDeleted = true;
             }
 
-            _logger.LogWarning("PROJECT RESET performed. DB purged, context cleared, state reset. OutputDeleted={Del}", outputDeleted);
+            _logger.LogWarning("PROJECT RESET performed. DB purged, context cleared, state reset. OutputDeleted={Del}, DatabaseDeleted={DbDel}", outputDeleted, request?.DeleteDatabase ?? false);
 
-            return Ok(new { success = true, message = "Project reset complete. All pipeline data cleared.", outputDeleted });
+            // 5. Optionally drop all schemas in the PostgreSQL database
+            var databaseDeleted = false;
+            if (request?.DeleteDatabase == true)
+            {
+                try
+                {
+                    var cfg = _orchestrator.GetCurrentContext()?.PipelineConfig;
+                    var dbHost = cfg?.DbHost ?? "localhost";
+                    var dbPort = cfg?.DbPort ?? 5418;
+                    var dbName = cfg?.DbName ?? "icu_db";
+                    var dbUser = cfg?.DbUser ?? "icu_admin";
+                    var dbPassword = cfg?.DbPassword ?? "ICU@1234";
+                    var connStr = $"Host={dbHost};Port={dbPort};Database={dbName};Username={dbUser};Password={dbPassword}";
+
+                    using var conn = new Npgsql.NpgsqlConnection(connStr);
+                    await conn.OpenAsync();
+
+                    // Drop all application schemas (not public/system ones)
+                    var schemas = new[] { "cl_mpi", "cl_encounter", "cl_inpatient", "cl_emergency", "cl_diagnostics", "op_revenue", "gov_audit", "gov_ai" };
+                    foreach (var schema in schemas)
+                    {
+                        using var cmd = conn.CreateCommand();
+                        cmd.CommandText = $"DROP SCHEMA IF EXISTS {schema} CASCADE;";
+                        await cmd.ExecuteNonQueryAsync();
+                    }
+
+                    databaseDeleted = true;
+                    _logger.LogWarning("PostgreSQL schemas dropped: {Schemas}", string.Join(", ", schemas));
+                }
+                catch (Exception dbEx)
+                {
+                    _logger.LogError(dbEx, "Failed to drop PostgreSQL schemas");
+                }
+            }
+
+            return Ok(new { success = true, message = "Project reset complete. All pipeline data cleared.", outputDeleted, databaseDeleted });
         }
         catch (Exception ex)
         {
@@ -1135,6 +1792,7 @@ public sealed class PipelineController : ControllerBase
 public sealed class ResetRequest
 {
     public bool DeleteGeneratedCode { get; init; }
+    public bool DeleteDatabase { get; init; }
     public string? OutputPath { get; init; }
 }
 
@@ -1158,12 +1816,14 @@ public sealed class PipelineRunRequest
     public string? SolutionNamespace { get; init; }
     public string? DockerContainerName { get; init; }
     public string? DbHost { get; init; }
-    public int DbPort { get; init; } = 5432;
+    public int DbPort { get; init; } = 5418;
     public string? DbName { get; init; }
     public string? DbPassword { get; init; }
     public string? DbUser { get; init; }
     public bool SpinUpDocker { get; init; } = true;
     public bool ExecuteDdl { get; init; } = true;
+    public int MaxQueueItems { get; init; } = 50;
+    public int MaxInDevItems { get; init; } = 50;
     public string? OrchestratorInstructions { get; init; }
     public ServicePortMap? ServicePorts { get; init; }
 }

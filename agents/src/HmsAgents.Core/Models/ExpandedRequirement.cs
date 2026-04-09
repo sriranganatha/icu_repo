@@ -116,4 +116,12 @@ public sealed class ExpandedRequirement
     public string DetailedSpec { get; set; } = string.Empty;
     /// <summary>Source: which agent created this item (Expander, Analyzer, Backlog).</summary>
     public string ProducedBy { get; set; } = string.Empty;
+
+    // ── DOD verification tracking ──
+    /// <summary>Per-DOD-item verification status. Key = DOD text, Value = true if verified.</summary>
+    public Dictionary<string, bool> DodVerificationStatus { get; set; } = new();
+    /// <summary>Whether all DOD items have been verified by the DodVerificationAgent.</summary>
+    public bool DodVerified { get; set; }
+    /// <summary>Reasons why specific DOD items failed verification.</summary>
+    public List<string> DodVerificationNotes { get; set; } = [];
 }

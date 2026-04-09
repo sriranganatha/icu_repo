@@ -16,4 +16,5 @@ public sealed class RequirementQualityScore
     public bool Testable { get; init; }
     public bool IsReady { get; init; }
     public List<string> Notes { get; init; } = [];
+    public List<string> ClarifyingQuestions { get; init; } = [];
 }

@@ -47,6 +47,8 @@ public sealed class CodeReasoningAgent : IAgent
         context.ReportProgress?.Invoke(Type,
             $"Reasoning over {context.Artifacts.Count} artifacts across {MicroserviceCatalog.All.Length} services...");
 
+        try
+        {
         var findings = new List<ReviewFinding>();
         var messages = new List<AgentMessage>();
 
@@ -115,6 +117,19 @@ public sealed class CodeReasoningAgent : IAgent
             sw.ElapsedMilliseconds, findings.Count);
 
         return result;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "CodeReasoningAgent failed — {ExType}: {Message}", ex.GetType().Name, ex.Message);
+            context.AgentStatuses[Type] = AgentStatus.Failed;
+            return new AgentResult
+            {
+                Agent = Type, Success = false,
+                Errors = [ex.ToString()],
+                Summary = $"CodeReasoning failed: {ex.GetType().Name}: {ex.Message}",
+                Duration = sw.Elapsed
+            };
+        }
     }
 
     // ─── Phase 1: Entity ↔ DTO contract alignment ───────────────────────────

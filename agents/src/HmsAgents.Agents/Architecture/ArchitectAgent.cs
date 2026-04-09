@@ -71,6 +71,10 @@ public sealed class ArchitectAgent : IAgent
             if (context.ReportProgress is not null)
                 await context.ReportProgress(Type, $"Architecture guidance ready for {selectedServices.Count} services: {serviceList}");
 
+            // Agent completes its own claimed work items
+            foreach (var item in context.CurrentClaimedItems)
+                context.CompleteWorkItem?.Invoke(item);
+
             return new AgentResult
             {
                 Agent = Type,

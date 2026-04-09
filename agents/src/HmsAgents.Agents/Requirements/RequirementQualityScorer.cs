@@ -13,6 +13,7 @@ internal static class RequirementQualityScorer
     {
         var notes = new List<string>();
         var text = $"{req.Title} {req.Description}".ToLowerInvariant();
+        var clarifyingQuestions = BuildClarifyingQuestions(req, text);
 
         var independent = req.DependsOn.Count == 0;
         if (!independent)
@@ -52,7 +53,14 @@ internal static class RequirementQualityScorer
         score += small ? 17 : 0;
         score += testable ? 17 : 0;
 
-        var isReady = score >= 70 && estimable && testable && valuable;
+        if (clarifyingQuestions.Count > 0)
+        {
+            // Ambiguity adds risk to downstream decomposition; apply a bounded readiness penalty.
+            score = Math.Max(0, score - Math.Min(20, clarifyingQuestions.Count * 5));
+            notes.Add($"Ambiguity detected: {clarifyingQuestions.Count} clarification question(s) should be answered before coding.");
+        }
+
+        var isReady = score >= 70 && estimable && testable && valuable && clarifyingQuestions.Count == 0;
         if (isReady)
             notes.Add("Ready: passes INVEST baseline for expansion.");
 
@@ -68,8 +76,43 @@ internal static class RequirementQualityScorer
             Small = small,
             Testable = testable,
             IsReady = isReady,
-            Notes = notes
+            Notes = notes,
+            ClarifyingQuestions = clarifyingQuestions
         };
+    }
+
+    private static List<string> BuildClarifyingQuestions(Requirement req, string normalizedText)
+    {
+        var questions = new List<string>();
+
+        if (ContainsAny(normalizedText,
+                "fast", "quick", "user-friendly", "intuitive", "as needed", "etc", "and so on", "optimized", "best possible"))
+        {
+            questions.Add("Which measurable targets define this requirement (e.g., latency, throughput, accuracy, or SLA values)?");
+        }
+
+        if (!ContainsAny(normalizedText, "nurse", "doctor", "admin", "patient", "system", "api", "service", "operator", "user"))
+        {
+            questions.Add("Who is the primary actor for this flow, and which secondary actors/systems are impacted?");
+        }
+
+        if (req.AcceptanceCriteria.Count == 0)
+        {
+            questions.Add("What are the explicit pass/fail acceptance criteria for this requirement?");
+        }
+        else if (req.AcceptanceCriteria.Any(c => c.Length < 20))
+        {
+            questions.Add("Can acceptance criteria be expanded into concrete Given/When/Then scenarios with expected outcomes?");
+        }
+
+        if (!ContainsAny(normalizedText, "must", "shall", "within", "under", "at least", "at most", "error", "validation"))
+        {
+            questions.Add("What constraints and validation rules must the system enforce for this requirement?");
+        }
+
+        return questions
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
     }
 
     private static bool ContainsAny(string source, params string[] needles)

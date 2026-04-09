@@ -25,6 +25,7 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
 
     private const int MaxAgentRetries = 2;
     private const int MaxClaimBatchSize = 50;
+    private const int MaxAdaptiveWipCap = 50;
     private static readonly TimeSpan RetryDelay = TimeSpan.FromSeconds(1);
     private static readonly TimeSpan DaemonPollInterval = TimeSpan.FromMilliseconds(500);
 
@@ -36,6 +37,9 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
         [AgentType.PlatformBuilder]       = [AgentType.Architect],
         [AgentType.RequirementsExpander]  = [AgentType.RequirementsReader],
         [AgentType.Backlog]               = [AgentType.RequirementsExpander],
+        // Code-gen agents depend only on PlatformBuilder (not Backlog) because Backlog
+        // cycles continuously. First dispatch is gated by backlogRanAtLeastOnce flag;
+        // subsequent dispatches use the backlog-driven re-dispatch block.
         [AgentType.Database]              = [AgentType.PlatformBuilder],
         [AgentType.ServiceLayer]          = [AgentType.PlatformBuilder],
         [AgentType.Application]           = [AgentType.PlatformBuilder],
@@ -83,6 +87,18 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
         [AgentType.UiUx]                 = [AgentType.Application],
         // LoadTest — after Deploy for performance validation
         [AgentType.LoadTest]             = [AgentType.Deploy],
+        // DodVerification — quality gate after all code-gen + Review complete
+        [AgentType.DodVerification]      = [AgentType.Database, AgentType.ServiceLayer, AgentType.Application, AgentType.Integration, AgentType.Testing, AgentType.Review],
+        // BRD generation — after requirements are expanded
+        [AgentType.BrdGenerator]         = [AgentType.RequirementsExpander],
+        // Conflict resolution — after all code-gen agents
+        [AgentType.ConflictResolver]     = [AgentType.Database, AgentType.ServiceLayer, AgentType.Application, AgentType.Integration],
+        // Traceability gate — after Review + Testing
+        [AgentType.TraceabilityGate]     = [AgentType.Review, AgentType.Testing],
+        // Sprint planning — after requirements are expanded
+        [AgentType.SprintPlanner]        = [AgentType.RequirementsExpander],
+        // Learning loop — runs last, after everything
+        [AgentType.LearningLoop]         = [],  // handled as meta/final agent
     };
 
     // Finding → remediation dispatch
@@ -120,7 +136,20 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
 
     // Heal-cycle agents skip the BugFix→Performance→Review loop themselves
     private static readonly HashSet<AgentType> s_healCycleAgents =
-        [AgentType.BugFix, AgentType.Performance, AgentType.Review, AgentType.Supervisor, AgentType.Backlog, AgentType.RequirementsExpander, AgentType.Deploy, AgentType.Build, AgentType.Monitor, AgentType.Planning, AgentType.CodeReasoning];
+        [AgentType.BugFix, AgentType.Performance, AgentType.Review, AgentType.Supervisor, AgentType.Backlog, AgentType.RequirementsExpander, AgentType.Deploy, AgentType.Build, AgentType.Monitor, AgentType.Planning, AgentType.CodeReasoning, AgentType.DodVerification];
+
+    // Meta-agents track/review items but don't produce deliverables — skip lifecycle Claim/Start/Complete
+    private static readonly HashSet<AgentType> s_metaAgents =
+        [AgentType.Backlog, AgentType.Supervisor, AgentType.Review, AgentType.RequirementsExpander, AgentType.RequirementAnalyzer, AgentType.CodeReasoning, AgentType.Planning, AgentType.DodVerification];
+
+    // Backlog-driven agents: re-dispatch iteratively as long as InQueue work items exist
+    private static readonly HashSet<AgentType> s_backlogDrivenAgents =
+        [AgentType.Database, AgentType.ServiceLayer, AgentType.Application, AgentType.Integration, AgentType.UiUx, AgentType.Testing, AgentType.BugFix];
+
+    // Feedback agents: when these complete with new findings, feed them through
+    // RequirementsExpander → Backlog so findings become actionable work items.
+    private static readonly HashSet<AgentType> s_feedbackAgents =
+        [AgentType.Review, AgentType.Build, AgentType.Deploy, AgentType.Monitor, AgentType.BugFix];
 
     private const int MaxBuildFixCycles = 3; // Max build→fix→rebuild iterations
 
@@ -261,6 +290,10 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
         _taskCompletedBy.Clear();
         _current = context;
 
+        // Apply WIP limits from config to lifecycle policy
+        _lifecycle.MaxQueueItems = config.MaxQueueItems > 0 ? config.MaxQueueItems : 10;
+        _lifecycle.MaxInDevItems = config.MaxInDevItems > 0 ? config.MaxInDevItems : 10;
+
         if (!string.IsNullOrWhiteSpace(config.OrchestratorInstructions))
             context.OrchestratorInstructions.Add(config.OrchestratorInstructions);
 
@@ -282,17 +315,40 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
             $"RequirementsPath: {config.RequirementsPath}, OutputPath: {config.OutputPath}",
             severity: AuditSeverity.Info, ct: ct);
 
+        try
+        {
+
         // Build the work queue: all agents we want to run
         var pendingAgents = new HashSet<AgentType>(s_dependencies.Keys);
         pendingAgents.Remove(AgentType.Supervisor);  // Supervisor runs at the very end
+        // Build/Deploy/Monitor/LoadTest are post-backlog gates and should not be daemon-dispatched early.
+        pendingAgents.Remove(AgentType.Build);
+        pendingAgents.Remove(AgentType.Deploy);
+        pendingAgents.Remove(AgentType.Monitor);
+        pendingAgents.Remove(AgentType.LoadTest);
         var completedAgents = new ConcurrentDictionary<AgentType, bool>(); // true=success, false=skipped
         var runningAgents = new ConcurrentDictionary<AgentType, Task>();
-        var remediationDispatched = false;
+        var platformExpandTriggered = false;
+        // Track finding count before each feedback agent runs so we detect new findings
+        var findingCountBeforeAgent = new ConcurrentDictionary<AgentType, int>();
+        // Track how many times Review has triggered remediation dispatch (allows iterative cycles)
+        var lastRemediationFindingCount = 0;
 
-        // ── Daemon loop: poll for ready agents, dispatch in parallel ──
-        while (pendingAgents.Count > 0 || runningAgents.Count > 0)
+        // Track stalled-tick count so the loop backs off to idle polling when no progress is made
+        var stalledTicks = 0;
+        var lastCompletedCount = 0;
+        const int MaxStalledTicks = 10;
+        // Track whether Build/Deploy/Monitor/Supervisor have run for the current backlog wave
+        var buildDeployRanForWave = false;
+        var lastArtifactWriteCount = 0;
+        // Track whether BacklogAgent has run at least once — code-gen agents wait for this
+        // before their first dispatch so they have InQueue items to claim.
+        var backlogRanAtLeastOnce = false;
+
+        // ── Daemon loop: runs 24/7 until cancellation ──
+        // Accepts new requirements from users/monitoring agents at any time via _pendingRequirements.
+        while (!ct.IsCancellationRequested)
         {
-            ct.ThrowIfCancellationRequested();
 
             // Process any mid-pipeline requirement injections
             await ProcessPendingRequirements(context, pendingAgents, completedAgents, ct);
@@ -305,9 +361,18 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
             if (unblocked > 0)
                 _logger.LogInformation("[Daemon] Unblocked {Count} work item(s) whose dependencies are now complete", unblocked);
 
+            // Sweep stuck InProgress items: if all relevant agents have completed their runs
+            // AND none are currently running, force-complete items that the task tracker missed.
+            SweepStuckInProgressItems(context, completedAgents, runningAgents);
+
+            ApplyAdaptiveWipLimits(context);
+
             // Find agents whose dependencies are all satisfied
             var readyBatch = pendingAgents
                 .Where(a => GetDependencies(a).All(dep => completedAgents.ContainsKey(dep)))
+                // Code-gen agents must wait until Backlog has run at least once
+                // so there are InQueue items to claim.
+                .Where(a => !s_backlogDrivenAgents.Contains(a) || backlogRanAtLeastOnce)
                 .ToList();
 
             // Dispatch all ready agents in parallel
@@ -332,19 +397,139 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
 
                 var task = Task.Run(async () =>
                 {
+                    // Snapshot finding count before execution so we can detect new findings
+                    if (s_feedbackAgents.Contains(agentType))
+                        findingCountBeforeAgent[agentType] = context.Findings.Count;
+
                     var success = await RunAgentWithHealingAsync(context, agent, ct);
                     completedAgents[agentType] = success;
                     runningAgents.TryRemove(agentType, out _);
+
+                    // Once BacklogAgent has run at least once, code-gen agents may dispatch
+                    if (agentType == AgentType.Backlog)
+                        backlogRanAtLeastOnce = true;
                 }, ct);
                 runningAgents[agentType] = task;
             }
 
-            // After Review completes — dispatch remediation agents dynamically
-            if (!remediationDispatched && completedAgents.ContainsKey(AgentType.Review))
+            // After PlatformBuilder completes — feed output through RequirementsExpander → Backlog
+            // so platform-derived technical requirements become backlog work items.
+            if (!platformExpandTriggered && completedAgents.ContainsKey(AgentType.PlatformBuilder))
             {
-                remediationDispatched = true;
+                platformExpandTriggered = true;
+                if (completedAgents.ContainsKey(AgentType.RequirementsExpander)
+                    && !pendingAgents.Contains(AgentType.RequirementsExpander)
+                    && !runningAgents.ContainsKey(AgentType.RequirementsExpander))
+                {
+                    completedAgents.TryRemove(AgentType.RequirementsExpander, out _);
+                    pendingAgents.Add(AgentType.RequirementsExpander);
+                    _logger.LogInformation("[Daemon] PlatformBuilder done — re-queuing RequirementsExpander for platform-derived requirements");
+                }
+                if (completedAgents.ContainsKey(AgentType.Backlog)
+                    && !pendingAgents.Contains(AgentType.Backlog)
+                    && !runningAgents.ContainsKey(AgentType.Backlog))
+                {
+                    completedAgents.TryRemove(AgentType.Backlog, out _);
+                    pendingAgents.Add(AgentType.Backlog);
+                    _logger.LogInformation("[Daemon] Re-queuing Backlog to process platform-derived expanded requirements");
+                }
+            }
+
+            // Backlog-driven re-dispatch: iteratively re-queue code-gen agents
+            // while InQueue work items remain for them to claim.
+            // NOTE: We only gate on PlatformBuilder (not Backlog) because Backlog
+            // is continuously cycling to promote items. Requiring Backlog in
+            // completedAgents would starve code-gen agents during Backlog runs.
+            if (completedAgents.ContainsKey(AgentType.PlatformBuilder))
+            {
+                foreach (var codeGenType in s_backlogDrivenAgents)
+                {
+                    if (pendingAgents.Contains(codeGenType) || runningAgents.ContainsKey(codeGenType))
+                        continue;
+                    if (!completedAgents.ContainsKey(codeGenType))
+                        continue; // hasn't run yet — normal dep-based dispatch will handle it
+
+                    var claimable = GetClaimableItems(context, codeGenType);
+                    if (claimable.Count > 0)
+                    {
+                        _logger.LogInformation("[Daemon] Backlog-driven re-dispatch: {Agent} — {Count} claimable item(s)", codeGenType, claimable.Count);
+                        completedAgents.TryRemove(codeGenType, out _);
+                        pendingAgents.Add(codeGenType);
+                    }
+                }
+            }
+
+            // Re-queue BacklogAgent when New items need promotion (independent of code-gen block)
+            {
+                var newItemCount = context.ExpandedRequirements.Count(i =>
+                    IsActionableWorkItem(i) && i.Status == WorkItemStatus.New);
+                if (newItemCount > 0
+                    && completedAgents.ContainsKey(AgentType.Backlog)
+                    && !pendingAgents.Contains(AgentType.Backlog)
+                    && !runningAgents.ContainsKey(AgentType.Backlog))
+                {
+                    _logger.LogInformation("[Daemon] Re-queuing BacklogAgent — {Count} New items still need promotion", newItemCount);
+                    completedAgents.TryRemove(AgentType.Backlog, out _);
+                    pendingAgents.Add(AgentType.Backlog);
+                }
+            }
+
+            // Feedback-driven expansion: when a feedback agent (Review, Build, Deploy,
+            // Monitor, BugFix) completes with new findings, re-queue RequirementsExpander
+            // → Backlog so findings are expanded into actionable work items.
+            // Also re-queue the feedback agents themselves for iterative cycles.
+            foreach (var fbAgent in s_feedbackAgents)
+            {
+                if (!completedAgents.ContainsKey(fbAgent)) continue;
+                if (!findingCountBeforeAgent.TryRemove(fbAgent, out var prevCount)) continue;
+
+                var newFindings = context.Findings.Count - prevCount;
+                if (newFindings <= 0) continue;
+
+                _logger.LogInformation(
+                    "[Daemon] Feedback agent {Agent} produced {Count} new finding(s) — triggering RequirementsExpander → Backlog",
+                    fbAgent, newFindings);
+
+                // Re-queue RequirementsExpander and Backlog to process findings into work items
+                if (!pendingAgents.Contains(AgentType.RequirementsExpander)
+                    && !runningAgents.ContainsKey(AgentType.RequirementsExpander))
+                {
+                    completedAgents.TryRemove(AgentType.RequirementsExpander, out _);
+                    pendingAgents.Add(AgentType.RequirementsExpander);
+                }
+                if (!pendingAgents.Contains(AgentType.Backlog)
+                    && !runningAgents.ContainsKey(AgentType.Backlog))
+                {
+                    completedAgents.TryRemove(AgentType.Backlog, out _);
+                    pendingAgents.Add(AgentType.Backlog);
+                }
+
+                // Re-queue Review after non-Review feedback agents produce findings,
+                // so the new/fixed code gets reviewed again.
+                if (fbAgent != AgentType.Review
+                    && !pendingAgents.Contains(AgentType.Review)
+                    && !runningAgents.ContainsKey(AgentType.Review))
+                {
+                    completedAgents.TryRemove(AgentType.Review, out _);
+                    pendingAgents.Add(AgentType.Review);
+                    _logger.LogInformation("[Daemon] Re-queuing Review — {Agent} produced new findings", fbAgent);
+                }
+                break; // one trigger per loop tick is enough
+            }
+
+            // After Review completes — dispatch remediation agents for any new findings.
+            // Uses a generation counter instead of a one-shot flag so Review → BugFix →
+            // Review cycles can repeat as long as new findings keep appearing.
+            if (completedAgents.ContainsKey(AgentType.Review) && context.Findings.Count > lastRemediationFindingCount)
+            {
+                var newSinceLastRemediation = context.Findings.Count - lastRemediationFindingCount;
+                lastRemediationFindingCount = context.Findings.Count;
+
+                _logger.LogInformation("[Daemon] Review cycle — {Count} new finding(s) since last remediation pass", newSinceLastRemediation);
+
                 var remediationTypes = new HashSet<AgentType>();
-                foreach (var finding in context.Findings.ToList())
+                // Only scan the new findings (tail of the list)
+                foreach (var finding in context.Findings.Skip(context.Findings.Count - newSinceLastRemediation).ToList())
                 {
                     if (s_findingDispatch.TryGetValue(finding.Category, out var agents))
                         foreach (var at in agents)
@@ -353,14 +538,15 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
 
                 foreach (var rt in remediationTypes)
                 {
-                    if (!completedAgents.ContainsKey(rt) && !pendingAgents.Contains(rt) && !runningAgents.ContainsKey(rt))
+                    if (!pendingAgents.Contains(rt) && !runningAgents.ContainsKey(rt))
                     {
+                        completedAgents.TryRemove(rt, out _);
                         _logger.LogInformation("[Daemon] Remediation dispatch: {Agent}", rt);
                         pendingAgents.Add(rt);
                     }
                 }
 
-                // After Review + Remediation, re-run Backlog to update statuses
+                // Re-run Backlog to update statuses
                 if (!pendingAgents.Contains(AgentType.Backlog) && !runningAgents.ContainsKey(AgentType.Backlog))
                 {
                     completedAgents.TryRemove(AgentType.Backlog, out _);
@@ -372,9 +558,13 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
             // Wait a tick before next poll (or until a running task completes)
             if (runningAgents.Count > 0)
             {
-                await Task.WhenAny(
-                    Task.WhenAny(runningAgents.Values),
-                    Task.Delay(DaemonPollInterval, ct));
+                try
+                {
+                    await Task.WhenAny(
+                        Task.WhenAny(runningAgents.Values),
+                        Task.Delay(DaemonPollInterval, ct));
+                }
+                catch (OperationCanceledException) { break; }
             }
             else if (pendingAgents.Count > 0)
             {
@@ -394,89 +584,170 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                 }
                 else
                 {
-                    await Task.Delay(DaemonPollInterval, ct);
+                    try { await Task.Delay(DaemonPollInterval, ct); }
+                    catch (OperationCanceledException) { break; }
                 }
             }
-        }
-
-        // ── Background Review pass: re-validate all artifacts ──────
-        var reviewAgent = _agents.FirstOrDefault(a => a.Type == AgentType.Review);
-        if (reviewAgent is not null)
-        {
-            _logger.LogInformation("[Daemon] Running final background Review pass on all artifacts");
-            context.ReviewIteration++;
-            await RunAgentWithHealingAsync(context, reviewAgent, ct);
-
-            // Final Backlog update after review
-            var backlog = _agents.FirstOrDefault(a => a.Type == AgentType.Backlog);
-            if (backlog is not null)
-                await RunAgentWithHealingAsync(context, backlog, ct);
-        }
-
-        // ── Build → Fix → Rebuild automated loop ───────────────────
-        var buildAgent = _agents.FirstOrDefault(a => a.Type == AgentType.Build);
-        var buildPassed = true;
-        if (buildAgent is not null)
-        {
-            buildPassed = await RunBuildFixCycleAsync(context, buildAgent, ct);
-        }
-
-        // ── Deploy → Monitor → Fix feedback loop (only if build passed) ──
-        var deployAgent = _agents.FirstOrDefault(a => a.Type == AgentType.Deploy);
-        if (deployAgent is not null && buildPassed)
-        {
-            await RunAgentWithHealingAsync(context, deployAgent, ct);
-
-            var monitorAgent = _agents.FirstOrDefault(a => a.Type == AgentType.Monitor);
-            if (monitorAgent is not null)
+            else
             {
-                await RunMonitorFixCycleAsync(context, monitorAgent, deployAgent, ct);
+                // No pending or running agents but actionable backlog items remain.
+                // Re-queue Backlog to update statuses, then re-dispatch will kick code-gen agents.
+                if (!pendingAgents.Contains(AgentType.Backlog) && !runningAgents.ContainsKey(AgentType.Backlog))
+                {
+                    completedAgents.TryRemove(AgentType.Backlog, out _);
+                    pendingAgents.Add(AgentType.Backlog);
+                    _logger.LogInformation("[Daemon] Re-queuing Backlog — actionable items still incomplete");
+                }
+
+                // Detect stalled state: back off to longer idle poll when no progress
+                var currentCompleted = context.ExpandedRequirements.Count(i => IsActionableWorkItem(i) && i.Status == WorkItemStatus.Completed);
+                var currentInProgress = context.ExpandedRequirements.Count(i => IsActionableWorkItem(i) && i.Status == WorkItemStatus.InProgress);
+                var currentInQueue = context.ExpandedRequirements.Count(i => IsActionableWorkItem(i) && i.Status == WorkItemStatus.InQueue);
+                var progressSnapshot = currentCompleted + currentInProgress * 1000 + currentInQueue * 1000000;
+                if (progressSnapshot == lastCompletedCount)
+                {
+                    stalledTicks++;
+                    if (stalledTicks >= MaxStalledTicks)
+                    {
+                        _logger.LogInformation("[Daemon] Idle — no progress for {Ticks} ticks. {Done}/{Total} actionable items completed. Waiting for new input...",
+                            stalledTicks, currentCompleted, context.ExpandedRequirements.Count(IsActionableWorkItem));
+                        // Back off to 5-second idle poll instead of 500ms to reduce CPU usage
+                        try { await Task.Delay(TimeSpan.FromSeconds(5), ct); }
+                        catch (OperationCanceledException) { break; }
+                        continue;
+                    }
+                }
+                else
+                {
+                    stalledTicks = 0;
+                    lastCompletedCount = progressSnapshot;
+                }
+
+                try { await Task.Delay(DaemonPollInterval, ct); }
+                catch (OperationCanceledException) { break; }
+            }
+
+            // ── Inside-loop: when all actionable backlog items complete, run Build/Deploy/Monitor/Supervisor ──
+            if (IsActionableBacklogCompleted(context) && !buildDeployRanForWave
+                && pendingAgents.Count == 0 && runningAgents.Count == 0)
+            {
+                buildDeployRanForWave = true;
+
+                // Background Review pass: re-validate all artifacts
+                var reviewAgent = _agents.FirstOrDefault(a => a.Type == AgentType.Review);
+                if (reviewAgent is not null)
+                {
+                    _logger.LogInformation("[Daemon] Running background Review pass on all artifacts");
+                    context.ReviewIteration++;
+                    await RunAgentWithHealingAsync(context, reviewAgent, ct);
+
+                    var backlogAgent = _agents.FirstOrDefault(a => a.Type == AgentType.Backlog);
+                    if (backlogAgent is not null)
+                        await RunAgentWithHealingAsync(context, backlogAgent, ct);
+                }
+
+                // Build → Fix → Rebuild
+                var buildAgent = _agents.FirstOrDefault(a => a.Type == AgentType.Build);
+                var buildPassed = true;
+                if (buildAgent is not null)
+                    buildPassed = await RunBuildFixCycleAsync(context, buildAgent, ct);
+
+                // Deploy → Monitor (only if build passed)
+                var deployAgent = _agents.FirstOrDefault(a => a.Type == AgentType.Deploy);
+                if (deployAgent is not null && buildPassed)
+                {
+                    await RunAgentWithHealingAsync(context, deployAgent, ct);
+                    var monitorAgent = _agents.FirstOrDefault(a => a.Type == AgentType.Monitor);
+                    if (monitorAgent is not null)
+                        await RunMonitorFixCycleAsync(context, monitorAgent, deployAgent, ct);
+                }
+                else if (deployAgent is not null && !buildPassed)
+                {
+                    _logger.LogWarning("[Daemon] Skipping deployment — build failed after {Max} cycles", MaxBuildFixCycles);
+                    await PublishEvent(context, AgentType.Deploy, AgentStatus.Failed,
+                        "Deployment SKIPPED — build has unresolved errors.", ct: ct);
+                }
+
+                // Supervisor report
+                var supervisor = _agents.FirstOrDefault(a => a.Type == AgentType.Supervisor);
+                if (supervisor is not null)
+                {
+                    _logger.LogInformation("[Daemon] Running Supervisor report");
+                    await RunAgentWithHealingAsync(context, supervisor, ct);
+                }
+
+                // Write artifacts to disk
+                if (context.Artifacts.Count > lastArtifactWriteCount && !string.IsNullOrEmpty(config.OutputPath))
+                {
+                    await _writer.WriteAllAsync(context.Artifacts, config.OutputPath, ct);
+                    lastArtifactWriteCount = context.Artifacts.Count;
+                    _logger.LogInformation("Wrote {Count} artifacts to {Path}", context.Artifacts.Count, config.OutputPath);
+                }
+
+                await PublishEvent(context, AgentType.Orchestrator, AgentStatus.Running,
+                    $"Wave complete — {context.Artifacts.Count} artifacts, {context.Findings.Count} findings. Awaiting new input...",
+                    artifactCount: context.Artifacts.Count, findingCount: context.Findings.Count, ct: ct);
+
+                _logger.LogInformation("[Daemon] Wave complete. Orchestrator continues to accept new requirements.");
+            }
+
+            // When new requirements arrive, reset the build/deploy gate for the next wave
+            if (!IsActionableBacklogCompleted(context) && buildDeployRanForWave)
+            {
+                buildDeployRanForWave = false;
+                _logger.LogInformation("[Daemon] New work detected — starting new wave");
             }
         }
-        else if (deployAgent is not null && !buildPassed)
-        {
-            _logger.LogWarning("[Daemon] Skipping deployment — build failed after {Max} cycles", MaxBuildFixCycles);
-            await PublishEvent(context, AgentType.Deploy, AgentStatus.Failed,
-                "Deployment SKIPPED — build has unresolved errors. Fix build before deploying.", ct: ct);
-        }
 
-        // ── Final: Supervisor report ────────────────────────────────
-        var supervisor = _agents.FirstOrDefault(a => a.Type == AgentType.Supervisor);
-        if (supervisor is not null)
-        {
-            _logger.LogInformation("[Daemon] All agents done — running Supervisor final report");
-            await RunAgentWithHealingAsync(context, supervisor, ct);
-        }
+        // ── Graceful shutdown: loop exited via cancellation ──────────
+        _logger.LogInformation("[Daemon] Orchestrator shutting down (cancellation requested)");
 
-        // Write artifacts to disk
+        // Final artifact flush
         if (context.Artifacts.Count > 0 && !string.IsNullOrEmpty(config.OutputPath))
         {
-            await _writer.WriteAllAsync(context.Artifacts, config.OutputPath, ct);
+            await _writer.WriteAllAsync(context.Artifacts, config.OutputPath, CancellationToken.None);
             _logger.LogInformation("Wrote {Count} artifacts to {Path}", context.Artifacts.Count, config.OutputPath);
         }
 
         context.CompletedAt = DateTimeOffset.UtcNow;
         context.AgentStatuses[AgentType.Orchestrator] = AgentStatus.Completed;
         _logger.LogInformation(
-            "Pipeline {RunId} completed — {Artifacts} artifacts, {Findings} findings, {Tests} diagnostics, {Backlog} backlog items",
+            "Pipeline {RunId} stopped — {Artifacts} artifacts, {Findings} findings, {Tests} diagnostics, {Backlog} backlog items",
             context.RunId, context.Artifacts.Count, context.Findings.Count, context.TestDiagnostics.Count, context.ExpandedRequirements.Count);
 
         await PublishEvent(context, AgentType.Orchestrator, AgentStatus.Completed,
-            $"Pipeline complete — {context.Artifacts.Count} artifacts, {context.Findings.Count} findings, {context.ExpandedRequirements.Count} backlog items",
-            artifactCount: context.Artifacts.Count, findingCount: context.Findings.Count, ct: ct);
+            $"Pipeline stopped — {context.Artifacts.Count} artifacts, {context.Findings.Count} findings, {context.ExpandedRequirements.Count} backlog items",
+            artifactCount: context.Artifacts.Count, findingCount: context.Findings.Count, ct: CancellationToken.None);
 
-        // ── Audit: pipeline completed
         var pipelineDuration = context.CompletedAt.HasValue && context.StartedAt != default
             ? $"{(context.CompletedAt.Value - context.StartedAt).TotalSeconds:F0}s"
             : "unknown";
         await _audit.LogAsync(AgentType.Orchestrator, context.RunId, AuditAction.PipelineCompleted,
-            $"Pipeline {context.RunId} completed — {context.Artifacts.Count} artifacts, {context.Findings.Count} findings",
+            $"Pipeline {context.RunId} stopped — {context.Artifacts.Count} artifacts, {context.Findings.Count} findings",
             $"Backlog: {context.ExpandedRequirements.Count}, TestDiagnostics: {context.TestDiagnostics.Count}, " +
             $"Duration: {pipelineDuration}",
-            severity: AuditSeverity.Info, ct: ct);
+            severity: AuditSeverity.Info, ct: CancellationToken.None);
 
-        // ── Post-pipeline instructions ──────────────────────────────
-        await ExecutePostPipelineInstructions(context, config, ct);
+        await ExecutePostPipelineInstructions(context, config, CancellationToken.None);
+
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex, "Pipeline {RunId} crashed — {ExType}: {Message}", context.RunId, ex.GetType().Name, ex.Message);
+            context.CompletedAt ??= DateTimeOffset.UtcNow;
+            context.AgentStatuses[AgentType.Orchestrator] = AgentStatus.Failed;
+
+            // Reset any agents stuck in Running state so they don't appear hung
+            foreach (var kv in context.AgentStatuses)
+            {
+                if (kv.Value == AgentStatus.Running && kv.Key != AgentType.Orchestrator)
+                    context.AgentStatuses[kv.Key] = AgentStatus.Failed;
+            }
+
+            await PublishEvent(context, AgentType.Orchestrator, AgentStatus.Failed,
+                $"Pipeline crashed: {ex.GetType().Name}: {ex.Message}", ct: ct);
+            throw;
+        }
 
         return context;
     }
@@ -584,6 +855,75 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
         return context;
     }
 
+    // ─── Rerun Failed Agents ────────────────────────────────────────
+    // After the main daemon loop, re-attempt agents that failed.
+    // This handles transient failures (DB connectivity, Docker not ready, etc.)
+    // by giving them one more shot before Review/Build/Deploy.
+
+    private static readonly HashSet<AgentType> s_rerunCandidates =
+    [
+        AgentType.Database, AgentType.ServiceLayer, AgentType.Application,
+        AgentType.Integration, AgentType.Testing
+    ];
+
+    private async Task RerunFailedAgentsAsync(
+        AgentContext context,
+        ConcurrentDictionary<AgentType, bool> completedAgents,
+        CancellationToken ct)
+    {
+        var failedAgents = context.AgentStatuses
+            .Where(kv => kv.Value == AgentStatus.Failed && s_rerunCandidates.Contains(kv.Key))
+            .Select(kv => kv.Key)
+            .ToList();
+
+        if (failedAgents.Count == 0) return;
+
+        _logger.LogInformation("[Daemon] Retrying {Count} failed agent(s): {Agents}",
+            failedAgents.Count, string.Join(", ", failedAgents));
+        await PublishEvent(context, AgentType.Orchestrator, AgentStatus.Running,
+            $"Retrying {failedAgents.Count} failed agent(s): {string.Join(", ", failedAgents)}", ct: ct);
+
+        foreach (var agentType in failedAgents)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            var agent = _agents.FirstOrDefault(a => a.Type == agentType);
+            if (agent is null) continue;
+
+            _logger.LogInformation("[Daemon] Re-running failed agent: {Agent}", agentType);
+            await PublishEvent(context, agentType, AgentStatus.Running,
+                $"Re-running {agent.Name} (previously failed)", ct: ct);
+
+            // Reset the agent status so it can run cleanly
+            context.AgentStatuses[agentType] = AgentStatus.Running;
+
+            var success = await RunAgentWithHealingAsync(context, agent, ct);
+            completedAgents[agentType] = success;
+
+            if (success)
+            {
+                _logger.LogInformation("[Daemon] {Agent} succeeded on retry", agentType);
+                await PublishEvent(context, agentType, AgentStatus.Completed,
+                    $"{agent.Name} recovered on retry", ct: ct);
+
+                // Re-evaluate blocked items now that this agent succeeded
+                var unblocked = ReevaluateBlockedItems(context);
+                if (unblocked > 0)
+                    _logger.LogInformation("[Daemon] Unblocked {Count} items after {Agent} retry succeeded",
+                        unblocked, agentType);
+            }
+            else
+            {
+                _logger.LogWarning("[Daemon] {Agent} failed again on retry — giving up", agentType);
+            }
+        }
+
+        // Final backlog re-evaluation after all retries
+        var finalUnblocked = ReevaluateBlockedItems(context);
+        if (finalUnblocked > 0)
+            _logger.LogInformation("[Daemon] Post-retry unblocked {Count} items total", finalUnblocked);
+    }
+
     // ─── Single Agent Runner with Self-Healing ──────────────────────
     // Runs an agent up to MaxAgentRetries. On failure triggers
     // BugFix → Performance → Review heal cycle, then retries.
@@ -618,59 +958,82 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                 $"Agent: {agent.Name}, Attempt: {attempt + 1}/{MaxAgentRetries + 1}",
                 severity: attempt > 0 ? AuditSeverity.Warning : AuditSeverity.Info, ct: ct);
 
-            // ── HITL: gate for Database DDL execution (only prompt once per run)
-            if (agent.Type == AgentType.Database && context.PipelineConfig.ExecuteDdl && !context.DdlApprovedForRun && attempt == 0)
-            {
-                var ddlDecision = await _humanGate.RequestApprovalAsync(new HumanApprovalRequest
-                {
-                    RunId = context.RunId,
-                    RequestingAgent = agent.Type,
-                    Category = HumanGateCategory.DatabaseDdl,
-                    Title = "Database DDL execution requires approval",
-                    Description = $"DatabaseAgent will execute DDL scripts against {context.PipelineConfig.DbHost}:{context.PipelineConfig.DbPort}/{context.PipelineConfig.DbName}. " +
-                        "This will create/alter database tables and may affect existing data.",
-                    Details = $"Docker: SpinUp={context.PipelineConfig.SpinUpDocker}, ExecuteDdl={context.PipelineConfig.ExecuteDdl}, " +
-                        $"Container: {context.PipelineConfig.DockerContainerName}",
-                    Timeout = TimeSpan.FromMinutes(15)
-                }, ct);
-
-                if (ddlDecision == HumanDecision.Approved)
-                {
-                    context.DdlApprovedForRun = true; // don't prompt again on re-dispatch
-                    _logger.LogInformation("[HITL] Human APPROVED DDL execution for run {RunId}", context.RunId);
-                    await _audit.LogAsync(agent.Type, context.RunId, AuditAction.HumanApproved,
-                        "DDL execution approved by human operator", severity: AuditSeverity.Decision, ct: ct);
-                }
-                else if (ddlDecision == HumanDecision.Rejected)
-                {
-                    _logger.LogWarning("[HITL] Human REJECTED DDL execution — skipping Database agent");
-                    await _audit.LogAsync(agent.Type, context.RunId, AuditAction.HumanRejected,
-                        "DDL execution rejected by human operator", severity: AuditSeverity.Decision, ct: ct);
-                    context.PipelineConfig.ExecuteDdl = false; // disable DDL, let it generate artifacts only
-                }
-                else // TimedOut
-                {
-                    _logger.LogWarning("[HITL] DDL approval timed out — disabling DDL execution");
-                    await _audit.LogAsync(agent.Type, context.RunId, AuditAction.HumanRejected,
-                        "DDL approval timed out — DDL execution disabled for safety", severity: AuditSeverity.Warning, ct: ct);
-                    context.PipelineConfig.ExecuteDdl = false;
-                }
-            }
-
             AgentResult result;
-            List<ExpandedRequirement> claimedBatch;
+            List<ExpandedRequirement> claimedBatch = [];
             try
             {
-                // ── Stage 1: CLAIM — New/InQueue → Received ──
                 var agentName = agent.Type.ToString();
-                claimedBatch = _lifecycle.Claim(
-                    context.ExpandedRequirements,
-                    agentName,
-                    item => GetRelevantTaskAgents(item),
-                    item => MatchesAgent(item, agent.Type));
 
-                // ── Stage 2: START — Received → InProgress ──
-                _lifecycle.Start(claimedBatch, agentName);
+                // Meta-agents (Backlog, Supervisor, Review, etc.) track/review items
+                // but don't produce deliverables — skip lifecycle to avoid stealing items
+                if (s_metaAgents.Contains(agent.Type))
+                {
+                    claimedBatch = [];
+                }
+                else
+                {
+                    // ── Stage 1: CLAIM — InQueue → Received ──
+                    claimedBatch = _lifecycle.Claim(
+                        context.ExpandedRequirements,
+                        agentName,
+                        item => GetRelevantTaskAgents(item),
+                        item => MatchesAgent(item, agent.Type));
+
+                    // ── Stage 2: START — Received → InProgress ──
+                    // Items appear as "In Dev" on the dashboard immediately,
+                    // even while waiting for HITL approval below.
+                    _lifecycle.Start(claimedBatch, agentName);
+                }
+
+                // ── HITL: gate for Database DDL execution (only prompt once per run)
+                // Items are already InProgress so the dashboard shows them as "In Dev"
+                // while waiting for human approval.
+                if (agent.Type == AgentType.Database && context.PipelineConfig.ExecuteDdl && !context.DdlApprovedForRun && attempt == 0)
+                {
+                    var ddlDecision = await _humanGate.RequestApprovalAsync(new HumanApprovalRequest
+                    {
+                        RunId = context.RunId,
+                        RequestingAgent = agent.Type,
+                        Category = HumanGateCategory.DatabaseDdl,
+                        Title = "Database DDL execution requires approval",
+                        Description = $"DatabaseAgent will execute DDL scripts against {context.PipelineConfig.DbHost}:{context.PipelineConfig.DbPort}/{context.PipelineConfig.DbName}. " +
+                            "This will create/alter database tables and may affect existing data.",
+                        Details = $"Docker: SpinUp={context.PipelineConfig.SpinUpDocker}, ExecuteDdl={context.PipelineConfig.ExecuteDdl}, " +
+                            $"Container: {context.PipelineConfig.DockerContainerName}",
+                        Timeout = TimeSpan.FromMinutes(15)
+                    }, ct);
+
+                    if (ddlDecision == HumanDecision.Approved)
+                    {
+                        context.DdlApprovedForRun = true;
+                        _logger.LogInformation("[HITL] Human APPROVED DDL execution for run {RunId}", context.RunId);
+                        await _audit.LogAsync(agent.Type, context.RunId, AuditAction.HumanApproved,
+                            "DDL execution approved by human operator", severity: AuditSeverity.Decision, ct: ct);
+                    }
+                    else if (ddlDecision == HumanDecision.Rejected)
+                    {
+                        _logger.LogWarning("[HITL] Human REJECTED DDL execution — skipping Database agent");
+                        await _audit.LogAsync(agent.Type, context.RunId, AuditAction.HumanRejected,
+                            "DDL execution rejected by human operator", severity: AuditSeverity.Decision, ct: ct);
+                        context.PipelineConfig.ExecuteDdl = false;
+                    }
+                    else // TimedOut
+                    {
+                        _logger.LogWarning("[HITL] DDL approval timed out — disabling DDL execution");
+                        await _audit.LogAsync(agent.Type, context.RunId, AuditAction.HumanRejected,
+                            "DDL approval timed out — DDL execution disabled for safety", severity: AuditSeverity.Warning, ct: ct);
+                        context.PipelineConfig.ExecuteDdl = false;
+                    }
+                }
+
+                // ── Wire up agent-owned lifecycle delegates ──
+                // Agents call CompleteWorkItem / FailWorkItem for each item they process.
+                context.CurrentClaimedItems = claimedBatch;
+                context.CompleteWorkItem = item => _lifecycle.CompleteItem(
+                    item, agentName, context.ExpandedRequirements,
+                    i => GetRelevantTaskAgents(i), _taskTracker);
+                context.FailWorkItem = (item, reason) => _lifecycle.FailItem(
+                    item, agentName, reason, _taskTracker);
 
                 result = await agent.ExecuteAsync(context, ct);
             }
@@ -682,43 +1045,92 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "[Self-Heal] {Agent} crashed", agent.Name);
+                _logger.LogError(ex,
+                    "[Self-Heal] {Agent} crashed — {ExType}: {Message}\n{StackTrace}",
+                    agent.Name, ex.GetType().FullName, ex.Message, ex.StackTrace);
+
+                // Classify: non-recoverable errors should not be retried
+                var nonRecoverable = IsNonRecoverableException(ex);
+                if (nonRecoverable)
+                    _logger.LogWarning("[Self-Heal] {Agent} error classified as non-recoverable — skipping further retries", agent.Name);
+
                 result = new AgentResult
                 {
                     Agent = agent.Type, Success = false,
-                    Errors = [ex.Message],
-                    Summary = $"{agent.Name} crashed: {ex.Message}",
+                    Errors = [ex.ToString()],
+                    Summary = $"{agent.Name} crashed: {ex.GetType().Name}: {ex.Message}",
                     Duration = sw.Elapsed
                 };
                 context.AgentStatuses[agent.Type] = AgentStatus.Failed;
+
+                // Store structured failure record immediately for pattern analysis
+                context.FailureRecords.Add(new AgentFailureRecord
+                {
+                    FailedAgent = agent.Type,
+                    Attempt = attempt + 1,
+                    Error = ex.Message,
+                    Summary = result.Summary,
+                    ExceptionType = ex.GetType().FullName ?? ex.GetType().Name,
+                    StackTrace = ex.StackTrace ?? string.Empty,
+                    NonRecoverable = nonRecoverable
+                });
+
+                if (nonRecoverable)
+                {
+                    await PublishEvent(context, agent.Type, AgentStatus.Failed,
+                        $"{agent.Name} failed (non-recoverable): {ex.GetType().Name}: {ex.Message}",
+                        attempt, elapsed: sw.Elapsed.TotalMilliseconds, ct: ct);
+                    // Fail only claimed items, not all items in the pipeline
+                    foreach (var item in claimedBatch.Where(i => i.Status is WorkItemStatus.InProgress or WorkItemStatus.Received))
+                        _lifecycle.FailItem(item, agent.Type.ToString(), $"Non-recoverable: {ex.GetType().Name}: {ex.Message}", _taskTracker);
+                    return false;
+                }
             }
 
+            // Respect the agent's own status if it set one (e.g. Backlog sets Idle when items remain)
+            var reportedStatus = result.Success
+                ? (context.AgentStatuses.TryGetValue(agent.Type, out var agentSelf) && agentSelf != AgentStatus.Running
+                    ? agentSelf
+                    : AgentStatus.Completed)
+                : AgentStatus.Failed;
+
             await PublishEvent(context, agent.Type,
-                result.Success ? AgentStatus.Completed : AgentStatus.Failed,
+                reportedStatus,
                 result.Summary, attempt,
                 result.Artifacts.Count, result.Findings.Count,
                 sw.Elapsed.TotalMilliseconds, result.TestDiagnostics, ct);
 
-            if (result.Success)
+            if (!s_metaAgents.Contains(agent.Type))
             {
-                // ── Stage 3a: COMPLETE — InProgress → Completed ──
-                _lifecycle.Complete(
-                    context.ExpandedRequirements,
-                    agent.Type.ToString(),
-                    item => GetRelevantTaskAgents(item),
-                    _taskTracker);
-            }
-            else
-            {
-                // ── Stage 3b: FAIL — InProgress → retry (InQueue) or backlog (New) ──
-                var (retriable, backlogged) = _lifecycle.Fail(
-                    context.ExpandedRequirements,
-                    agent.Type.ToString(),
-                    _taskTracker);
+                // Agents own their lifecycle: they call CompleteWorkItem/FailWorkItem per item.
+                // Safety net: handle any claimed items the agent left InProgress/Received.
+                var orphaned = claimedBatch
+                    .Where(i => i.Status is WorkItemStatus.InProgress or WorkItemStatus.Received)
+                    .ToList();
 
-                if (retriable > 0)
-                    _logger.LogInformation("[Self-Heal] {Agent} attempt {Attempt}: {Retriable} items queued for retry",
-                        agent.Name, attempt + 1, retriable);
+                if (result.Success)
+                {
+                    if (orphaned.Count > 0)
+                    {
+                        _logger.LogWarning("[Lifecycle] {Agent} returned success but left {Count} claimed items unprocessed — failing them",
+                            agent.Name, orphaned.Count);
+                        foreach (var item in orphaned)
+                            _lifecycle.FailItem(item, agent.Type.ToString(),
+                                "Agent returned success without completing this item", _taskTracker);
+                    }
+                }
+                else
+                {
+                    // Agent failed — fail all remaining claimed items
+                    foreach (var item in orphaned)
+                        _lifecycle.FailItem(item, agent.Type.ToString(),
+                            result.Summary ?? "Agent execution failed", _taskTracker);
+
+                    var retriable = claimedBatch.Count(i => i.Status == WorkItemStatus.InQueue);
+                    if (retriable > 0)
+                        _logger.LogInformation("[Self-Heal] {Agent} attempt {Attempt}: {Retriable} items queued for retry",
+                            agent.Name, attempt + 1, retriable);
+                }
             }
 
             // ── Audit: agent completed/failed with details
@@ -796,14 +1208,24 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
 
             // Record failure context
             lastError = result.Errors.FirstOrDefault() ?? result.Summary;
+            var isNonRecoverable = IsNonRecoverableError(lastError);
             context.RetryAttempts[result.Agent] = context.RetryAttempts.GetValueOrDefault(result.Agent, 0) + 1;
             context.FailureRecords.Add(new AgentFailureRecord
             {
                 FailedAgent = agent.Type,
                 Attempt = attempt + 1,
                 Error = lastError ?? "Unknown",
-                Summary = result.Summary
+                Summary = result.Summary,
+                NonRecoverable = isNonRecoverable
             });
+
+            // Skip retries for non-recoverable errors (auth failures, missing config, etc.)
+            if (isNonRecoverable)
+            {
+                _logger.LogWarning("[Self-Heal] {Agent} error is non-recoverable — skipping remaining retries: {Error}",
+                    agent.Name, lastError);
+                break;
+            }
 
             // Heal cycle for non-heal agents
             if (!s_healCycleAgents.Contains(agent.Type))
@@ -1204,6 +1626,33 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
     private static string Truncate(string? s, int max) =>
         s is null ? "" : s.Length <= max ? s : s[..max] + "...";
 
+    /// <summary>
+    /// Classifies whether an exception is non-recoverable (retrying won't help).
+    /// Auth failures, config errors, and missing infrastructure are non-recoverable.
+    /// </summary>
+    private static bool IsNonRecoverableException(Exception ex) =>
+        IsNonRecoverableError(ex.Message) ||
+        ex is ArgumentException or InvalidOperationException or NotSupportedException or
+            UnauthorizedAccessException or System.Security.SecurityException;
+
+    /// <summary>
+    /// Classifies whether an error message indicates a non-recoverable problem.
+    /// </summary>
+    private static bool IsNonRecoverableError(string? error)
+    {
+        if (string.IsNullOrWhiteSpace(error)) return false;
+        // PostgreSQL auth failures — retrying with the same password is futile
+        if (error.Contains("28P01", StringComparison.Ordinal)) return true;
+        if (error.Contains("password authentication failed", StringComparison.OrdinalIgnoreCase)) return true;
+        // Connection refused — infrastructure not available
+        if (error.Contains("Connection refused", StringComparison.OrdinalIgnoreCase)) return true;
+        // Missing configuration
+        if (error.Contains("not configured", StringComparison.OrdinalIgnoreCase)) return true;
+        if (error.Contains("API key expired", StringComparison.OrdinalIgnoreCase)) return true;
+        if (error.Contains("API_KEY_INVALID", StringComparison.OrdinalIgnoreCase)) return true;
+        return false;
+    }
+
     // ── Backlog item <-> Agent mapping ──────────────────────────────
 
     /// <summary>Maps task tags → responsible agent types.</summary>
@@ -1214,6 +1663,7 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
         ["api"]            = AgentType.Application,
         ["application"]    = AgentType.Application,
         ["testing"]        = AgentType.Testing,
+        ["bugfix"]         = AgentType.BugFix,
         ["integration"]    = AgentType.Integration,
         ["security"]       = AgentType.Security,
         ["hipaa"]          = AgentType.HipaaCompliance,
@@ -1238,50 +1688,155 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
     ];
 
     /// <summary>
-    /// Re-evaluate all Blocked work items. If all DependsOn items are now Completed (or missing),
-    /// move the item back to InQueue so agents can claim it.
-    /// Called every daemon-loop iteration so items unblock as soon as dependencies finish.
+    /// Re-evaluate dependency gates and queue admission on every daemon loop:
+    /// - Items with unmet dependencies stay in New (pool)
+    /// - Items with satisfied dependencies are admitted to InQueue up to queue cap
+    /// This keeps lifecycle strict: New (pool) -> InQueue -> Received -> InProgress -> Completed.
     /// </summary>
     private static int ReevaluateBlockedItems(AgentContext context)
     {
-        var unblocked = 0;
-        foreach (var item in context.ExpandedRequirements.ToList())
+        RollupParentItems(context.ExpandedRequirements);
+
+        var maxQueue = context.PipelineConfig?.MaxQueueItems ?? 50;
+        var maxInDev = context.PipelineConfig?.MaxInDevItems ?? 50;
+        var promotionCap = (maxQueue + maxInDev) * 2;
+        var changed = 0;
+        var items = context.ExpandedRequirements
+            .Where(IsActionableWorkItem)
+            .Where(i => i.Status is not (WorkItemStatus.Completed or WorkItemStatus.Received or WorkItemStatus.InProgress))
+            .ToList();
+
+        var byId = context.ExpandedRequirements
+            .Where(i => !string.IsNullOrWhiteSpace(i.Id))
+            .GroupBy(i => i.Id, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+
+        var downstreamDependents = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var item in context.ExpandedRequirements)
         {
-            if (item.Status != WorkItemStatus.Blocked) continue;
-            if (item.DependsOn.Count == 0)
+            foreach (var depId in item.DependsOn)
             {
-                // No deps but marked Blocked — shouldn't happen, fix it
-                item.Status = WorkItemStatus.InQueue;
-                unblocked++;
-                continue;
-            }
-
-            var allDepsComplete = item.DependsOn.All(depId =>
-            {
-                var dep = context.ExpandedRequirements.FirstOrDefault(e => e.Id == depId);
-                return dep is null || dep.Status == WorkItemStatus.Completed;
-            });
-
-            if (allDepsComplete)
-            {
-                item.Status = WorkItemStatus.InQueue;
-                unblocked++;
+                if (!byId.ContainsKey(depId)) continue;
+                downstreamDependents.TryGetValue(depId, out var count);
+                downstreamDependents[depId] = count + 1;
             }
         }
-        return unblocked;
+
+        var ready = items
+            .Where(item => item.DependsOn.Count == 0 || item.DependsOn.All(depId =>
+            {
+                if (!byId.TryGetValue(depId, out var dep)) return true;
+                if (!IsActionableWorkItem(dep)) return true;
+                if (dep.Status == WorkItemStatus.Completed) return true;
+
+                var ownerAgent = GetOwnerAgent(dep);
+                return ownerAgent.HasValue &&
+                       context.AgentStatuses.TryGetValue(ownerAgent.Value, out var agentStatus) &&
+                       agentStatus == AgentStatus.Failed;
+            }))
+            .OrderByDescending(item => downstreamDependents.TryGetValue(item.Id, out var c) ? c : 0)
+            .ThenBy(item => item.Priority)
+            .ThenBy(item => item.CreatedAt)
+            .ThenBy(item => item.Id, StringComparer.OrdinalIgnoreCase)
+            .Select(item => item.Id)
+            .Take(promotionCap)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var item in items)
+        {
+            if (ready.Contains(item.Id))
+            {
+                if (item.Status != WorkItemStatus.InQueue)
+                {
+                    item.Status = WorkItemStatus.InQueue;
+                    changed++;
+                }
+            }
+            // Don't demote InQueue items to New — they may be waiting for an agent to claim them.
+            // Only promote New → InQueue, never InQueue → New (avoids thrashing).
+        }
+
+        return changed;
+    }
+
+    /// <summary>Determine which agent owns a work item based on its tags.</summary>
+    private static AgentType? GetOwnerAgent(ExpandedRequirement item)
+    {
+        foreach (var tag in item.Tags)
+        {
+            if (s_tagToAgent.TryGetValue(tag, out var agentType))
+                return agentType;
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Sweep items stuck in InProgress whose relevant agents have all completed their runs
+    /// AND are not currently running. For multi-agent Task items, force-register completion
+    /// via the task tracker. For single-agent items, mark them Completed directly.
+    /// </summary>
+    private void SweepStuckInProgressItems(
+        AgentContext context,
+        ConcurrentDictionary<AgentType, bool> completedAgents,
+        ConcurrentDictionary<AgentType, Task> runningAgents)
+    {
+        var swept = 0;
+        foreach (var item in context.ExpandedRequirements)
+        {
+            if (item.Status != WorkItemStatus.InProgress) continue;
+            if (!IsActionableWorkItem(item)) continue;
+
+            if (item.ItemType == WorkItemType.Task)
+            {
+                var relevantAgents = GetRelevantTaskAgents(item);
+                // Check if every relevant agent has finished at least one run AND is not currently running
+                var allAgentsDone = relevantAgents.All(agentName =>
+                    Enum.TryParse<AgentType>(agentName, ignoreCase: true, out var at) &&
+                    completedAgents.ContainsKey(at) &&
+                    !runningAgents.ContainsKey(at));
+
+                if (!allAgentsDone) continue;
+
+                // Force-complete via the tracker for each relevant agent
+                foreach (var agentName in relevantAgents)
+                    _taskTracker.MarkDone(item.Id, agentName);
+
+                if (_taskTracker.AllDone(item.Id, relevantAgents))
+                {
+                    item.Status = WorkItemStatus.Completed;
+                    item.CompletedAt = DateTimeOffset.UtcNow;
+                    swept++;
+                }
+            }
+            else
+            {
+                // Bug / UseCase — single agent
+                if (string.IsNullOrEmpty(item.AssignedAgent)) continue;
+                if (!Enum.TryParse<AgentType>(item.AssignedAgent, ignoreCase: true, out var assignedType)) continue;
+                // Skip if agent is currently running (it may still be processing this item)
+                if (runningAgents.ContainsKey(assignedType)) continue;
+                if (!completedAgents.ContainsKey(assignedType)) continue;
+
+                item.Status = WorkItemStatus.Completed;
+                item.CompletedAt = DateTimeOffset.UtcNow;
+                swept++;
+            }
+        }
+
+        if (swept > 0)
+            _logger.LogInformation("[Daemon] Swept {Count} stuck InProgress item(s) — force-completed", swept);
     }
 
     /// <summary>Get items this agent would claim (read-only peek for dispatch logging).</summary>
     private static List<ExpandedRequirement> GetClaimableItems(AgentContext context, AgentType agentType)
     {
         var result = new List<ExpandedRequirement>();
-        var snapshot = context.ExpandedRequirements.ToList();
+        var snapshot = context.ExpandedRequirements.Snapshot();
         foreach (var item in snapshot)
         {
             if (result.Count >= MaxClaimBatchSize) break;
 
-            if (item.Status != WorkItemStatus.InQueue && item.Status != WorkItemStatus.New) continue;
-            if (!string.IsNullOrEmpty(item.AssignedAgent)) continue;
+            if (item.Status != WorkItemStatus.InQueue) continue;
             if (MatchesAgent(item, agentType))
                 result.Add(item);
         }
@@ -1295,37 +1850,276 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
     {
         if (item.ItemType == WorkItemType.Task)
             return GetRelevantTaskAgents(item).Contains(agentType.ToString());
-        if (item.ItemType is WorkItemType.Epic or WorkItemType.UserStory && s_epicAgents.Contains(agentType))
-            return true;
+        if (item.ItemType == WorkItemType.Bug)
+            return agentType == AgentType.BugFix;
+        if (item.ItemType is WorkItemType.Epic or WorkItemType.UserStory)
+            return false;
         if (item.ItemType == WorkItemType.UseCase && s_agentTags.ContainsKey(agentType))
             return true;
         return false;
     }
 
+    private static bool IsActionableWorkItem(ExpandedRequirement item) =>
+        item.ItemType is WorkItemType.Task or WorkItemType.Bug or WorkItemType.UseCase;
+
+    private static bool IsActionableBacklogCompleted(AgentContext context)
+    {
+        var actionable = context.ExpandedRequirements.Where(IsActionableWorkItem).ToList();
+        if (actionable.Count == 0)
+            return false;
+
+        return actionable.All(i => i.Status == WorkItemStatus.Completed);
+    }
+
+    private static void RollupParentItems(IList<ExpandedRequirement> allItems)
+    {
+        var byParent = allItems
+            .Where(c => !string.IsNullOrWhiteSpace(c.ParentId))
+            .GroupBy(c => c.ParentId, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.ToList(), StringComparer.OrdinalIgnoreCase);
+
+        foreach (var parent in allItems.Where(e => e.ItemType is WorkItemType.Epic or WorkItemType.UserStory))
+        {
+            if (!byParent.TryGetValue(parent.Id, out var children) || children.Count == 0)
+                continue;
+
+            if (children.All(c => c.Status == WorkItemStatus.Completed))
+            {
+                parent.Status = WorkItemStatus.Completed;
+                parent.CompletedAt ??= DateTimeOffset.UtcNow;
+                parent.AssignedAgent = string.Empty;
+                continue;
+            }
+
+            parent.Status = WorkItemStatus.InProgress;
+            parent.CompletedAt = null;
+            parent.AssignedAgent = string.Empty;
+        }
+    }
+
+    /// <summary>
+    /// Determine which agents are responsible for a task by analyzing:
+    ///   1. Explicit tags on the item
+    ///   2. Title, Description, TechnicalNotes, DetailedSpec, Module text
+    ///   3. Definition of Done checklist items (e.g. "unit tests written" → Testing)
+    ///   4. Acceptance Criteria text
+    ///   5. AffectedServices list
+    /// Returns the sorted list of agent names relevant to this item.
+    /// </summary>
     private static List<string> GetRelevantTaskAgents(ExpandedRequirement item)
     {
         var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        // ── 1. Explicit tags ──
         foreach (var tag in item.Tags)
         {
             if (s_tagToAgent.TryGetValue(tag, out var mapped))
                 result.Add(mapped.ToString());
         }
 
-        // Fallback from title text when tags are weak/missing
-        var title = item.Title ?? string.Empty;
-        if (result.Count == 0)
+        // ── 2. Combined text from task description + technical notes ──
+        var text = string.Join(' ',
+            new[]
+            {
+                item.Title,
+                item.Description,
+                item.TechnicalNotes,
+                item.DetailedSpec,
+                item.Module
+            }.Where(s => !string.IsNullOrWhiteSpace(s)))
+            .ToLowerInvariant();
+
+        MapTextToAgents(text, result);
+
+        // ── 3. Definition of Done items — each DOD entry can imply an agent ──
+        foreach (var dod in item.DefinitionOfDone)
         {
-            if (title.Contains("database", StringComparison.OrdinalIgnoreCase) || title.Contains("migration", StringComparison.OrdinalIgnoreCase))
-                result.Add(AgentType.Database.ToString());
-            else if (title.Contains("test", StringComparison.OrdinalIgnoreCase))
-                result.Add(AgentType.Testing.ToString());
-            else if (title.Contains("integration", StringComparison.OrdinalIgnoreCase))
-                result.Add(AgentType.Integration.ToString());
-            else
-                result.Add(AgentType.ServiceLayer.ToString());
+            MapTextToAgents(dod.ToLowerInvariant(), result);
         }
 
+        // ── 4. Acceptance Criteria text ──
+        foreach (var ac in item.AcceptanceCriteria)
+        {
+            MapTextToAgents(ac.ToLowerInvariant(), result);
+        }
+
+        // ── 5. AffectedServices — if services are listed, code-gen agents are needed ──
+        if (item.AffectedServices.Count > 0)
+        {
+            result.Add(AgentType.Database.ToString());
+            result.Add(AgentType.ServiceLayer.ToString());
+            result.Add(AgentType.Application.ToString());
+        }
+
+        if (item.ItemType == WorkItemType.Bug)
+            result.Add(AgentType.BugFix.ToString());
+
+        // ── Fallback: parse title alone when no agents matched yet ──
+        if (result.Count == 0)
+        {
+            var title = (item.Title ?? string.Empty).ToLowerInvariant();
+            MapTextToAgents(title, result);
+        }
+
+        // ── Ultimate fallback ──
+        if (result.Count == 0)
+            result.Add(AgentType.ServiceLayer.ToString());
+
         return result.OrderBy(x => x).ToList();
+    }
+
+    /// <summary>
+    /// Keyword-to-agent mapping rules applied to any text corpus (title, description, DOD, AC).
+    /// </summary>
+    private static void MapTextToAgents(string text, HashSet<string> agents)
+    {
+        // Database layer
+        if (text.Contains("database") || text.Contains("schema") || text.Contains("migration") ||
+            text.Contains("sql") || text.Contains("dbcontext") || text.Contains("entity") ||
+            text.Contains("table") || text.Contains("column") || text.Contains("index") ||
+            text.Contains("rls") || text.Contains("row-level security") || text.Contains("db "))
+            agents.Add(AgentType.Database.ToString());
+
+        // Service layer
+        if (text.Contains("service") || text.Contains("validation") || text.Contains("business logic") ||
+            text.Contains("workflow") || text.Contains("dto") || text.Contains("repository") ||
+            text.Contains("crud") || text.Contains("domain logic"))
+            agents.Add(AgentType.ServiceLayer.ToString());
+
+        // Application / API layer
+        if (text.Contains("api") || text.Contains("endpoint") || text.Contains("controller") ||
+            text.Contains("route") || text.Contains("gateway") || text.Contains("minimal api") ||
+            text.Contains("rest") || text.Contains("http") || text.Contains("swagger"))
+            agents.Add(AgentType.Application.ToString());
+
+        // Integration
+        if (text.Contains("integration") || text.Contains("hl7") || text.Contains("fhir") ||
+            text.Contains("kafka") || text.Contains("message") || text.Contains("event bus") ||
+            text.Contains("outbox") || text.Contains("dead letter") || text.Contains("interop"))
+            agents.Add(AgentType.Integration.ToString());
+
+        // Testing
+        if (text.Contains("test") || text.Contains("unit test") || text.Contains("assert") ||
+            text.Contains("xunit") || text.Contains("moq") || text.Contains("coverage") ||
+            text.Contains("test case") || text.Contains("verified by test"))
+            agents.Add(AgentType.Testing.ToString());
+
+        // Security
+        if (text.Contains("security") || text.Contains("authentication") || text.Contains("authorization") ||
+            text.Contains("rbac") || text.Contains("jwt") || text.Contains("token") ||
+            text.Contains("encrypt") || text.Contains("audit trail"))
+            agents.Add(AgentType.Security.ToString());
+
+        // Access control
+        if (text.Contains("access control") || text.Contains("permission") || text.Contains("role-based") ||
+            text.Contains("tenant isolation") || text.Contains("multi-tenant"))
+            agents.Add(AgentType.AccessControl.ToString());
+
+        // Compliance
+        if (text.Contains("hipaa") || text.Contains("phi") || text.Contains("protected health"))
+            agents.Add(AgentType.HipaaCompliance.ToString());
+        if (text.Contains("soc2") || text.Contains("soc 2") || text.Contains("compliance"))
+            agents.Add(AgentType.Soc2Compliance.ToString());
+
+        // Observability
+        if (text.Contains("observability") || text.Contains("logging") || text.Contains("tracing") ||
+            text.Contains("metrics") || text.Contains("health check") || text.Contains("telemetry") ||
+            text.Contains("opentelemetry") || text.Contains("prometheus") || text.Contains("grafana"))
+            agents.Add(AgentType.Observability.ToString());
+
+        // Performance
+        if (text.Contains("performance") || text.Contains("benchmark") || text.Contains("latency") ||
+            text.Contains("throughput") || text.Contains("cache") || text.Contains("optimize"))
+            agents.Add(AgentType.Performance.ToString());
+
+        // Infrastructure / deployment
+        if (text.Contains("infrastructure") || text.Contains("docker") || text.Contains("kubernetes") ||
+            text.Contains("terraform") || text.Contains("helm") || text.Contains("k8s"))
+            agents.Add(AgentType.Infrastructure.ToString());
+        if (text.Contains("deploy") || text.Contains("ci/cd") || text.Contains("pipeline") ||
+            text.Contains("github action"))
+            agents.Add(AgentType.Deploy.ToString());
+
+        // Documentation
+        if (text.Contains("documentation") || text.Contains("swagger") || text.Contains("openapi") ||
+            text.Contains("readme") || text.Contains("api doc"))
+            agents.Add(AgentType.ApiDocumentation.ToString());
+
+        // UI/UX
+        if (text.Contains("ui") || text.Contains("ux") || text.Contains("frontend") ||
+            text.Contains("blazor") || text.Contains("razor") || text.Contains("component") ||
+            text.Contains("page") || text.Contains("layout") || text.Contains("dashboard"))
+            agents.Add(AgentType.UiUx.ToString());
+
+        // Configuration
+        if (text.Contains("configuration") || text.Contains("appsettings") || text.Contains("environment variable") ||
+            text.Contains("config"))
+            agents.Add(AgentType.Configuration.ToString());
+
+        // Migration
+        if (text.Contains("data migration") || text.Contains("migrate"))
+            agents.Add(AgentType.Migration.ToString());
+
+        // Code quality
+        if (text.Contains("code quality") || text.Contains("lint") || text.Contains("analyzer") ||
+            text.Contains("refactor") || text.Contains("code review"))
+            agents.Add(AgentType.CodeQuality.ToString());
+    }
+
+    private void ApplyAdaptiveWipLimits(AgentContext context)
+    {
+        var baseQueue = context.PipelineConfig?.MaxQueueItems > 0 ? context.PipelineConfig.MaxQueueItems : 10;
+        var baseInDev = context.PipelineConfig?.MaxInDevItems > 0 ? context.PipelineConfig.MaxInDevItems : 10;
+
+        if (context.ExpandedRequirements.Count == 0)
+        {
+            _lifecycle.MaxQueueItems = baseQueue;
+            _lifecycle.MaxInDevItems = baseInDev;
+            return;
+        }
+
+        var total = context.ExpandedRequirements.Count;
+        var blocked = context.ExpandedRequirements.Count(e => e.Status == WorkItemStatus.Blocked);
+        var ready = context.ExpandedRequirements.Count(e => e.Status is WorkItemStatus.New or WorkItemStatus.InQueue);
+
+        var blockedRatio = (double)blocked / total;
+        var queueCap = baseQueue;
+        var inDevCap = baseInDev;
+
+        if (blockedRatio >= 0.75)
+        {
+            queueCap = Math.Min(MaxAdaptiveWipCap, baseQueue + 10);
+            inDevCap = Math.Min(MaxAdaptiveWipCap, baseInDev + 10);
+        }
+        else if (blockedRatio >= 0.55)
+        {
+            queueCap = Math.Min(MaxAdaptiveWipCap, baseQueue + 5);
+            inDevCap = Math.Min(MaxAdaptiveWipCap, baseInDev + 5);
+        }
+
+        // Avoid inflating WIP when there is no backlog pressure.
+        if (ready <= baseInDev)
+        {
+            queueCap = baseQueue;
+            inDevCap = baseInDev;
+        }
+
+        if (_lifecycle.MaxQueueItems != queueCap || _lifecycle.MaxInDevItems != inDevCap)
+        {
+            _logger.LogInformation(
+                "[Daemon] Adaptive WIP updated: queue {PrevQueue}->{QueueCap}, inDev {PrevDev}->{InDevCap} (blocked={Blocked}/{Total}, ratio={Ratio:P0}, ready={Ready})",
+                _lifecycle.MaxQueueItems,
+                queueCap,
+                _lifecycle.MaxInDevItems,
+                inDevCap,
+                blocked,
+                total,
+                blockedRatio,
+                ready);
+        }
+
+        _lifecycle.MaxQueueItems = queueCap;
+        _lifecycle.MaxInDevItems = inDevCap;
     }
 
 }

@@ -21,6 +21,10 @@ public sealed class PipelineConfig
     public bool SpinUpDocker { get; init; } = true;
     public bool ExecuteDdl { get; set; } = true;
 
+    // WIP limits — cap the number of items in Queue (Received) and InDev (InProgress) globally
+    public int MaxQueueItems { get; init; } = 10;
+    public int MaxInDevItems { get; init; } = 10;
+
     // Orchestrator instructions — user-provided directives to guide the pipeline
     public string OrchestratorInstructions { get; init; } = string.Empty;
 

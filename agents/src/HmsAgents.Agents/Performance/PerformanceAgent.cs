@@ -89,6 +89,10 @@ public sealed class PerformanceAgent : IAgent
             _logger.LogInformation("PerformanceAgent done — {Optimized} optimizations applied, {Findings} advisory findings",
                 optimizedCount, findings.Count);
 
+            // Agent completes its own claimed work items
+            foreach (var item in context.CurrentClaimedItems)
+                context.CompleteWorkItem?.Invoke(item);
+
             return new AgentResult
             {
                 Agent = Type, Success = true,

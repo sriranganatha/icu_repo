@@ -34,4 +34,41 @@ public sealed class AgentContext
     public bool DdlApprovedForRun { get; set; }
     /// <summary>Structured implementation plan created by PlanningAgent — guides downstream code-gen agents.</summary>
     public ImplementationPlan? ImplementationPlan { get; set; }
+
+    // ── Agent-owned lifecycle ─────────────────────────────────
+    // The orchestrator claims & starts items, then sets these before calling ExecuteAsync.
+    // Agents call CompleteWorkItem / FailWorkItem for each item they process.
+
+    /// <summary>Work items claimed for the current agent execution. Set by the orchestrator before calling ExecuteAsync.</summary>
+    public List<ExpandedRequirement> CurrentClaimedItems { get; set; } = [];
+
+    /// <summary>Marks a single work item as completed. Agents call this after successfully generating artifacts for an item.</summary>
+    public Action<ExpandedRequirement>? CompleteWorkItem { get; set; }
+
+    /// <summary>Marks a single work item as failed with a reason. Agents call this when they cannot process an item.</summary>
+    public Action<ExpandedRequirement, string>? FailWorkItem { get; set; }
+
+    // ── Requirement version history ──
+    public ConcurrentBag<RequirementVersion> RequirementVersions { get; set; } = [];
+
+    // ── BRD documents ──
+    public ConcurrentBag<BrdDocument> BrdDocuments { get; set; } = [];
+
+    // ── Pipeline checkpoints for replay/resume ──
+    public ConcurrentBag<PipelineCheckpoint> Checkpoints { get; set; } = [];
+
+    // ── Artifact conflicts ──
+    public ConcurrentBag<ArtifactConflict> ArtifactConflicts { get; set; } = [];
+
+    // ── Agent escalation policies ──
+    public List<AgentEscalationPolicy> EscalationPolicies { get; set; } = [];
+
+    // ── Release evidence ──
+    public ReleaseEvidence? ReleaseEvidence { get; set; }
+
+    // ── Sprint plans ──
+    public List<SprintPlan> SprintPlans { get; set; } = [];
+
+    // ── Learning records ──
+    public ConcurrentBag<AgentLearningRecord> LearningRecords { get; set; } = [];
 }

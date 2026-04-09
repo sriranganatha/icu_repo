@@ -1,6 +1,7 @@
 using HmsAgents.Agents.AccessControl;
 using HmsAgents.Agents.Architecture;
 using HmsAgents.Agents.Backlog;
+using HmsAgents.Agents.Brd;
 using HmsAgents.Agents.Build;
 using HmsAgents.Agents.BugFix;
 using HmsAgents.Agents.CodeQuality;
@@ -11,6 +12,7 @@ using HmsAgents.Agents.ContextBrokering;
 using HmsAgents.Agents.Database;
 using HmsAgents.Agents.DependencyAudit;
 using HmsAgents.Agents.Deploy;
+using HmsAgents.Agents.DodVerification;
 using HmsAgents.Agents.Documentation;
 using HmsAgents.Agents.GapAnalysis;
 using HmsAgents.Agents.Infrastructure;
@@ -113,6 +115,16 @@ builder.Services.AddSingleton<IAgent, RefactoringAgent>();
 builder.Services.AddSingleton<IAgent, ConfigurationAgent>();
 builder.Services.AddSingleton<IAgent, UiUxAgent>();
 builder.Services.AddSingleton<IAgent, LoadTestAgent>();
+
+// DOD verification (quality gate for completed items)
+builder.Services.AddSingleton<IAgent, DodVerificationAgent>();
+
+// BRD, conflict resolution, traceability, sprint planning, learning loop
+builder.Services.AddSingleton<IAgent, BrdGeneratorAgent>();
+builder.Services.AddSingleton<IAgent, ConflictResolverAgent>();
+builder.Services.AddSingleton<IAgent, TraceabilityGateAgent>();
+builder.Services.AddSingleton<IAgent, SprintPlannerAgent>();
+builder.Services.AddSingleton<IAgent, LearningLoopAgent>();
 
 builder.Services.AddSingleton<IAgentOrchestrator, AgentOrchestrator>();
 

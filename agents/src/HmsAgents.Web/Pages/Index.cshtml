@@ -86,6 +86,25 @@
                         </div>
                     </div>
                 </div>
+                <!-- WIP Limits -->
+                <hr class="my-3" />
+                <div class="d-flex align-items-center mb-2">
+                    <i class="bi bi-kanban me-2 text-warning"></i>
+                    <span class="fw-semibold">WIP Limits</span>
+                    <small class="text-muted ms-2">Cap the number of items in Queue and In-Dev to avoid overload</small>
+                </div>
+                <div class="row g-2">
+                    <div class="col-md-3 col-6">
+                        <label class="form-label fw-semibold">Max Queue Items</label>
+                        <input type="number" id="inputMaxQueue" class="form-control" value="10" min="1" max="200" />
+                        <small class="text-muted">Items in Received state</small>
+                    </div>
+                    <div class="col-md-3 col-6">
+                        <label class="form-label fw-semibold">Max In-Dev Items</label>
+                        <input type="number" id="inputMaxInDev" class="form-control" value="10" min="1" max="200" />
+                        <small class="text-muted">Items in InProgress state</small>
+                    </div>
+                </div>
                 <!-- Service Port Mapping -->
                 <hr class="my-3" />
                 <div class="d-flex align-items-center mb-2">
@@ -341,11 +360,11 @@
         <div class="card-header bg-secondary bg-opacity-10 d-flex justify-content-between align-items-center flex-wrap gap-2">
             <span><i class="bi bi-kanban text-secondary me-2"></i><strong>Backlog Tracker</strong> <small class="text-muted ms-2">SDLC work items — managed by BacklogAgent</small></span>
             <div class="d-flex align-items-center gap-1 flex-wrap">
-                <span class="badge bg-primary me-1" id="blStatNew">0 New</span>
-                <span class="badge bg-info me-1" id="blStatQueued">0 Queued</span>
-                <span class="badge bg-warning text-dark me-1" id="blStatDev">0 In Dev</span>
-                <span class="badge bg-success me-1" id="blStatDone">0 Done</span>
-                <span class="badge bg-danger me-1" id="blStatBlocked">0 Blocked</span>
+                <button class="badge bg-primary border-0 me-1" id="blStatNew" onclick="setBacklogStatusQuickView('New')" title="Show New items">0 New</button>
+                <button class="badge bg-info border-0 me-1" id="blStatQueued" onclick="setBacklogStatusQuickView('InQueue')" title="Show Queued items">0 Queued</button>
+                <button class="badge bg-warning text-dark border-0 me-1" id="blStatDev" onclick="setBacklogStatusQuickView('InProgress')" title="Show In Dev items">0 In Dev</button>
+                <button class="badge bg-success border-0 me-1" id="blStatDone" onclick="setBacklogStatusQuickView('Completed')" title="Show Done items">0 Done</button>
+                <button class="badge bg-danger border-0 me-1" id="blStatBlocked" onclick="setBacklogStatusQuickView('Blocked')" title="Show Blocked items">0 Blocked</button>
                 <button class="btn btn-outline-secondary btn-sm ms-2" onclick="refreshBacklog()" title="Refresh backlog">
                     <i class="bi bi-arrow-clockwise"></i>
                 </button>
@@ -372,7 +391,8 @@
                             <option value="">All Statuses</option>
                             <option value="New">New</option>
                             <option value="InQueue">InQueue</option>
-                            <option value="UnderDev">UnderDev</option>
+                            <option value="Received">Received</option>
+                            <option value="InProgress">InProgress</option>
                             <option value="Completed">Completed</option>
                             <option value="Blocked">Blocked</option>
                         </select>
@@ -399,6 +419,14 @@
                         </select>
                         <button class="btn btn-outline-secondary btn-sm" onclick="clearBacklogFilters()" title="Clear all filters"><i class="bi bi-x-circle"></i></button>
                         <span class="text-muted small ms-auto" id="blFilterCount"></span>
+                    </div>
+                    <div class="d-flex gap-2 flex-wrap align-items-center mt-2">
+                        <small class="text-muted">Quick views:</small>
+                        <button class="btn btn-outline-info btn-sm" onclick="setBacklogStatusQuickView('InQueue')">Queue</button>
+                        <button class="btn btn-outline-warning btn-sm" onclick="setBacklogStatusQuickView('InProgress')">In Dev</button>
+                        <button class="btn btn-outline-success btn-sm" onclick="setBacklogStatusQuickView('Completed')">Done</button>
+                        <button class="btn btn-outline-danger btn-sm" onclick="setBacklogStatusQuickView('Blocked')">Blocked</button>
+                        <button class="btn btn-outline-secondary btn-sm" onclick="setBacklogStatusQuickView('')">All</button>
                     </div>
                 </div>
 
@@ -564,6 +592,41 @@
             @await Html.PartialAsync("_AgentCard", new HmsAgents.Web.Pages.AgentCardModel { Name = "API Documentation", Icon = "bi-journal-code", AgentKey = "ApiDocumentation", Description = "OpenAPI specs, Swagger, endpoint docs" })
         </div>
     </div>
+    <!-- Agent Cards: Quality & Build Agents -->
+    <h5 class="mb-2"><i class="bi bi-tools text-secondary me-1"></i> Quality &amp; Build Agents</h5>
+    <div class="row mb-3 g-3">
+        <div class="col-md-4 col-lg-3" id="card-DependencyAudit">
+            @await Html.PartialAsync("_AgentCard", new HmsAgents.Web.Pages.AgentCardModel { Name = "Dependency Audit", Icon = "bi-shield-exclamation", AgentKey = "DependencyAudit", Description = "Scans package vulnerabilities, licensing, and version drift" })
+        </div>
+        <div class="col-md-4 col-lg-3" id="card-CodeQuality">
+            @await Html.PartialAsync("_AgentCard", new HmsAgents.Web.Pages.AgentCardModel { Name = "Code Quality", Icon = "bi-stars", AgentKey = "CodeQuality", Description = "Checks maintainability, duplication, and coding standards" })
+        </div>
+        <div class="col-md-4 col-lg-3" id="card-Refactoring">
+            @await Html.PartialAsync("_AgentCard", new HmsAgents.Web.Pages.AgentCardModel { Name = "Refactoring", Icon = "bi-bezier2", AgentKey = "Refactoring", Description = "Applies safe structural improvements from review findings" })
+        </div>
+        <div class="col-md-4 col-lg-3" id="card-Configuration">
+            @await Html.PartialAsync("_AgentCard", new HmsAgents.Web.Pages.AgentCardModel { Name = "Configuration", Icon = "bi-sliders", AgentKey = "Configuration", Description = "Generates environment settings, flags, and config baselines" })
+        </div>
+        <div class="col-md-4 col-lg-3" id="card-UiUx">
+            @await Html.PartialAsync("_AgentCard", new HmsAgents.Web.Pages.AgentCardModel { Name = "UI/UX", Icon = "bi-palette", AgentKey = "UiUx", Description = "Builds accessible, reusable UI patterns and components" })
+        </div>
+        <div class="col-md-4 col-lg-3" id="card-Migration">
+            @await Html.PartialAsync("_AgentCard", new HmsAgents.Web.Pages.AgentCardModel { Name = "Migration", Icon = "bi-arrow-left-right", AgentKey = "Migration", Description = "Creates migration scripts, rollbacks, and seed updates" })
+        </div>
+        <div class="col-md-4 col-lg-3" id="card-Build">
+            @await Html.PartialAsync("_AgentCard", new HmsAgents.Web.Pages.AgentCardModel { Name = "Build", Icon = "bi-hammer", AgentKey = "Build", Description = "Compiles solution and reports build diagnostics" })
+        </div>
+    </div>
+    <!-- Agent Cards: Reasoning Agents -->
+    <h5 class="mb-2"><i class="bi bi-lightbulb text-warning me-1"></i> Reasoning Agents</h5>
+    <div class="row mb-3 g-3">
+        <div class="col-md-4 col-lg-3" id="card-Planning">
+            @await Html.PartialAsync("_AgentCard", new HmsAgents.Web.Pages.AgentCardModel { Name = "Planning", Icon = "bi-map", AgentKey = "Planning", Description = "Produces execution plans and delivery sequencing" })
+        </div>
+        <div class="col-md-4 col-lg-3" id="card-CodeReasoning">
+            @await Html.PartialAsync("_AgentCard", new HmsAgents.Web.Pages.AgentCardModel { Name = "Code Reasoning", Icon = "bi-cpu", AgentKey = "CodeReasoning", Description = "Cross-service reasoning over generated code and constraints" })
+        </div>
+    </div>
     <!-- Agent Cards: Gap Analysis -->
     <h5 class="mb-2"><i class="bi bi-clipboard-data text-info me-1"></i> Gap Analysis</h5>
     <div class="row mb-3 g-3">
@@ -576,6 +639,12 @@
     <div class="row mb-4 g-3">
         <div class="col-md-4 col-lg-3" id="card-Deploy">
             @await Html.PartialAsync("_AgentCard", new HmsAgents.Web.Pages.AgentCardModel { Name = "Deploy Agent", Icon = "bi-rocket-takeoff", AgentKey = "Deploy", Description = "Builds, publishes & deploys the generated HMS solution" })
+        </div>
+        <div class="col-md-4 col-lg-3" id="card-Monitor">
+            @await Html.PartialAsync("_AgentCard", new HmsAgents.Web.Pages.AgentCardModel { Name = "Monitor Agent", Icon = "bi-activity", AgentKey = "Monitor", Description = "Validates runtime health and service readiness" })
+        </div>
+        <div class="col-md-4 col-lg-3" id="card-LoadTest">
+            @await Html.PartialAsync("_AgentCard", new HmsAgents.Web.Pages.AgentCardModel { Name = "Load Test", Icon = "bi-graph-up", AgentKey = "LoadTest", Description = "Generates and runs load/performance test scenarios" })
         </div>
         <div class="col-md-8 col-lg-9">
             <div class="card border-primary">
@@ -896,28 +965,28 @@
             "Review","Testing","Supervisor","BugFix","Performance","Security","HipaaCompliance","Soc2Compliance",
             "AccessControl","Observability","Infrastructure","ApiDocumentation","RequirementsExpander","Backlog","Deploy",
             "RequirementAnalyzer","Build","Monitor","Migration","CodeQuality","DependencyAudit","Refactoring",
-            "Configuration","UiUx","LoadTest","GapAnalysis"
+            "Configuration","UiUx","LoadTest","GapAnalysis","Planning","CodeReasoning"
         ];
         const ALL_AGENT_LABELS = [
             "Orchestrator","Reqs Reader","Architect","Platform Builder","Database","Service","Application","Integration",
             "Review","Testing","Supervisor","BugFix","Performance","Security","HIPAA","SOC2",
             "AccessCtrl","Observability","Infra","API Docs","Reqs Expander","Backlog","Deploy",
             "Req Analyzer","Build","Monitor","Migration","Code Quality","Dependency Audit","Refactoring",
-            "Configuration","UI/UX","Load Test","Gap Analysis"
+            "Configuration","UI/UX","Load Test","Gap Analysis","Planning","Code Reasoning"
         ];
         const ALL_AGENT_ICONS = [
             "bi-diagram-3","bi-file-earmark-text","bi-diagram-3-fill","bi-hdd-stack","bi-database","bi-layers","bi-window-stack","bi-plug",
             "bi-shield-check","bi-check2-circle","bi-eye","bi-bug","bi-speedometer2","bi-shield-lock","bi-heart-pulse","bi-file-earmark-lock",
             "bi-key","bi-binoculars","bi-cloud-arrow-up","bi-journal-code","bi-diagram-2","bi-kanban","bi-rocket-takeoff",
             "bi-search","bi-hammer","bi-activity","bi-arrow-left-right","bi-stars","bi-shield-exclamation","bi-bezier2",
-            "bi-sliders","bi-palette","bi-graph-up","bi-clipboard-data"
+            "bi-sliders","bi-palette","bi-graph-up","bi-clipboard-data","bi-map","bi-cpu"
         ];
         const ALL_AGENT_COLORS = [
             "#78909c","#42a5f5","#1e88e5","#3949ab","#66bb6a","#ffa726","#ef5350","#ab47bc",
             "#26c6da","#8d6e63","#e91e63","#ff7043","#29b6f6","#ec407a","#66bb6a","#5c6bc0",
             "#ffca28","#26a69a","#7e57c2","#8d6e63","#7cb342","#9575cd","#1e88e5",
             "#00897b","#6d4c41","#00acc1","#546e7a","#8e24aa","#c62828","#5d4037",
-            "#3949ab","#ff8f00","#2e7d32","#00838f"
+            "#3949ab","#ff8f00","#2e7d32","#00838f","#f9a825","#455a64"
         ];
         // Keep backward compat aliases
         const AGENTS = ALL_AGENTS;
@@ -1493,6 +1562,7 @@
             'inputReqsPath', 'inputOutputPath', 'inputNamespace',
             'inputContainerName', 'inputDbHost', 'inputDbPort', 'inputDbUser',
             'inputDbName', 'inputDbPassword',
+            'inputMaxQueue', 'inputMaxInDev',
             'portPatient', 'portEncounter', 'portInpatient', 'portEmergency',
             'portDiagnostics', 'portRevenue', 'portAudit', 'portAi',
             'portGateway', 'portKafka'
@@ -1682,6 +1752,12 @@
                                         Also delete generated code (Hms.* folders in Output Path)
                                     </label>
                                 </div>
+                                <div class="form-check mb-2">
+                                    <input class="form-check-input" type="checkbox" id="resetDeleteDb">
+                                    <label class="form-check-label" for="resetDeleteDb">
+                                        Also drop PostgreSQL database schemas (cl_mpi, cl_encounter, etc.)
+                                    </label>
+                                </div>
                                 <p class="text-muted small mb-0">The requirements source files will NOT be deleted.</p>
                             </div>
                             <div class="modal-footer py-2">
@@ -1694,8 +1770,9 @@
                 const bsModal = new bootstrap.Modal(modal);
                 modal.querySelector('#resetConfirmBtn').onclick = () => {
                     const del = modal.querySelector('#resetDeleteCode').checked;
+                    const delDb = modal.querySelector('#resetDeleteDb').checked;
                     bsModal.hide();
-                    resolve(del);
+                    resolve({ del, delDb });
                 };
                 modal.addEventListener('hidden.bs.modal', () => { modal.remove(); resolve(null); });
                 bsModal.show();
@@ -1708,7 +1785,7 @@
                 const res = await fetch('/api/pipeline/reset', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ deleteGeneratedCode: deleteCode, outputPath })
+                    body: JSON.stringify({ deleteGeneratedCode: deleteCode.del, deleteDatabase: deleteCode.delDb, outputPath })
                 });
                 const data = await res.json();
                 if (data.success) {
@@ -1721,7 +1798,7 @@
                     applyBacklogFilters();
                     document.getElementById('btnRunPipeline').disabled = false;
                     document.getElementById('btnStopPipeline').disabled = true;
-                    appendLog('info', `Project reset complete.${data.outputDeleted ? ' Generated code deleted.' : ''} Ready to start fresh.`);
+                    appendLog('info', `Project reset complete.${data.outputDeleted ? ' Generated code deleted.' : ''}${data.databaseDeleted ? ' Database schemas dropped.' : ''} Ready to start fresh.`);
                 } else {
                     appendLog('error', 'Reset failed: ' + (data.error || 'unknown'));
                 }
@@ -1759,6 +1836,8 @@
                 dbPassword: document.getElementById('inputDbPassword').value || 'hms_dev_pw',
                 spinUpDocker: document.getElementById('chkSpinDocker').checked,
                 executeDdl: document.getElementById('chkExecDdl').checked,
+                maxQueueItems: parseInt(document.getElementById('inputMaxQueue').value) || 10,
+                maxInDevItems: parseInt(document.getElementById('inputMaxInDev').value) || 10,
                 orchestratorInstructions: document.getElementById('inputInstructions').value.trim(),
                 servicePorts: {
                     patient: parseInt(document.getElementById('portPatient').value) || 5101,
@@ -2015,10 +2094,22 @@
         let _blPage = 1;
         let _blPageSize = 25;
 
-        const blStatusColors = { 'New': 'primary', 'InQueue': 'info', 'UnderDev': 'warning', 'Completed': 'success', 'Blocked': 'danger' };
+        const blStatusColors = {
+            'New': 'primary',
+            'InQueue': 'info',
+            'Received': 'secondary',
+            'InProgress': 'warning',
+            'Completed': 'success',
+            'Blocked': 'danger'
+        };
         const blTypeIcons = { 'Epic': 'bi-layers', 'UserStory': 'bi-person', 'UseCase': 'bi-lightning', 'Task': 'bi-check-square', 'Bug': 'bi-bug-fill' };
         const blPriorityLabels = { 0: 'P0 Critical', 1: 'P1 High', 2: 'P2 Medium', 3: 'P3 Low' };
         const blPriorityBadge = { 0: 'danger', 1: 'warning text-dark', 2: 'info', 3: 'secondary' };
+
+        function normalizeBacklogStatus(status) {
+            if (status === 'UnderDev') return 'InProgress';
+            return status;
+        }
 
         async function refreshBacklog() {
             try {
@@ -2029,20 +2120,25 @@
                 const s = data.stats;
                 const total = data.totalItems || 1;
                 document.getElementById('blStatNew').textContent = (s.newCount || 0) + ' New';
-                document.getElementById('blStatQueued').textContent = (s.inQueue || 0) + ' Queued';
-                document.getElementById('blStatDev').textContent = (s.underDev || 0) + ' In Dev';
+                const queueCount = s.readyBacklog ?? s.inQueue ?? 0;
+                const devCount = s.inDev ?? s.underDev ?? 0;
+
+                document.getElementById('blStatQueued').textContent = queueCount + ' Queued';
+                document.getElementById('blStatDev').textContent = devCount + ' In Dev';
                 document.getElementById('blStatDone').textContent = (s.completed || 0) + ' Done';
                 document.getElementById('blStatBlocked').textContent = (s.blocked || 0) + ' Blocked';
 
                 // Progress bar
                 document.getElementById('blBarNew').style.width = ((s.newCount || 0) / total * 100) + '%';
-                document.getElementById('blBarQueued').style.width = ((s.inQueue || 0) / total * 100) + '%';
-                document.getElementById('blBarDev').style.width = ((s.underDev || 0) / total * 100) + '%';
+                document.getElementById('blBarQueued').style.width = (queueCount / total * 100) + '%';
+                document.getElementById('blBarDev').style.width = (devCount / total * 100) + '%';
                 document.getElementById('blBarDone').style.width = ((s.completed || 0) / total * 100) + '%';
                 document.getElementById('blBarBlocked').style.width = ((s.blocked || 0) / total * 100) + '%';
 
                 // Store items and populate filters
-                _backlogItems = Array.isArray(data.items) ? data.items : [];
+                _backlogItems = Array.isArray(data.items)
+                    ? data.items.map(i => ({ ...i, status: normalizeBacklogStatus(i.status) }))
+                    : [];
                 populateBacklogFilterDropdowns();
                 applyBacklogFilters();
             } catch (e) {
@@ -2138,7 +2234,7 @@
                     <td><small>${item.module || '—'}</small></td>
                     <td>
                         <select class="form-select form-select-sm border-0 p-0" style="font-size:.75rem;background-color:transparent" onchange="updateBacklogField('${item.id}','status',this.value)">
-                            ${['New','InQueue','UnderDev','Completed','Blocked'].map(s => `<option value="${s}" ${item.status === s ? 'selected' : ''} class="bg-white">${s}</option>`).join('')}
+                            ${['New','InQueue','Received','InProgress','Completed','Blocked'].map(s => `<option value="${s}" ${item.status === s ? 'selected' : ''} class="bg-white">${s}</option>`).join('')}
                         </select>
                     </td>
                     <td><small class="text-muted">${item.assignedAgent || '—'}</small></td>
@@ -2164,6 +2260,12 @@
         function sortBacklog(field) {
             if (_backlogSortField === field) { _backlogSortAsc = !_backlogSortAsc; }
             else { _backlogSortField = field; _backlogSortAsc = true; }
+            _blPage = 1;
+            applyBacklogFilters();
+        }
+
+        function setBacklogStatusQuickView(status) {
+            document.getElementById('blFilterStatus').value = status || '';
             _blPage = 1;
             applyBacklogFilters();
         }

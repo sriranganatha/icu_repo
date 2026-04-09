@@ -42,6 +42,8 @@ public sealed class PlanningAgent : IAgent
         var sw = Stopwatch.StartNew();
         context.AgentStatuses[Type] = AgentStatus.Running;
 
+        try
+        {
         var plan = new ImplementationPlan { RunId = context.RunId, Iteration = context.DevIteration };
 
         context.ReportProgress?.Invoke(Type,
@@ -158,6 +160,19 @@ public sealed class PlanningAgent : IAgent
             sw.ElapsedMilliseconds, affectedServices.Count, plan.ExecutionOrder.Count);
 
         return result;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "PlanningAgent failed — {ExType}: {Message}", ex.GetType().Name, ex.Message);
+            context.AgentStatuses[Type] = AgentStatus.Failed;
+            return new AgentResult
+            {
+                Agent = Type, Success = false,
+                Errors = [ex.ToString()],
+                Summary = $"PlanningAgent failed: {ex.GetType().Name}: {ex.Message}",
+                Duration = sw.Elapsed
+            };
+        }
     }
 
     // ─── Identify which services are affected by the current requirements ───

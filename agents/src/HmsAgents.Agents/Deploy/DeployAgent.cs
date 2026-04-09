@@ -280,6 +280,10 @@ public sealed class DeployAgent : IAgent
 
             context.AgentStatuses[Type] = AgentStatus.Completed;
 
+            // Agent completes its own claimed work items
+            foreach (var item in context.CurrentClaimedItems)
+                context.CompleteWorkItem?.Invoke(item);
+
             return new AgentResult
             {
                 Agent = Type,

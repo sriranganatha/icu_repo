@@ -64,6 +64,10 @@ public sealed class SecurityAgent : IAgent
             context.Findings.AddRange(findings);
             context.AgentStatuses[Type] = AgentStatus.Completed;
 
+            // Agent completes its own claimed work items
+            foreach (var item in context.CurrentClaimedItems)
+                context.CompleteWorkItem?.Invoke(item);
+
             await Task.CompletedTask;
             return new AgentResult
             {

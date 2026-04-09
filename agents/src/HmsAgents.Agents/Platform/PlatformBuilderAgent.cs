@@ -69,6 +69,10 @@ public sealed class PlatformBuilderAgent : IAgent
             if (context.ReportProgress is not null)
                 await context.ReportProgress(Type, $"Platform guidance published: runtime={runtime}, quality gates enabled");
 
+            // Agent completes its own claimed work items
+            foreach (var item in context.CurrentClaimedItems)
+                context.CompleteWorkItem?.Invoke(item);
+
             return new AgentResult
             {
                 Agent = Type,

@@ -1,0 +1,139 @@
+@page
+@{
+    ViewData["Title"] = "Release Evidence";
+}
+
+<div class="container-fluid px-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2><i class="bi bi-shield-check me-2"></i>Release Evidence Package</h2>
+        <span class="badge fs-6" id="releaseBadge">Pending</span>
+    </div>
+
+    <!-- Release Decision -->
+    <div class="card mb-4" id="decisionCard">
+        <div class="card-body text-center py-4">
+            <i class="bi fs-1" id="decisionIcon"></i>
+            <h3 class="mt-2" id="decisionText">Awaiting pipeline completion…</h3>
+            <p class="text-muted" id="decisionSub"></p>
+        </div>
+    </div>
+
+    <!-- Metrics Grid -->
+    <div class="row g-3 mb-4">
+        <div class="col-md-2">
+            <div class="card text-center">
+                <div class="card-body">
+                    <h4 id="metricReqs">0</h4>
+                    <small class="text-muted">Requirements</small>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-2">
+            <div class="card text-center">
+                <div class="card-body">
+                    <h4 id="metricCovered">0</h4>
+                    <small class="text-muted">Covered</small>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-2">
+            <div class="card text-center">
+                <div class="card-body">
+                    <h4 id="metricTests">0</h4>
+                    <small class="text-muted">Tests</small>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-2">
+            <div class="card text-center">
+                <div class="card-body">
+                    <h4 id="metricPassed">0</h4>
+                    <small class="text-muted">Passed</small>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-2">
+            <div class="card text-center">
+                <div class="card-body">
+                    <h4 id="metricFindings">0</h4>
+                    <small class="text-muted">Findings</small>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-2">
+            <div class="card text-center border-danger">
+                <div class="card-body">
+                    <h4 id="metricCritical" class="text-danger">0</h4>
+                    <small class="text-muted">Critical</small>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row g-3">
+        <!-- Security Scan -->
+        <div class="col-md-6">
+            <div class="card h-100">
+                <div class="card-header"><i class="bi bi-shield-lock me-1"></i>Security Scan</div>
+                <div class="card-body">
+                    <ul id="securityList" class="list-unstyled mb-0">
+                        <li class="text-muted">No data yet.</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+        <!-- Compliance -->
+        <div class="col-md-6">
+            <div class="card h-100">
+                <div class="card-header"><i class="bi bi-clipboard-check me-1"></i>Compliance Checks</div>
+                <div class="card-body">
+                    <ul id="complianceList" class="list-unstyled mb-0">
+                        <li class="text-muted">No data yet.</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+<script src="https://cdn.jsdelivr.net/npm/microsoft/signalr@8.0.0/dist/browser/signalr.min.js"></script>
+<script>
+    const connection = new signalR.HubConnectionBuilder()
+        .withUrl("/hubs/pipeline")
+        .withAutomaticReconnect()
+        .build();
+
+    connection.on("PipelineState", (state) => {
+        if (state.releaseEvidence) render(state.releaseEvidence);
+    });
+
+    connection.start().catch(console.error);
+
+    function render(ev) {
+        const releasable = ev.isReleasable;
+
+        document.getElementById('releaseBadge').textContent = releasable ? 'PASS' : 'BLOCKED';
+        document.getElementById('releaseBadge').className = `badge fs-6 bg-${releasable ? 'success' : 'danger'}`;
+
+        document.getElementById('decisionCard').className = `card mb-4 border-${releasable ? 'success' : 'danger'}`;
+        document.getElementById('decisionIcon').className = `bi fs-1 ${releasable ? 'bi-check-circle text-success' : 'bi-x-octagon text-danger'}`;
+        document.getElementById('decisionText').textContent = releasable ? 'Release Approved' : 'Release Blocked';
+        document.getElementById('decisionSub').textContent = releasable
+            ? 'All quality gates passed. Safe to deploy.'
+            : `${ev.criticalFindings} critical finding(s) must be resolved before release.`;
+
+        document.getElementById('metricReqs').textContent = ev.totalRequirements;
+        document.getElementById('metricCovered').textContent = ev.coveredRequirements;
+        document.getElementById('metricTests').textContent = ev.totalTests;
+        document.getElementById('metricPassed').textContent = ev.passedTests;
+        document.getElementById('metricFindings').textContent = ev.totalFindings;
+        document.getElementById('metricCritical').textContent = ev.criticalFindings;
+
+        document.getElementById('securityList').innerHTML =
+            (ev.securityScanResults || []).map(r => `<li><i class="bi bi-dot"></i>${r}</li>`).join('') || '<li class="text-muted">No results.</li>';
+        document.getElementById('complianceList').innerHTML =
+            (ev.complianceCheckResults || []).map(r => `<li><i class="bi bi-dot"></i>${r}</li>`).join('') || '<li class="text-muted">No results.</li>';
+    }
+</script>
+}

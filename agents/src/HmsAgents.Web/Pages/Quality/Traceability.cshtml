@@ -1,0 +1,106 @@
+@page
+@{
+    ViewData["Title"] = "Traceability Matrix";
+}
+
+<div class="container-fluid px-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2><i class="bi bi-diagram-3 me-2"></i>Traceability Matrix</h2>
+        <div>
+            <span class="badge bg-success fs-6 me-2" id="coveredBadge">0 covered</span>
+            <span class="badge bg-danger fs-6" id="gapBadge">0 gaps</span>
+        </div>
+    </div>
+
+    <!-- Coverage Progress -->
+    <div class="card mb-4">
+        <div class="card-body">
+            <div class="d-flex justify-content-between mb-1">
+                <strong>Requirement Coverage</strong>
+                <span id="coveragePct">0%</span>
+            </div>
+            <div class="progress" style="height: 12px;">
+                <div class="progress-bar bg-success" id="coverageBar" style="width: 0%"></div>
+                <div class="progress-bar bg-danger" id="gapBar" style="width: 0%"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Matrix Table -->
+    <div class="card">
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-hover table-sm mb-0" id="matrixTable">
+                    <thead class="table-dark">
+                        <tr>
+                            <th>Requirement</th>
+                            <th>Artifacts</th>
+                            <th>Tests</th>
+                            <th>Covered</th>
+                        </tr>
+                    </thead>
+                    <tbody id="matrixBody">
+                        <tr><td colspan="4" class="text-center text-muted py-4">No data yet.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+<script src="https://cdn.jsdelivr.net/npm/microsoft/signalr@8.0.0/dist/browser/signalr.min.js"></script>
+<script>
+    let matrix = [];
+
+    const connection = new signalR.HubConnectionBuilder()
+        .withUrl("/hubs/pipeline")
+        .withAutomaticReconnect()
+        .build();
+
+    connection.on("PipelineState", (state) => {
+        if (state.releaseEvidence?.traceabilityMatrix) {
+            matrix = state.releaseEvidence.traceabilityMatrix;
+            render();
+        }
+    });
+
+    connection.start().catch(console.error);
+
+    function render() {
+        const covered = matrix.filter(e => e.fullyCovered).length;
+        const gaps = matrix.length - covered;
+        const pct = matrix.length > 0 ? ((covered / matrix.length) * 100).toFixed(0) : 0;
+
+        document.getElementById('coveredBadge').textContent = `${covered} covered`;
+        document.getElementById('gapBadge').textContent = `${gaps} gaps`;
+        document.getElementById('coveragePct').textContent = pct + '%';
+        document.getElementById('coverageBar').style.width = pct + '%';
+        document.getElementById('gapBar').style.width = (100 - pct) + '%';
+
+        if (matrix.length === 0) {
+            document.getElementById('matrixBody').innerHTML = '<tr><td colspan="4" class="text-center text-muted py-4">No traceability data yet.</td></tr>';
+            return;
+        }
+
+        document.getElementById('matrixBody').innerHTML = matrix.map(entry => `
+            <tr class="${entry.fullyCovered ? '' : 'table-warning'}">
+                <td><code>${entry.requirementId}</code></td>
+                <td>
+                    <span class="badge bg-primary">${entry.implementingArtifacts?.length || 0}</span>
+                    ${(entry.implementingArtifacts || []).slice(0, 2).map(a => `<small class="d-block text-muted text-truncate" style="max-width:300px">${a}</small>`).join('')}
+                </td>
+                <td>
+                    <span class="badge bg-info">${entry.verifyingTests?.length || 0}</span>
+                    ${(entry.verifyingTests || []).slice(0, 2).map(t => `<small class="d-block text-muted text-truncate" style="max-width:300px">${t}</small>`).join('')}
+                </td>
+                <td>
+                    ${entry.fullyCovered
+                        ? '<i class="bi bi-check-circle-fill text-success fs-5"></i>'
+                        : '<i class="bi bi-exclamation-triangle-fill text-danger fs-5"></i>'}
+                </td>
+            </tr>
+        `).join('');
+    }
+</script>
+}

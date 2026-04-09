@@ -20,6 +20,12 @@ public sealed class WorkItemLifecyclePolicy
     /// <summary>Max items an agent may claim in a single cycle.</summary>
     public int BatchSize { get; init; } = 50;
 
+    /// <summary>Global cap on items in Received state (queued, waiting to start).</summary>
+    public int MaxQueueItems { get; set; } = 50;
+
+    /// <summary>Global cap on items in InProgress state (actively being worked on).</summary>
+    public int MaxInDevItems { get; set; } = 50;
+
     private readonly Action<string> _log;
 
     public WorkItemLifecyclePolicy(Action<string> log) => _log = log;
@@ -41,11 +47,76 @@ public sealed class WorkItemLifecyclePolicy
     {
         var claimed = new List<ExpandedRequirement>();
 
-        foreach (var item in allItems)
+        // Enforce global WIP limits: count items already in Received (queue) and InProgress (in-dev)
+        var currentReceived = 0;
+        var currentInProgress = 0;
+        foreach (var it in allItems)
         {
-            if (claimed.Count >= BatchSize) break;
+            if (!IsActionable(it))
+                continue;
 
-            if (item.Status is not (WorkItemStatus.New or WorkItemStatus.InQueue)) continue;
+            if (it.Status == WorkItemStatus.Received) currentReceived++;
+            else if (it.Status == WorkItemStatus.InProgress) currentInProgress++;
+        }
+
+        var queueSlots = Math.Max(0, MaxQueueItems - currentReceived);
+        var devSlots = Math.Max(0, MaxInDevItems - currentInProgress);
+        // The effective limit is the smallest of batch size, available queue slots, and available dev slots
+        var effectiveLimit = Math.Min(BatchSize, Math.Min(queueSlots, devSlots));
+
+        if (effectiveLimit <= 0)
+        {
+            _log($"[Lifecycle] {agentName} skipped claiming — WIP limits reached (queue={currentReceived}/{MaxQueueItems}, inDev={currentInProgress}/{MaxInDevItems})");
+            return claimed;
+        }
+
+        var byId = allItems
+            .Where(i => !string.IsNullOrWhiteSpace(i.Id))
+            .GroupBy(i => i.Id, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+
+        var downstreamDependents = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var candidate in allItems)
+        {
+            foreach (var depId in candidate.DependsOn)
+            {
+                if (!byId.ContainsKey(depId))
+                    continue;
+
+                downstreamDependents.TryGetValue(depId, out var count);
+                downstreamDependents[depId] = count + 1;
+            }
+        }
+
+        var orderedCandidates = allItems
+            // Strict lifecycle: only queued items are claimable.
+            // Items stay in New (pool) until admitted to queue.
+            .Where(item => item.Status == WorkItemStatus.InQueue)
+            .Where(item =>
+            {
+                if (item.DependsOn.Count == 0)
+                    return true;
+
+                foreach (var depId in item.DependsOn)
+                {
+                    if (!byId.TryGetValue(depId, out var dep))
+                        continue;
+                    if (dep.ItemType is WorkItemType.Epic or WorkItemType.UserStory)
+                        continue;
+                    if (dep.Status != WorkItemStatus.Completed)
+                        return false;
+                }
+
+                return true;
+            })
+            .OrderByDescending(item => downstreamDependents.TryGetValue(item.Id, out var c) ? c : 0)
+            .ThenBy(item => item.Priority)
+            .ThenBy(item => item.CreatedAt)
+            .ToList();
+
+        foreach (var item in orderedCandidates)
+        {
+            if (claimed.Count >= effectiveLimit) break;
 
             if (item.ItemType == WorkItemType.Task)
             {
@@ -88,6 +159,8 @@ public sealed class WorkItemLifecyclePolicy
         foreach (var item in claimedItems)
         {
             if (item.Status != WorkItemStatus.Received) continue;
+            if (string.IsNullOrWhiteSpace(item.AssignedAgent))
+                item.AssignedAgent = agentName;
             item.Status = WorkItemStatus.InProgress;
             count++;
         }
@@ -151,6 +224,89 @@ public sealed class WorkItemLifecyclePolicy
     }
 
     // ────────────────────────────────────────────────────────────
+    //  Stage 3a-single: COMPLETE one item   InProgress → Completed
+    // ────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Complete a single work item for <paramref name="agentName"/>.
+    /// For multi-agent tasks, uses <paramref name="taskTracker"/> and only
+    /// marks Completed when ALL relevant agents have finished.
+    /// Called by agents themselves after processing each item.
+    /// </summary>
+    public bool CompleteItem(
+        ExpandedRequirement item,
+        string agentName,
+        IList<ExpandedRequirement> allItems,
+        Func<ExpandedRequirement, IReadOnlyList<string>> getRelevantAgents,
+        ConcurrentTaskTracker taskTracker)
+    {
+        if (item.Status == WorkItemStatus.Completed) return false;
+
+        if (item.ItemType == WorkItemType.Task)
+        {
+            var relevantAgents = getRelevantAgents(item);
+            if (!relevantAgents.Contains(agentName, StringComparer.OrdinalIgnoreCase))
+                return false;
+
+            if (taskTracker.TryComplete(item.Id, agentName, relevantAgents))
+            {
+                item.Status = WorkItemStatus.Completed;
+                item.CompletedAt = DateTimeOffset.UtcNow;
+                item.AssignedAgent = string.Join(",", relevantAgents);
+                PropagateParentCompletion(allItems);
+                _log($"[Lifecycle] {agentName} completed item {item.Id}: {item.Title}");
+                return true;
+            }
+            return false;
+        }
+
+        if (item.AssignedAgent != agentName) return false;
+
+        item.Status = WorkItemStatus.Completed;
+        item.CompletedAt = DateTimeOffset.UtcNow;
+        PropagateParentCompletion(allItems);
+        _log($"[Lifecycle] {agentName} completed item {item.Id}: {item.Title}");
+        return true;
+    }
+
+    // ────────────────────────────────────────────────────────────
+    //  Stage 3b-single: FAIL one item   InProgress → retry / backlog
+    // ────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Fail a single work item. Retries if under <see cref="MaxItemRetries"/>,
+    /// otherwise returns the item to backlog (New).
+    /// Called by agents when they cannot process a specific item.
+    /// </summary>
+    public void FailItem(
+        ExpandedRequirement item,
+        string agentName,
+        string reason,
+        ConcurrentTaskTracker? taskTracker = null)
+    {
+        if (item.Status is not (WorkItemStatus.InProgress or WorkItemStatus.Received))
+            return;
+
+        item.RetryCount++;
+        item.LastFailedAgent = agentName;
+        taskTracker?.RemoveAgent(item.Id, agentName);
+
+        if (item.RetryCount < MaxItemRetries)
+        {
+            item.Status = WorkItemStatus.InQueue;
+            item.AssignedAgent = string.Empty;
+            _log($"[Lifecycle] {agentName} failed item {item.Id} — retry {item.RetryCount}/{MaxItemRetries}: {reason}");
+        }
+        else
+        {
+            item.Status = WorkItemStatus.New;
+            item.AssignedAgent = string.Empty;
+            item.StartedAt = null;
+            _log($"[Lifecycle] {agentName} failed item {item.Id} — backlogged after {MaxItemRetries} retries: {reason}");
+        }
+    }
+
+    // ────────────────────────────────────────────────────────────
     //  Stage 3b: FAIL   InProgress → Failed → retry or backlog
     // ────────────────────────────────────────────────────────────
 
@@ -185,6 +341,7 @@ public sealed class WorkItemLifecyclePolicy
             {
                 // Will be re-claimed on the next cycle — set back to InQueue
                 item.Status = WorkItemStatus.InQueue;
+                item.AssignedAgent = string.Empty; // clear so GetClaimableItems can re-claim
                 retriable++;
             }
             else
@@ -211,17 +368,32 @@ public sealed class WorkItemLifecyclePolicy
 
     private static void PropagateParentCompletion(IList<ExpandedRequirement> allItems)
     {
+        var byParent = allItems
+            .Where(c => !string.IsNullOrWhiteSpace(c.ParentId))
+            .GroupBy(c => c.ParentId, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.ToList(), StringComparer.OrdinalIgnoreCase);
+
         foreach (var parent in allItems.Where(e => e.ItemType is WorkItemType.Epic or WorkItemType.UserStory))
         {
-            if (parent.Status == WorkItemStatus.Completed) continue;
-            var children = allItems.Where(c => c.ParentId == parent.Id).ToList();
-            if (children.Count > 0 && children.All(c => c.Status == WorkItemStatus.Completed))
+            if (!byParent.TryGetValue(parent.Id, out var children) || children.Count == 0)
+                continue;
+
+            if (children.All(c => c.Status == WorkItemStatus.Completed))
             {
                 parent.Status = WorkItemStatus.Completed;
-                parent.CompletedAt = DateTimeOffset.UtcNow;
+                parent.CompletedAt ??= DateTimeOffset.UtcNow;
+                parent.AssignedAgent = string.Empty;
+                continue;
             }
+
+            parent.Status = WorkItemStatus.InProgress;
+            parent.CompletedAt = null;
+            parent.AssignedAgent = string.Empty;
         }
     }
+
+    private static bool IsActionable(ExpandedRequirement item) =>
+        item.ItemType is WorkItemType.Task or WorkItemType.Bug or WorkItemType.UseCase;
 }
 
 /// <summary>

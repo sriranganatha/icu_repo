@@ -38,6 +38,8 @@ public sealed class GapAnalysisAgent : IAgent
         _logger.LogInformation("GapAnalysisAgent starting — {Arts} artifacts, {Reqs} requirements, {Backlog} backlog items",
             context.Artifacts.Count, context.Requirements.Count, context.ExpandedRequirements.Count);
 
+        try
+        {
         var artifacts = context.Artifacts.ToList();
         var expandedItems = context.ExpandedRequirements.ToList();
         var gapRequirements = new List<Requirement>();
@@ -156,6 +158,11 @@ public sealed class GapAnalysisAgent : IAgent
             await context.ReportProgress(Type, $"Gap analysis complete: {allGaps.Count} gaps → {newReqCount} new requirements fed to expansion pipeline");
 
         context.AgentStatuses[Type] = AgentStatus.Completed;
+
+        // Agent completes its own claimed work items
+        foreach (var item in context.CurrentClaimedItems)
+            context.CompleteWorkItem?.Invoke(item);
+
         return new AgentResult
         {
             Agent = Type,
@@ -163,6 +170,19 @@ public sealed class GapAnalysisAgent : IAgent
             Summary = $"GapAnalysis: {allGaps.Count} gaps identified → {newReqCount} new requirements created for expansion",
             Duration = sw.Elapsed
         };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "GapAnalysisAgent failed — {ExType}: {Message}", ex.GetType().Name, ex.Message);
+            context.AgentStatuses[Type] = AgentStatus.Failed;
+            return new AgentResult
+            {
+                Agent = Type, Success = false,
+                Errors = [ex.ToString()],
+                Summary = $"GapAnalysis failed: {ex.GetType().Name}: {ex.Message}",
+                Duration = sw.Elapsed
+            };
+        }
     }
 
     // ─── Artifact Cataloging ───────────────────────────────────────────

@@ -1,0 +1,214 @@
+@page
+@{
+    ViewData["Title"] = "BRD Management";
+}
+
+<div class="container-fluid px-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2><i class="bi bi-file-earmark-text me-2"></i>Business Requirements Documents</h2>
+        <span class="badge bg-primary fs-6" id="brdCount">0 documents</span>
+    </div>
+
+    <!-- Status Filter Tabs -->
+    <ul class="nav nav-tabs mb-3" id="statusTabs">
+        <li class="nav-item">
+            <a class="nav-link active" href="#" data-filter="all">All</a>
+        </li>
+        <li class="nav-item">
+            <a class="nav-link" href="#" data-filter="Draft"><i class="bi bi-pencil me-1"></i>Draft</a>
+        </li>
+        <li class="nav-item">
+            <a class="nav-link" href="#" data-filter="InReview"><i class="bi bi-eye me-1"></i>In Review</a>
+        </li>
+        <li class="nav-item">
+            <a class="nav-link" href="#" data-filter="Approved"><i class="bi bi-check-circle me-1"></i>Approved</a>
+        </li>
+        <li class="nav-item">
+            <a class="nav-link" href="#" data-filter="Rejected"><i class="bi bi-x-circle me-1"></i>Rejected</a>
+        </li>
+    </ul>
+
+    <!-- BRD Cards -->
+    <div id="brdList" class="row g-3">
+        <div class="col-12 text-center text-muted py-5">
+            <i class="bi bi-hourglass-split fs-1"></i>
+            <p class="mt-2">No BRD documents yet. Run the pipeline to generate one.</p>
+        </div>
+    </div>
+
+    <!-- BRD Detail Modal -->
+    <div class="modal fade" id="brdModal" tabindex="-1">
+        <div class="modal-dialog modal-xl modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header" style="background: linear-gradient(135deg, #1a237e, #0d47a1);">
+                    <h5 class="modal-title text-white" id="brdModalTitle">BRD Details</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body" id="brdModalBody">
+                </div>
+                <div class="modal-footer">
+                    <div class="btn-group" id="brdActions">
+                        <button class="btn btn-outline-primary" id="btnSubmitReview" onclick="submitForReview()">
+                            <i class="bi bi-send me-1"></i>Submit for Review
+                        </button>
+                        <button class="btn btn-success" id="btnApprove" onclick="approveBrd()">
+                            <i class="bi bi-check-lg me-1"></i>Approve
+                        </button>
+                        <button class="btn btn-danger" id="btnReject" onclick="rejectBrd()">
+                            <i class="bi bi-x-lg me-1"></i>Reject
+                        </button>
+                    </div>
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+<script src="https://cdn.jsdelivr.net/npm/microsoft/signalr@8.0.0/dist/browser/signalr.min.js"></script>
+<script>
+    let brds = [];
+    let selectedBrdId = null;
+
+    const connection = new signalR.HubConnectionBuilder()
+        .withUrl("/hubs/pipeline")
+        .withAutomaticReconnect()
+        .build();
+
+    connection.on("BrdUpdated", (brd) => {
+        const idx = brds.findIndex(b => b.id === brd.id);
+        if (idx >= 0) brds[idx] = brd;
+        else brds.push(brd);
+        renderBrds();
+    });
+
+    connection.on("PipelineState", (state) => {
+        if (state.brdDocuments) {
+            brds = state.brdDocuments;
+            renderBrds();
+        }
+    });
+
+    connection.start().catch(console.error);
+
+    // Tab filtering
+    document.querySelectorAll('#statusTabs a').forEach(tab => {
+        tab.addEventListener('click', (e) => {
+            e.preventDefault();
+            document.querySelectorAll('#statusTabs a').forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+            renderBrds();
+        });
+    });
+
+    function getActiveFilter() {
+        return document.querySelector('#statusTabs a.active')?.dataset.filter || 'all';
+    }
+
+    function renderBrds() {
+        const filter = getActiveFilter();
+        const filtered = filter === 'all' ? brds : brds.filter(b => b.status === filter);
+        document.getElementById('brdCount').textContent = `${filtered.length} document(s)`;
+
+        if (filtered.length === 0) {
+            document.getElementById('brdList').innerHTML =
+                '<div class="col-12 text-center text-muted py-5"><i class="bi bi-hourglass-split fs-1"></i><p class="mt-2">No BRD documents match this filter.</p></div>';
+            return;
+        }
+
+        document.getElementById('brdList').innerHTML = filtered.map(brd => `
+            <div class="col-md-6 col-lg-4">
+                <div class="card h-100" style="cursor:pointer" onclick="showBrd('${brd.id}')">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span class="fw-bold text-truncate">${brd.title || 'Untitled BRD'}</span>
+                        ${statusBadge(brd.status)}
+                    </div>
+                    <div class="card-body">
+                        <p class="card-text text-muted small">${(brd.executiveSummary || '').substring(0, 150)}…</p>
+                        <div class="d-flex gap-2 flex-wrap">
+                            <span class="badge bg-light text-dark"><i class="bi bi-list-check me-1"></i>${brd.tracedRequirementIds?.length || 0} reqs</span>
+                            <span class="badge bg-light text-dark"><i class="bi bi-chat-dots me-1"></i>${brd.reviewComments?.length || 0} comments</span>
+                            <span class="badge bg-light text-dark"><i class="bi bi-exclamation-triangle me-1"></i>${brd.risks?.length || 0} risks</span>
+                        </div>
+                    </div>
+                    <div class="card-footer text-muted small">
+                        Created: ${new Date(brd.createdAt).toLocaleDateString()}
+                    </div>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    function statusBadge(status) {
+        const map = {
+            'Draft': 'bg-secondary',
+            'InReview': 'bg-warning text-dark',
+            'Approved': 'bg-success',
+            'Rejected': 'bg-danger',
+            'Superseded': 'bg-dark'
+        };
+        return `<span class="badge ${map[status] || 'bg-info'}">${status}</span>`;
+    }
+
+    function showBrd(id) {
+        const brd = brds.find(b => b.id === id);
+        if (!brd) return;
+        selectedBrdId = id;
+
+        document.getElementById('brdModalTitle').textContent = brd.title || 'BRD Details';
+
+        const body = document.getElementById('brdModalBody');
+        body.innerHTML = `
+            <div class="row mb-3">
+                <div class="col-md-4"><strong>Status:</strong> ${statusBadge(brd.status)}</div>
+                <div class="col-md-4"><strong>Run ID:</strong> <code>${brd.runId}</code></div>
+                <div class="col-md-4"><strong>Created:</strong> ${new Date(brd.createdAt).toLocaleString()}</div>
+            </div>
+            <h5>Executive Summary</h5><p>${brd.executiveSummary || '<em>Empty</em>'}</p>
+            <h5>Scope</h5><p>${brd.projectScope || '<em>Empty</em>'}</p>
+            <div class="row">
+                <div class="col-md-6"><h6>In Scope</h6><pre class="bg-light p-2 small">${brd.inScope || '-'}</pre></div>
+                <div class="col-md-6"><h6>Out of Scope</h6><pre class="bg-light p-2 small">${brd.outOfScope || '-'}</pre></div>
+            </div>
+            <h5>Stakeholders</h5><ul>${(brd.stakeholders||[]).map(s => `<li>${s}</li>`).join('')}</ul>
+            <h5>Functional Requirements</h5><ul>${(brd.functionalRequirements||[]).map(r => `<li class="small">${r}</li>`).join('')}</ul>
+            <h5>Non-Functional Requirements</h5><ul>${(brd.nonFunctionalRequirements||[]).map(r => `<li class="small">${r}</li>`).join('')}</ul>
+            <h5>Risks</h5>
+            <table class="table table-sm table-striped">
+                <thead><tr><th>Risk</th><th>Impact</th><th>Likelihood</th><th>Mitigation</th></tr></thead>
+                <tbody>${(brd.risks||[]).map(r => `<tr><td>${r.description}</td><td>${r.impact}</td><td>${r.likelihood}</td><td>${r.mitigation}</td></tr>`).join('')}</tbody>
+            </table>
+            <h5>Review Comments</h5>
+            ${(brd.reviewComments||[]).length === 0 ? '<p class="text-muted">No comments yet.</p>' :
+              (brd.reviewComments||[]).map(c => `<div class="border-start border-3 ps-2 mb-2 ${c.action === 'Approve' ? 'border-success' : c.action === 'Reject' ? 'border-danger' : 'border-primary'}">
+                <strong>${c.author}</strong> <span class="badge bg-secondary">${c.action}</span> <small class="text-muted">${new Date(c.timestamp).toLocaleString()}</small>
+                <p class="mb-0">${c.content}</p>
+              </div>`).join('')}
+        `;
+
+        // Toggle action buttons based on status
+        document.getElementById('btnSubmitReview').style.display = brd.status === 'Draft' ? '' : 'none';
+        document.getElementById('btnApprove').style.display = brd.status === 'InReview' ? '' : 'none';
+        document.getElementById('btnReject').style.display = brd.status === 'InReview' ? '' : 'none';
+
+        new bootstrap.Modal(document.getElementById('brdModal')).show();
+    }
+
+    async function submitForReview() {
+        if (!selectedBrdId) return;
+        await connection.invoke("BrdAction", selectedBrdId, "SubmitForReview", "");
+    }
+
+    async function approveBrd() {
+        if (!selectedBrdId) return;
+        await connection.invoke("BrdAction", selectedBrdId, "Approve", "Approved via dashboard.");
+    }
+
+    async function rejectBrd() {
+        const reason = prompt("Rejection reason:");
+        if (!reason || !selectedBrdId) return;
+        await connection.invoke("BrdAction", selectedBrdId, "Reject", reason);
+    }
+</script>
+}

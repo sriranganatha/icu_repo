@@ -37,5 +37,11 @@ public enum AgentType
     LoadTest,
     GapAnalysis,
     Planning,
-    CodeReasoning
+    CodeReasoning,
+    DodVerification,
+    BrdGenerator,
+    ConflictResolver,
+    TraceabilityGate,
+    SprintPlanner,
+    LearningLoop
 }

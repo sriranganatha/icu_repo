@@ -75,6 +75,10 @@ public sealed class TestingAgent : IAgent
             context.Artifacts.AddRange(artifacts);
             context.AgentStatuses[Type] = AgentStatus.Completed;
 
+            // Agent completes its own claimed work items
+            foreach (var item in context.CurrentClaimedItems)
+                context.CompleteWorkItem?.Invoke(item);
+
             await Task.CompletedTask;
             _logger.LogInformation("TestingAgent completed — {Count} test artifacts generated", artifacts.Count);
 

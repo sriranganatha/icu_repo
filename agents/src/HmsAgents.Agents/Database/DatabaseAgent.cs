@@ -14,6 +14,10 @@ namespace HmsAgents.Agents.Database;
 public sealed class DatabaseAgent : IAgent
 {
     private readonly ILogger<DatabaseAgent> _logger;
+    // Track which artifact paths this agent has already produced in this pipeline run
+    private readonly HashSet<string> _generatedPaths = new(StringComparer.OrdinalIgnoreCase);
+    // Track whether DDL has been executed this pipeline run
+    private bool _ddlExecutedThisRun;
 
     public AgentType Type => AgentType.Database;
     public string Name => "Database Agent";
@@ -25,10 +29,44 @@ public sealed class DatabaseAgent : IAgent
     {
         var sw = Stopwatch.StartNew();
         context.AgentStatuses[Type] = AgentStatus.Running;
-        var scopedServices = ResolveTargetServices(context);
         var guidance = GetGuidanceSummary(context);
-        _logger.LogInformation("DatabaseAgent starting — microservice-aligned generation for {Count} services",
-            scopedServices.Count);
+
+        // ── Resolve which services need work based on assigned backlog items ──
+        var assignedItems = context.ExpandedRequirements
+            .Where(i => i.Status == WorkItemStatus.InProgress
+                     && i.AssignedAgent.Contains("Database", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        var scopedServices = assignedItems.Count > 0
+            ? ResolveServicesFromBacklogItems(assignedItems, context)
+            : ResolveTargetServices(context);   // first run: no items claimed yet → generate all
+
+        // ── Filter out services whose artifacts were already generated ──
+        var newServices = scopedServices
+            .Where(svc => !_generatedPaths.Contains($"{svc.ProjectName}/Data/{svc.DbContextName}.cs"))
+            .ToList();
+
+        if (newServices.Count == 0 && _ddlExecutedThisRun)
+        {
+            _logger.LogInformation("DatabaseAgent skipping — all {Count} services already generated and DDL already executed",
+                scopedServices.Count);
+            if (context.ReportProgress is not null)
+                await context.ReportProgress(Type, $"Database layer up-to-date — {scopedServices.Count} services already generated, DDL already executed. Nothing to do.");
+
+            // Mark assigned items as completed even on skip
+            MarkItemsCompleted(context);
+
+            context.AgentStatuses[Type] = AgentStatus.Completed;
+            return new AgentResult
+            {
+                Agent = Type, Success = true,
+                Summary = $"Database layer up-to-date — {scopedServices.Count} services already generated. Skipped re-execution.",
+                Duration = sw.Elapsed
+            };
+        }
+
+        _logger.LogInformation("DatabaseAgent starting — {New} new services to generate (of {Total} total), {Items} backlog items assigned",
+            newServices.Count, scopedServices.Count, assignedItems.Count);
 
         var artifacts = new List<CodeArtifact>();
         var messages = new List<AgentMessage>();
@@ -38,48 +76,41 @@ public sealed class DatabaseAgent : IAgent
             if (context.ReportProgress is not null && !string.IsNullOrWhiteSpace(guidance))
                 await context.ReportProgress(Type, $"Applying architecture/platform guidance: {guidance}");
 
-            // Generate per-service database artifacts
-            foreach (var svc in scopedServices)
+            // Generate per-service database artifacts (only for NEW services)
+            foreach (var svc in newServices)
             {
                 _logger.LogInformation("Generating DB layer for {Service} ({Schema})", svc.Name, svc.Schema);
                 if (context.ReportProgress is not null)
                     await context.ReportProgress(Type, $"Generating DB layer for {svc.Name} — schema: {svc.Schema}, entities: {string.Join(", ", svc.Entities)}");
 
-                // Entities
                 foreach (var entity in svc.Entities)
-                {
-                    artifacts.Add(GenerateEntity(svc, entity));
-                }
+                    AddIfNew(artifacts, GenerateEntity(svc, entity));
 
-                // Per-service DbContext
-                artifacts.Add(GenerateDbContext(svc));
+                AddIfNew(artifacts, GenerateDbContext(svc));
 
-                // Per-service repositories
                 foreach (var entity in svc.Entities)
-                {
-                    artifacts.Add(GenerateRepository(svc, entity));
-                }
+                    AddIfNew(artifacts, GenerateRepository(svc, entity));
 
-                // Per-service migration script
-                artifacts.Add(GenerateMigrationScript(svc));
+                AddIfNew(artifacts, GenerateMigrationScript(svc));
 
                 if (context.ReportProgress is not null)
                     await context.ReportProgress(Type, $"{svc.Name}: Generated {svc.Entities.Length} entities, DbContext, {svc.Entities.Length} repositories, migration script");
             }
 
-            // Shared: tenant RLS applied across all schemas
-            artifacts.Add(GenerateRlsMigration(scopedServices));
-
-            // Shared: docker-compose for all services
-            artifacts.Add(GenerateDockerCompose(context.PipelineConfig, scopedServices));
+            // Shared artifacts (only if we generated new services)
+            if (newServices.Count > 0)
+            {
+                AddIfNew(artifacts, GenerateRlsMigration(scopedServices));
+                AddIfNew(artifacts, GenerateDockerCompose(context.PipelineConfig, scopedServices));
+            }
 
             context.Artifacts.AddRange(artifacts);
 
-            // Docker + DDL provisioning
+            // Docker + DDL provisioning (only run DDL once per pipeline)
             var config = context.PipelineConfig;
             var ddlExecuted = false;
             var ddlSuccess = true;
-            if (config is not null)
+            if (config is not null && !_ddlExecutedThisRun)
             {
                 var provisioner = new DockerDbProvisioner(_logger);
                 var containerOk = true; // assume ok if not spinning up
@@ -124,6 +155,7 @@ public sealed class DatabaseAgent : IAgent
                     var (ddlOk, objectsCreated, ddlErrors) = await provisioner.ExecuteDdlAsync(config, ct);
                     ddlExecuted = true;
                     ddlSuccess = ddlOk;
+                    _ddlExecutedThisRun = ddlOk; // Only mark as done if successful
                     if (context.ReportProgress is not null)
                         await context.ReportProgress(Type, $"DDL execution: {objectsCreated} database objects created{(ddlErrors.Count > 0 ? $", {ddlErrors.Count} errors" : "")}");
 
@@ -164,16 +196,27 @@ public sealed class DatabaseAgent : IAgent
                 }
             }
 
-            context.AgentStatuses[Type] = ddlSuccess ? AgentStatus.Completed : AgentStatus.Failed;
-            var ddlSuffix = ddlExecuted ? (ddlSuccess ? " | DDL executed successfully" : " | DDL completed with errors") : "";
-            _logger.LogInformation("DatabaseAgent completed — {Count} artifacts across {Svc} microservices{Ddl}",
-                artifacts.Count, scopedServices.Count, ddlSuffix);
+            // Artifact generation is the primary success criterion.
+            // DDL errors are surfaced as findings for downstream agents to fix,
+            // but should NOT fail the entire agent when code artifacts are generated.
+            var artifactsGenerated = artifacts.Count > 0 || _generatedPaths.Count > 0;
+            var agentSuccess = artifactsGenerated;
+            context.AgentStatuses[Type] = agentSuccess ? AgentStatus.Completed : AgentStatus.Failed;
+            var ddlSuffix = ddlExecuted ? (ddlSuccess ? " | DDL executed successfully" : " | DDL completed with errors (non-blocking)") : "";
+            if (!ddlSuccess && artifactsGenerated)
+                _logger.LogWarning("DatabaseAgent: DDL had errors but artifacts were generated successfully — marking agent as Completed");
+
+            // Mark assigned backlog items as completed
+            MarkItemsCompleted(context);
+
+            _logger.LogInformation("DatabaseAgent completed — {New} new artifacts, {Total} total generated across {Svc} microservices{Ddl}",
+                artifacts.Count, _generatedPaths.Count, scopedServices.Count, ddlSuffix);
 
             return new AgentResult
             {
                 Agent = Type,
-                Success = ddlSuccess,
-                Summary = $"Generated {artifacts.Count} DB artifacts across {scopedServices.Count} scoped microservices{ddlSuffix}",
+                Success = agentSuccess,
+                Summary = $"Generated {artifacts.Count} new DB artifacts ({newServices.Count} new services of {scopedServices.Count} total){ddlSuffix}",
                 Artifacts = artifacts,
                 Messages =
                 [
@@ -484,6 +527,61 @@ public sealed class DatabaseAgent : IAgent
             .ToList();
 
         return resolved.Count > 0 ? resolved : MicroserviceCatalog.All.ToList();
+    }
+
+    /// <summary>
+    /// Resolve microservices from assigned backlog items by matching tags, module, and title keywords
+    /// to services in the catalog. Falls back to full catalog if no matches found.
+    /// </summary>
+    private static List<MicroserviceDefinition> ResolveServicesFromBacklogItems(
+        List<ExpandedRequirement> items, AgentContext context)
+    {
+        var matched = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var item in items)
+        {
+            var text = $"{item.Title} {item.Description} {item.Module} {string.Join(" ", item.Tags)}";
+
+            foreach (var svc in MicroserviceCatalog.All)
+            {
+                if (matched.Contains(svc.Name)) continue;
+
+                // Match by schema name, service name, short name, or entity names
+                if (text.Contains(svc.ShortName, StringComparison.OrdinalIgnoreCase)
+                    || text.Contains(svc.Schema, StringComparison.OrdinalIgnoreCase)
+                    || text.Contains(svc.Name, StringComparison.OrdinalIgnoreCase)
+                    || svc.Entities.Any(e => text.Contains(e, StringComparison.OrdinalIgnoreCase)))
+                {
+                    matched.Add(svc.Name);
+                }
+            }
+        }
+
+        if (matched.Count == 0)
+        {
+            // Fallback: use arch instructions or full catalog
+            return ResolveTargetServices(context);
+        }
+
+        return MicroserviceCatalog.All.Where(s => matched.Contains(s.Name)).ToList();
+    }
+
+    /// <summary>
+    /// Add artifact only if its path hasn't been generated before in this pipeline run.
+    /// </summary>
+    private void AddIfNew(List<CodeArtifact> artifacts, CodeArtifact artifact)
+    {
+        if (_generatedPaths.Add(artifact.RelativePath))
+            artifacts.Add(artifact);
+    }
+
+    /// <summary>
+    /// Complete all claimed items via the agent-owned lifecycle delegate.
+    /// </summary>
+    private static void MarkItemsCompleted(AgentContext context)
+    {
+        foreach (var item in context.CurrentClaimedItems)
+            context.CompleteWorkItem?.Invoke(item);
     }
 
     private static string GetGuidanceSummary(AgentContext context)

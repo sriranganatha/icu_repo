@@ -15,6 +15,7 @@ namespace HmsAgents.Agents.Backlog;
 public sealed class BacklogAgent : IAgent
 {
     private readonly ILogger<BacklogAgent> _logger;
+    private const int MaxAutoBugsPerRun = 100;
 
     public AgentType Type => AgentType.Backlog;
     public string Name => "Backlog Manager";
@@ -28,50 +29,72 @@ public sealed class BacklogAgent : IAgent
         context.AgentStatuses[Type] = AgentStatus.Running;
         _logger.LogInformation("BacklogAgent starting — iteration {Iter}", context.DevIteration);
 
-        // 1. Backlog must consume only expander output.
-        // Never synthesize backlog directly from raw requirements.
-        if (context.ExpandedRequirements.Count == 0 && context.Requirements.Count > 0)
+        try
         {
-            context.ReportProgress?.Invoke(Type,
-                $"No expanded items available yet ({context.Requirements.Count} requirements). Waiting for RequirementsExpander output.");
+            // 1. Backlog must consume only expander output.
+            // Never synthesize backlog directly from raw requirements.
+            if (context.ExpandedRequirements.Count == 0 && context.Requirements.Count > 0)
+            {
+                context.ReportProgress?.Invoke(Type,
+                    $"No expanded items available yet ({context.Requirements.Count} requirements). Waiting for RequirementsExpander output.");
 
-            context.AgentStatuses[Type] = AgentStatus.Idle;
+                context.AgentStatuses[Type] = AgentStatus.Idle;
+                return Task.FromResult(new AgentResult
+                {
+                    Agent = Type,
+                    Success = true,
+                    Summary = $"Backlog waiting: {context.Requirements.Count} requirements pending expansion",
+                    Duration = sw.Elapsed
+                });
+            }
+
+            // 1b. Convert cross-agent findings into standardized bug backlog items
+            var bugItemsAdded = EnsureBugItemsFromFindings(context);
+            if (bugItemsAdded > 0)
+                context.ReportProgress?.Invoke(Type, $"Added {bugItemsAdded} bug item(s) from findings using bug report template");
+
+            // 2. Update statuses based on current artifacts and findings
+            context.ReportProgress?.Invoke(Type, $"Updating backlog statuses — {context.Artifacts.Count} artifacts, {context.Findings.Count} findings");
+            UpdateBacklogStatuses(context);
+
+            // 3. Process inter-agent directives targeted at Backlog
+            ProcessDirectives(context);
+
+            // 4. Identify blocked items and send directives to unblock them
+            IdentifyBlockedItems(context);
+
+            var stats = GetBacklogStats(context);
+            context.ReportProgress?.Invoke(Type,
+                $"Backlog summary: {stats.Total} items — {stats.New} new, {stats.ReadyBacklog} ready, {stats.ActiveQueue} active-queue, {stats.InDev} in-dev, {stats.Completed} done, {stats.Blocked} blocked");
+
+            // Only mark Backlog as Completed when every actionable item is done.
+            // This keeps the orchestrator's backlog-driven re-dispatch loop active.
+            var actionable = context.ExpandedRequirements.Where(IsActionableWorkItem).ToList();
+            var allDone = actionable.Count > 0 && actionable.All(i => i.Status == WorkItemStatus.Completed);
+            context.AgentStatuses[Type] = allDone ? AgentStatus.Completed : AgentStatus.Idle;
+
             return Task.FromResult(new AgentResult
             {
                 Agent = Type,
                 Success = true,
-                Summary = $"Backlog waiting: {context.Requirements.Count} requirements pending expansion",
+                Summary = allDone
+                    ? $"Backlog COMPLETE: all {actionable.Count} actionable items done"
+                    : $"Backlog: {stats.Total} items — {stats.New} new, {stats.ReadyBacklog} ready, {stats.ActiveQueue} active-queue, {stats.InDev} in-dev, {stats.Completed} done, {stats.Blocked} blocked",
                 Duration = sw.Elapsed
             });
         }
-
-        // 1b. Convert cross-agent findings into standardized bug backlog items
-        var bugItemsAdded = EnsureBugItemsFromFindings(context);
-        if (bugItemsAdded > 0)
-            context.ReportProgress?.Invoke(Type, $"Added {bugItemsAdded} bug item(s) from findings using bug report template");
-
-        // 2. Update statuses based on current artifacts and findings
-        context.ReportProgress?.Invoke(Type, $"Updating backlog statuses — {context.Artifacts.Count} artifacts, {context.Findings.Count} findings");
-        UpdateBacklogStatuses(context);
-
-        // 3. Process inter-agent directives targeted at Backlog
-        ProcessDirectives(context);
-
-        // 4. Identify blocked items and send directives to unblock them
-        IdentifyBlockedItems(context);
-
-        var stats = GetBacklogStats(context);
-        context.ReportProgress?.Invoke(Type, $"Backlog summary: {stats.Total} items — {stats.New} new, {stats.InQueue} queued, {stats.UnderDev} in-dev, {stats.Completed} done, {stats.Blocked} blocked");
-
-        context.AgentStatuses[Type] = AgentStatus.Completed;
-
-        return Task.FromResult(new AgentResult
+        catch (Exception ex)
         {
-            Agent = Type,
-            Success = true,
-            Summary = $"Backlog: {stats.Total} items — {stats.New} new, {stats.InQueue} queued, {stats.UnderDev} in-dev, {stats.Completed} done, {stats.Blocked} blocked",
-            Duration = sw.Elapsed
-        });
+            _logger.LogError(ex, "BacklogAgent failed — {ExType}: {Message}", ex.GetType().Name, ex.Message);
+            context.AgentStatuses[Type] = AgentStatus.Failed;
+            return Task.FromResult(new AgentResult
+            {
+                Agent = Type, Success = false,
+                Errors = [ex.ToString()],
+                Summary = $"Backlog failed: {ex.GetType().Name}: {ex.Message}",
+                Duration = sw.Elapsed
+            });
+        }
     }
 
     private void ExpandRequirementsToBacklog(AgentContext context)
@@ -259,6 +282,10 @@ public sealed class BacklogAgent : IAgent
         var artifactPaths = context.Artifacts.Select(a => a.RelativePath).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var artifactModules = context.Artifacts.Select(a => ExtractModule(a.Namespace)).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
+        // Read WIP limits from pipeline config
+        var maxInDev = context.PipelineConfig?.MaxInDevItems ?? 50;
+        var maxQueue = context.PipelineConfig?.MaxQueueItems ?? 50;
+
         foreach (var item in context.ExpandedRequirements)
         {
             if (item.Status == WorkItemStatus.Completed) continue;
@@ -277,8 +304,13 @@ public sealed class BacklogAgent : IAgent
 
             if (hasArtifact && item.Status is WorkItemStatus.InQueue or WorkItemStatus.New)
             {
-                item.Status = WorkItemStatus.UnderDev;
-                item.StartedAt = DateTimeOffset.UtcNow;
+                // Enforce WIP limit: only move to UnderDev if below cap
+                var currentInDev = context.ExpandedRequirements.Count(e => e.Status == WorkItemStatus.UnderDev);
+                if (currentInDev < maxInDev)
+                {
+                    item.Status = WorkItemStatus.UnderDev;
+                    item.StartedAt = DateTimeOffset.UtcNow;
+                }
             }
 
             // Check if all child tasks are complete for parent items
@@ -294,8 +326,12 @@ public sealed class BacklogAgent : IAgent
                 {
                     if (item.Status is WorkItemStatus.New or WorkItemStatus.InQueue)
                     {
-                        item.Status = WorkItemStatus.UnderDev;
-                        item.StartedAt ??= DateTimeOffset.UtcNow;
+                        var currentInDev = context.ExpandedRequirements.Count(e => e.Status == WorkItemStatus.UnderDev);
+                        if (currentInDev < maxInDev)
+                        {
+                            item.Status = WorkItemStatus.UnderDev;
+                            item.StartedAt ??= DateTimeOffset.UtcNow;
+                        }
                     }
                 }
             }
@@ -361,52 +397,137 @@ public sealed class BacklogAgent : IAgent
 
     private void IdentifyBlockedItems(AgentContext context)
     {
+        RollupParentItems(context.ExpandedRequirements);
+
+        var maxQueue = context.PipelineConfig?.MaxQueueItems ?? 50;
+        var maxInDev = context.PipelineConfig?.MaxInDevItems ?? 50;
+        // Promote enough items to fill both queue + in-dev slots; WIP limits enforced in Claim().
+        var promotionCap = (maxQueue + maxInDev) * 2;
+        var items = context.ExpandedRequirements
+            .Where(IsActionableWorkItem)
+            .Where(i => i.Status is not (WorkItemStatus.Completed or WorkItemStatus.Received or WorkItemStatus.InProgress))
+            // Skip items that have already been claimed (have an AssignedAgent) to avoid
+            // a race condition where Claim() sets AssignedAgent + Received concurrently
+            // and this method resets the item back to InQueue.
+            .Where(i => string.IsNullOrEmpty(i.AssignedAgent))
+            .ToList();
+
+        var byId = context.ExpandedRequirements
+            .Where(i => !string.IsNullOrWhiteSpace(i.Id))
+            .GroupBy(i => i.Id, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+
+        var downstreamDependents = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         foreach (var item in context.ExpandedRequirements)
         {
-            if (item.DependsOn.Count == 0) continue;
-
-            if (item.Status == WorkItemStatus.InQueue || item.Status == WorkItemStatus.New)
+            foreach (var depId in item.DependsOn)
             {
-                // Check if any dependency is incomplete → block
-                foreach (var dep in item.DependsOn)
-                {
-                    var depItem = context.ExpandedRequirements.FirstOrDefault(e => e.Id == dep);
-                    if (depItem is not null && depItem.Status != WorkItemStatus.Completed)
-                    {
-                        item.Status = WorkItemStatus.Blocked;
-                        break;
-                    }
-                }
-            }
-            else if (item.Status == WorkItemStatus.Blocked)
-            {
-                // Re-evaluate: if ALL dependencies are now Completed → unblock
-                var allDepsComplete = item.DependsOn.All(dep =>
-                {
-                    var depItem = context.ExpandedRequirements.FirstOrDefault(e => e.Id == dep);
-                    return depItem is null || depItem.Status == WorkItemStatus.Completed;
-                });
-
-                if (allDepsComplete)
-                {
-                    item.Status = WorkItemStatus.InQueue;
-                    _logger.LogInformation("[Backlog] Unblocked {ItemId} — all dependencies now complete", item.Id);
-                }
+                if (!byId.ContainsKey(depId)) continue;
+                downstreamDependents.TryGetValue(depId, out var count);
+                downstreamDependents[depId] = count + 1;
             }
         }
+
+        var ready = items
+            .Where(item => item.DependsOn.Count == 0 || item.DependsOn.All(depId =>
+            {
+                if (!byId.TryGetValue(depId, out var depItem)) return true;
+                if (!IsActionableWorkItem(depItem)) return true;
+                if (depItem.Status == WorkItemStatus.Completed) return true;
+                return IsDepAgentFailed(depItem, context);
+            }))
+            .OrderByDescending(item => downstreamDependents.TryGetValue(item.Id, out var c) ? c : 0)
+            .ThenBy(item => item.Priority)
+            .ThenBy(item => item.CreatedAt)
+            .ThenBy(item => item.Id, StringComparer.OrdinalIgnoreCase)
+            .Select(item => item.Id)
+            .Take(promotionCap)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var item in items)
+        {
+            if (ready.Contains(item.Id))
+            {
+                // Promote to InQueue if not already there
+                if (item.Status != WorkItemStatus.InQueue)
+                    item.Status = WorkItemStatus.InQueue;
+            }
+            else if (item.Status == WorkItemStatus.New)
+            {
+                // Item is New and not ready — leave it as New (no demotion of InQueue items)
+            }
+            // Items already InQueue but not in 'ready' keep their InQueue status
+            // to avoid thrashing between InQueue→New→InQueue on each BacklogAgent cycle.
+        }
+    }
+
+    private static bool IsActionableWorkItem(ExpandedRequirement item) =>
+        item.ItemType is WorkItemType.Task or WorkItemType.Bug or WorkItemType.UseCase;
+
+    private static void RollupParentItems(IList<ExpandedRequirement> allItems)
+    {
+        var byParent = allItems
+            .Where(c => !string.IsNullOrWhiteSpace(c.ParentId))
+            .GroupBy(c => c.ParentId, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.ToList(), StringComparer.OrdinalIgnoreCase);
+
+        foreach (var parent in allItems.Where(e => e.ItemType is WorkItemType.Epic or WorkItemType.UserStory))
+        {
+            if (!byParent.TryGetValue(parent.Id, out var children) || children.Count == 0)
+                continue;
+
+            if (children.All(c => c.Status == WorkItemStatus.Completed))
+            {
+                parent.Status = WorkItemStatus.Completed;
+                parent.CompletedAt ??= DateTimeOffset.UtcNow;
+                parent.AssignedAgent = string.Empty;
+                continue;
+            }
+
+            parent.Status = WorkItemStatus.InProgress;
+            parent.CompletedAt = null;
+            parent.AssignedAgent = string.Empty;
+        }
+    }
+
+    /// <summary>Check if the agent that owns a dependency item has permanently failed.</summary>
+    private static bool IsDepAgentFailed(ExpandedRequirement depItem, AgentContext context)
+    {
+        foreach (var tag in depItem.Tags)
+        {
+            if (string.Equals(tag, "database", StringComparison.OrdinalIgnoreCase) &&
+                context.AgentStatuses.TryGetValue(AgentType.Database, out var dbStatus) && dbStatus == AgentStatus.Failed)
+                return true;
+            if (string.Equals(tag, "service", StringComparison.OrdinalIgnoreCase) &&
+                context.AgentStatuses.TryGetValue(AgentType.ServiceLayer, out var svcStatus) && svcStatus == AgentStatus.Failed)
+                return true;
+            if (string.Equals(tag, "testing", StringComparison.OrdinalIgnoreCase) &&
+                context.AgentStatuses.TryGetValue(AgentType.Testing, out var testStatus) && testStatus == AgentStatus.Failed)
+                return true;
+            if ((string.Equals(tag, "api", StringComparison.OrdinalIgnoreCase) || string.Equals(tag, "application", StringComparison.OrdinalIgnoreCase)) &&
+                context.AgentStatuses.TryGetValue(AgentType.Application, out var appStatus) && appStatus == AgentStatus.Failed)
+                return true;
+            if (string.Equals(tag, "integration", StringComparison.OrdinalIgnoreCase) &&
+                context.AgentStatuses.TryGetValue(AgentType.Integration, out var intStatus) && intStatus == AgentStatus.Failed)
+                return true;
+        }
+        return false;
     }
 
     private static BacklogStats GetBacklogStats(AgentContext context) => new()
     {
         Total = context.ExpandedRequirements.Count,
         New = context.ExpandedRequirements.Count(e => e.Status == WorkItemStatus.New),
-        InQueue = context.ExpandedRequirements.Count(e => e.Status == WorkItemStatus.InQueue),
-        UnderDev = context.ExpandedRequirements.Count(e => e.Status == WorkItemStatus.UnderDev),
+        ReadyBacklog = context.ExpandedRequirements.Count(e => e.Status == WorkItemStatus.InQueue),
+        ActiveQueue = context.ExpandedRequirements.Count(e => e.Status == WorkItemStatus.Received),
+        InDev = context.ExpandedRequirements.Count(e => e.Status == WorkItemStatus.InProgress && IsActionableWorkItem(e)),
         Completed = context.ExpandedRequirements.Count(e => e.Status == WorkItemStatus.Completed),
         Blocked = context.ExpandedRequirements.Count(e => e.Status == WorkItemStatus.Blocked),
     };
 
     private static bool ModuleMatch(string ns, string module) =>
+        string.IsNullOrWhiteSpace(module) ||
+        string.Equals(module, "General", StringComparison.OrdinalIgnoreCase) ||
         ns.Contains(module, StringComparison.OrdinalIgnoreCase) ||
         ns.Contains(module.Replace("Service", ""), StringComparison.OrdinalIgnoreCase);
 
@@ -440,14 +561,26 @@ public sealed class BacklogAgent : IAgent
             .Where(e => e.ItemType == WorkItemType.Bug && !string.IsNullOrWhiteSpace(e.SourceRequirementId))
             .Select(e => e.SourceRequirementId)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var existingFingerprints = context.ExpandedRequirements
+            .Where(e => e.ItemType == WorkItemType.Bug)
+            .Select(BuildBugFingerprint)
+            .Where(fp => !string.IsNullOrWhiteSpace(fp))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         foreach (var finding in context.Findings)
         {
+            if (added >= MaxAutoBugsPerRun)
+                break;
+
             if (!ShouldCreateBugFromFinding(finding))
                 continue;
 
             var sourceRef = $"FINDING:{finding.Id}";
             if (existingFindingRefs.Contains(sourceRef))
+                continue;
+
+            var fingerprint = BuildFindingFingerprint(finding);
+            if (!string.IsNullOrWhiteSpace(fingerprint) && existingFingerprints.Contains(fingerprint))
                 continue;
 
             var bugId = $"BUG-AUTO-{finding.Id[..Math.Min(8, finding.Id.Length)].ToUpperInvariant()}";
@@ -473,16 +606,35 @@ public sealed class BacklogAgent : IAgent
                 Module = InferModuleFromFinding(finding),
                 Priority = severity is "Blocker" or "Critical" ? 1 : 2,
                 Iteration = context.DevIteration,
-                Tags = ["bugfix", finding.Category.ToLowerInvariant()],
-                Status = WorkItemStatus.InQueue,
+                Tags = ["bugfix", (finding.Category ?? "general").ToLowerInvariant()],
+                // New status lets lifecycle policy enforce queue/in-dev limits consistently.
+                Status = WorkItemStatus.New,
                 ProducedBy = "Backlog",
             });
 
             existingFindingRefs.Add(sourceRef);
+            if (!string.IsNullOrWhiteSpace(fingerprint))
+                existingFingerprints.Add(fingerprint);
             added++;
         }
 
         return added;
+    }
+
+    private static string BuildFindingFingerprint(ReviewFinding finding)
+    {
+        var category = (finding.Category ?? string.Empty).Trim().ToLowerInvariant();
+        var file = (finding.FilePath ?? string.Empty).Trim().ToLowerInvariant();
+        var message = Regex.Replace((finding.Message ?? string.Empty).Trim().ToLowerInvariant(), @"\s+", " ");
+        return string.Join("|", [category, file, message]);
+    }
+
+    private static string BuildBugFingerprint(ExpandedRequirement bug)
+    {
+        var title = Regex.Replace((bug.Title ?? string.Empty).Trim().ToLowerInvariant(), @"\s+", " ");
+        var module = (bug.Module ?? string.Empty).Trim().ToLowerInvariant();
+        var severity = (bug.Severity ?? string.Empty).Trim().ToLowerInvariant();
+        return string.Join("|", [title, module, severity]);
     }
 
     private static bool ShouldCreateBugFromFinding(ReviewFinding finding)
@@ -542,6 +694,6 @@ public sealed class BacklogAgent : IAgent
 
     private record BacklogStats
     {
-        public int Total, New, InQueue, UnderDev, Completed, Blocked;
+        public int Total, New, ReadyBacklog, ActiveQueue, InDev, Completed, Blocked;
     }
 }

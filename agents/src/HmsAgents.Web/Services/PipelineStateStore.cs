@@ -91,9 +91,11 @@ public sealed class PipelineStateStore
                 Iteration = e.Iteration,
                 Tags = e.Tags,
                 AcceptanceCriteria = e.AcceptanceCriteria,
+                DependsOn = e.DependsOn,
                 CreatedAt = e.CreatedAt,
                 StartedAt = e.StartedAt,
-                CompletedAt = e.CompletedAt
+                CompletedAt = e.CompletedAt,
+                AssignedAgent = e.AssignedAgent
             }).ToList();
 
             SaveToDisk(snapshot);
@@ -177,7 +179,9 @@ public sealed class BacklogItemSnapshot
     public int Iteration { get; set; }
     public List<string> Tags { get; set; } = [];
     public List<string> AcceptanceCriteria { get; set; } = [];
+    public List<string> DependsOn { get; set; } = [];
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset? StartedAt { get; set; }
     public DateTimeOffset? CompletedAt { get; set; }
+    public string AssignedAgent { get; set; } = string.Empty;
 }

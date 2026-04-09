@@ -91,6 +91,11 @@ public sealed class BugFixAgent : IAgent
             context.Findings.RemoveAll(f => resolvedFindings.Contains(f.Id));
 
             context.AgentStatuses[Type] = AgentStatus.Completed;
+
+            // Agent completes its own claimed work items
+            foreach (var item in context.CurrentClaimedItems)
+                context.CompleteWorkItem?.Invoke(item);
+
             await Task.CompletedTask;
 
             return new AgentResult
