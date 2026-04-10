@@ -9,6 +9,9 @@ public class Project : PlatformEntityBase
     public string Description { get; set; } = string.Empty;
     [Required] public string ProjectType { get; set; } = "web_app"; // web_app | api | mobile_app | data_pipeline | ml_model | cli_tool | library | full_stack
     [Required] public string Status { get; set; } = "draft"; // draft | active | paused | completed | archived
+    public string BrdStatus { get; set; } = "draft"; // draft | in_review | approved | rejected | superseded
+    public DateTimeOffset? BrdApprovedAt { get; set; }
+    public string? BrdApprovedBy { get; set; }
     public string? OrganizationId { get; set; }
 
     public ProjectSettings? Settings { get; set; }

@@ -3,6 +3,7 @@ using GNex.Agents.Orchestrator;
 using GNex.Core.Enums;
 using GNex.Core.Interfaces;
 using GNex.Core.Models;
+using GNex.Services.Platform;
 using GNex.Studio.Services;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
@@ -18,6 +19,17 @@ public sealed class PipelineHub : Hub
     {
         await Clients.Caller.SendAsync("Connected", "Dashboard connected to pipeline hub.");
         await base.OnConnectedAsync();
+    }
+}
+
+/// <summary>
+/// SignalR-based BRD status notifier — broadcasts BrdUpdated events to all clients.
+/// </summary>
+public sealed class SignalRBrdStatusNotifier(IHubContext<PipelineHub> hub) : IBrdStatusNotifier
+{
+    public async Task NotifyBrdStatusChangedAsync(string projectId, string status, string message, CancellationToken ct = default)
+    {
+        await hub.Clients.All.SendAsync("BrdUpdated", new { projectId, status, message }, ct);
     }
 }
 

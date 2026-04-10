@@ -92,6 +92,8 @@ builder.Services.AddScoped<ICompatibilityService, CompatibilityService>();
 builder.Services.AddScoped<IStarterKitService, StarterKitService>();
 builder.Services.AddScoped<IProjectRecipeService, ProjectRecipeService>();
 builder.Services.AddScoped<IBrdUploadService, BrdUploadService>();
+builder.Services.AddScoped<IBrdWorkflowService, BrdWorkflowService>();
+builder.Services.AddSingleton<IBrdStatusNotifier, SignalRBrdStatusNotifier>();
 
 // Workflow engine & agent resolver (Phase 9 — multi-project orchestration)
 builder.Services.AddScoped<IWorkflowExecutionEngine, WorkflowExecutionEngine>();

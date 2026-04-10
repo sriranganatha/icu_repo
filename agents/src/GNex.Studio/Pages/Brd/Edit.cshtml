@@ -1,0 +1,631 @@
+@page
+@{
+    ViewData["Title"] = "Edit BRD";
+}
+
+<div class="container-fluid px-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2><i class="bi bi-pencil-square me-2"></i>Edit BRD</h2>
+        <a href="/Brd" class="btn btn-outline-secondary"><i class="bi bi-arrow-left me-1"></i>Back to BRD List</a>
+    </div>
+
+    <!-- Project selector -->
+    <div class="card mb-4" id="projectCard">
+        <div class="card-header"><i class="bi bi-folder me-1"></i>Select Project</div>
+        <div class="card-body">
+            <div id="projectLoading" class="text-muted"><i class="bi bi-hourglass-split me-1"></i>Loading projects...</div>
+            <div id="projectList" class="row g-3" style="display:none;"></div>
+            <div id="noProjects" class="text-center text-muted py-3" style="display:none;">
+                <i class="bi bi-inbox fs-3"></i>
+                <p class="mt-2 mb-0">No projects with BRD sections found. <a href="/Brd/Upload">Upload requirements first</a>.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Active project header -->
+    <div id="activeProjectBar" class="alert alert-primary d-flex justify-content-between align-items-center mb-3" style="display:none!important;">
+        <div>
+            <i class="bi bi-folder-fill me-1"></i>
+            <strong id="activeProjectName"></strong>
+            <span class="badge bg-secondary ms-2" id="activeProjectType"></span>
+            <span class="badge bg-info ms-1" id="activeSectionCount"></span>
+            <span class="badge ms-1" id="activeBrdStatus"></span>
+        </div>
+        <button class="btn btn-sm btn-outline-primary" onclick="changeProject()">
+            <i class="bi bi-arrow-repeat me-1"></i>Change Project
+        </button>
+    </div>
+
+    <!-- BRD Workflow Status Bar -->
+    <div id="workflowBar" class="card mb-3" style="display:none;">
+        <div class="card-body py-2">
+            <div class="d-flex justify-content-between align-items-center">
+                <div class="d-flex align-items-center gap-3">
+                    <span class="fw-bold">BRD Status:</span>
+                    <!-- Status pipeline visual -->
+                    <div class="d-flex align-items-center gap-1" id="statusPipeline">
+                        <span class="badge rounded-pill" id="stepDraft">Draft</span>
+                        <i class="bi bi-arrow-right text-muted"></i>
+                        <span class="badge rounded-pill" id="stepInReview">In Review</span>
+                        <i class="bi bi-arrow-right text-muted"></i>
+                        <span class="badge rounded-pill" id="stepApproved">Approved</span>
+                    </div>
+                    <span id="approvalInfo" class="text-muted small" style="display:none;"></span>
+                </div>
+                <div class="d-flex gap-2" id="workflowActions">
+                    <button class="btn btn-sm btn-primary" id="btnSubmitReview" onclick="submitForReview()" style="display:none;">
+                        <i class="bi bi-send me-1"></i>Submit for Review
+                    </button>
+                    <button class="btn btn-sm btn-success" id="btnApprove" onclick="approveBrd()" style="display:none;">
+                        <i class="bi bi-check-circle me-1"></i>Approve
+                    </button>
+                    <button class="btn btn-sm btn-danger" id="btnReject" onclick="rejectBrd()" style="display:none;">
+                        <i class="bi bi-x-circle me-1"></i>Reject
+                    </button>
+                    <button class="btn btn-sm btn-warning" id="btnRequestChanges" onclick="requestChanges()" style="display:none;">
+                        <i class="bi bi-arrow-counterclockwise me-1"></i>Request Changes
+                    </button>
+                </div>
+            </div>
+            <!-- Pipeline progress (shown after approval) -->
+            <div id="pipelineProgress" class="mt-2" style="display:none;">
+                <div class="d-flex align-items-center gap-2">
+                    <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
+                    <span class="small text-primary fw-bold">Pipeline running...</span>
+                    <span class="small text-muted" id="pipelineStatus"></span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Action bar -->
+    <div id="actionBar" class="d-flex justify-content-between align-items-center mb-3" style="display:none;">
+        <div class="d-flex gap-2">
+            <button class="btn btn-success" id="btnSaveAll" onclick="saveAllSections()" disabled>
+                <i class="bi bi-save me-1"></i>Save All Changes
+            </button>
+            <button class="btn btn-outline-secondary" id="btnCancelEdits" onclick="cancelEdits()" disabled>
+                <i class="bi bi-x-circle me-1"></i>Cancel Edits
+            </button>
+        </div>
+        <div class="d-flex gap-2">
+            <button class="btn btn-outline-primary" onclick="expandAll()">
+                <i class="bi bi-arrows-expand me-1"></i>Expand All
+            </button>
+            <button class="btn btn-outline-primary" onclick="collapseAll()">
+                <i class="bi bi-arrows-collapse me-1"></i>Collapse All
+            </button>
+            <button class="btn btn-outline-danger" id="btnClearAll" onclick="clearAllSections()">
+                <i class="bi bi-trash me-1"></i>Clear All
+            </button>
+        </div>
+    </div>
+
+    <!-- Sections editor -->
+    <div id="sectionsContainer"></div>
+</div>
+
+@section Scripts {
+<script>
+    let selectedProjectId = null;
+    let loadedSections = [];
+    let editedSections = {};
+
+    // ── Init ──────────────────────────────────────────────
+    (async function init() {
+        // Check URL for projectId query param
+        const params = new URLSearchParams(window.location.search);
+        const pid = params.get('projectId');
+        if (pid) {
+            selectedProjectId = pid;
+            await loadSectionsForProject(pid);
+        } else {
+            await loadProjects();
+        }
+    })();
+
+    // ── Project listing ───────────────────────────────────
+    async function loadProjects() {
+        document.getElementById('projectCard').style.display = '';
+        document.getElementById('actionBar').style.display = 'none';
+        document.getElementById('activeProjectBar').style.cssText = 'display:none!important';
+        document.getElementById('sectionsContainer').innerHTML = '';
+
+        try {
+            const res = await fetch('/api/brd/projects');
+            if (!res.ok) throw new Error('Failed to load');
+            const projects = await res.json();
+
+            document.getElementById('projectLoading').style.display = 'none';
+
+            if (projects.length === 0) {
+                document.getElementById('noProjects').style.display = '';
+                return;
+            }
+
+            const list = document.getElementById('projectList');
+            list.style.display = '';
+            list.innerHTML = projects.map(p => `
+                <div class="col-md-4 col-lg-3">
+                    <div class="card h-100 project-pick-card" style="cursor:pointer"
+                         onclick="selectProject('${p.projectId}', '${escapeAttr(p.projectName)}', '${p.projectType}', ${p.sectionCount}, '${p.brdStatus || 'draft'}')">
+                        <div class="card-body">
+                            <h6 class="card-title mb-1">${escapeHtml(p.projectName)}</h6>
+                            <span class="badge bg-secondary">${p.projectType}</span>
+                            <span class="badge bg-info ms-1">${p.sectionCount} sections</span>
+                            <span class="badge ${statusBadgeClass(p.brdStatus || 'draft')} ms-1">${formatStatus(p.brdStatus || 'draft')}</span>
+                            <div class="text-muted small mt-2">
+                                Updated: ${new Date(p.lastUpdated).toLocaleString()}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+        } catch (e) {
+            document.getElementById('projectLoading').innerHTML =
+                '<span class="text-danger"><i class="bi bi-exclamation-triangle me-1"></i>Error loading projects.</span>';
+        }
+    }
+
+    let currentBrdStatus = 'draft';
+
+    function selectProject(id, name, type, count, brdStatus) {
+        selectedProjectId = id;
+        currentBrdStatus = brdStatus || 'draft';
+        // Update URL without reload
+        history.replaceState(null, '', `/Brd/Edit?projectId=${id}`);
+        showActiveProject(name, type, count);
+        updateWorkflowBar(currentBrdStatus);
+        loadSectionsForProject(id);
+    }
+
+    function showActiveProject(name, type, count) {
+        document.getElementById('projectCard').style.display = 'none';
+        const bar = document.getElementById('activeProjectBar');
+        bar.style.cssText = '';
+        document.getElementById('activeProjectName').textContent = name;
+        document.getElementById('activeProjectType').textContent = type;
+        document.getElementById('activeSectionCount').textContent = `${count} sections`;
+    }
+
+    function changeProject() {
+        selectedProjectId = null;
+        editedSections = {};
+        history.replaceState(null, '', '/Brd/Edit');
+        loadProjects();
+    }
+
+    // ── Section loading ───────────────────────────────────
+    async function loadSectionsForProject(projectId) {
+        const res = await fetch(`/api/brd/${projectId}/sections`);
+        if (!res.ok) {
+            document.getElementById('sectionsContainer').innerHTML =
+                '<div class="alert alert-warning">Could not load sections for this project.</div>';
+            return;
+        }
+
+        const sections = await res.json();
+        loadedSections = sections.map(s => ({ ...s }));
+        editedSections = {};
+
+        // If we don't have project name from card click, show generic header
+        const bar = document.getElementById('activeProjectBar');
+        if (bar.style.cssText.includes('none')) {
+            showActiveProject(projectId, '', sections.length);
+            // Try to fetch project name
+            fetch('/api/brd/projects').then(r => r.json()).then(projects => {
+                const p = projects.find(x => x.projectId === projectId);
+                if (p) showActiveProject(p.projectName, p.projectType, p.sectionCount);
+            }).catch(() => {});
+        }
+
+        document.getElementById('projectCard').style.display = 'none';
+        document.getElementById('actionBar').style.display = '';
+        renderSections(sections);
+        updateActionButtons();
+    }
+
+    function renderSections(sections) {
+        const container = document.getElementById('sectionsContainer');
+
+        if (sections.length === 0) {
+            container.innerHTML = '<div class="text-center text-muted py-5"><i class="bi bi-inbox fs-1"></i><p class="mt-2">No sections found for this project.</p></div>';
+            return;
+        }
+
+        container.innerHTML = `
+            <div class="accordion" id="sectionsAccordion">
+                ${sections.map((s, i) => `
+                    <div class="accordion-item" data-section-id="${s.id}">
+                        <h2 class="accordion-header">
+                            <button class="accordion-button collapsed" type="button"
+                                    data-bs-toggle="collapse" data-bs-target="#section${i}">
+                                <span class="badge bg-secondary me-2">${s.order}</span>
+                                ${formatSectionName(s.sectionType)}
+                                <span class="badge bg-warning ms-2 dirty-badge" style="display:none;">Modified</span>
+                            </button>
+                        </h2>
+                        <div id="section${i}" class="accordion-collapse collapse" data-bs-parent="#sectionsAccordion">
+                            <div class="accordion-body">
+                                <div class="d-flex justify-content-end gap-1 mb-2">
+                                    <button class="btn btn-sm btn-outline-primary btn-edit" onclick="toggleEdit('${s.id}', ${i})">
+                                        <i class="bi bi-pencil me-1"></i>Edit
+                                    </button>
+                                    <button class="btn btn-sm btn-success btn-save-one" onclick="saveOneSection('${s.id}', ${i})" style="display:none;">
+                                        <i class="bi bi-check-lg me-1"></i>Save
+                                    </button>
+                                    <button class="btn btn-sm btn-outline-secondary btn-cancel-one" onclick="cancelOneEdit('${s.id}', ${i})" style="display:none;">
+                                        Cancel
+                                    </button>
+                                </div>
+                                <pre class="bg-light p-3 rounded small section-view" id="view-${i}" style="white-space:pre-wrap">${escapeHtml(s.content)}</pre>
+                                <textarea class="form-control font-monospace small section-editor" id="editor-${i}" rows="20" style="display:none; white-space:pre;">${escapeHtml(s.content)}</textarea>
+                            </div>
+                        </div>
+                    </div>
+                `).join('')}
+            </div>
+        `;
+    }
+
+    // ── Editing ───────────────────────────────────────────
+    function toggleEdit(sectionId, idx) {
+        const view = document.getElementById(`view-${idx}`);
+        const editor = document.getElementById(`editor-${idx}`);
+        const item = document.querySelector(`[data-section-id="${sectionId}"]`);
+
+        view.style.display = 'none';
+        editor.style.display = '';
+        item.querySelector('.btn-edit').style.display = 'none';
+        item.querySelector('.btn-save-one').style.display = '';
+        item.querySelector('.btn-cancel-one').style.display = '';
+
+        editor.oninput = () => {
+            const original = loadedSections.find(s => s.id === sectionId);
+            if (editor.value !== original.content) {
+                editedSections[sectionId] = editor.value;
+                item.querySelector('.dirty-badge').style.display = '';
+            } else {
+                delete editedSections[sectionId];
+                item.querySelector('.dirty-badge').style.display = 'none';
+            }
+            updateActionButtons();
+        };
+    }
+
+    function cancelOneEdit(sectionId, idx) {
+        const view = document.getElementById(`view-${idx}`);
+        const editor = document.getElementById(`editor-${idx}`);
+        const item = document.querySelector(`[data-section-id="${sectionId}"]`);
+
+        const original = loadedSections.find(s => s.id === sectionId);
+        editor.value = original.content;
+        view.textContent = original.content;
+        delete editedSections[sectionId];
+        item.querySelector('.dirty-badge').style.display = 'none';
+
+        editor.style.display = 'none';
+        view.style.display = '';
+        item.querySelector('.btn-edit').style.display = '';
+        item.querySelector('.btn-save-one').style.display = 'none';
+        item.querySelector('.btn-cancel-one').style.display = 'none';
+        updateActionButtons();
+    }
+
+    async function saveOneSection(sectionId, idx) {
+        const editor = document.getElementById(`editor-${idx}`);
+        const res = await fetch(`/api/brd/sections/${sectionId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ content: editor.value })
+        });
+
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            alert('Save failed: ' + (err.error || res.statusText));
+            return;
+        }
+
+        const orig = loadedSections.find(s => s.id === sectionId);
+        if (orig) orig.content = editor.value;
+        delete editedSections[sectionId];
+
+        document.getElementById(`view-${idx}`).textContent = editor.value;
+        cancelOneEdit(sectionId, idx);
+        showToast('Section saved.');
+    }
+
+    async function saveAllSections() {
+        const ids = Object.keys(editedSections);
+        if (ids.length === 0) return;
+
+        document.getElementById('btnSaveAll').disabled = true;
+        let saved = 0, failed = 0;
+
+        for (const id of ids) {
+            const res = await fetch(`/api/brd/sections/${id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ content: editedSections[id] })
+            });
+
+            if (res.ok) {
+                const orig = loadedSections.find(s => s.id === id);
+                if (orig) orig.content = editedSections[id];
+                delete editedSections[id];
+                const item = document.querySelector(`[data-section-id="${id}"]`);
+                if (item) item.querySelector('.dirty-badge').style.display = 'none';
+                saved++;
+            } else {
+                failed++;
+            }
+        }
+
+        showToast(`${saved} section(s) saved.${failed > 0 ? ` ${failed} failed.` : ''}`);
+        if (selectedProjectId) await loadSectionsForProject(selectedProjectId);
+    }
+
+    function cancelEdits() {
+        if (Object.keys(editedSections).length > 0 && !confirm('Discard all unsaved changes?')) return;
+        editedSections = {};
+        if (selectedProjectId) loadSectionsForProject(selectedProjectId);
+    }
+
+    async function clearAllSections() {
+        if (!selectedProjectId) return;
+        if (!confirm('This will remove all BRD sections for this project. This cannot be undone. Continue?')) return;
+
+        const res = await fetch(`/api/brd/${selectedProjectId}/sections`, { method: 'DELETE' });
+        if (!res.ok) { alert('Clear failed: ' + res.statusText); return; }
+
+        const data = await res.json();
+        loadedSections = [];
+        editedSections = {};
+        document.getElementById('sectionsContainer').innerHTML = '';
+        document.getElementById('actionBar').style.display = 'none';
+        showToast(`${data.count} section(s) cleared.`);
+        changeProject();
+    }
+
+    // ── Expand / Collapse ─────────────────────────────────
+    function expandAll() {
+        document.querySelectorAll('#sectionsAccordion .accordion-collapse').forEach(el => {
+            new bootstrap.Collapse(el, { toggle: false }).show();
+        });
+    }
+    function collapseAll() {
+        document.querySelectorAll('#sectionsAccordion .accordion-collapse.show').forEach(el => {
+            bootstrap.Collapse.getInstance(el)?.hide();
+        });
+    }
+
+    // ── Helpers ───────────────────────────────────────────
+    function updateActionButtons() {
+        const hasDirty = Object.keys(editedSections).length > 0;
+        document.getElementById('btnSaveAll').disabled = !hasDirty;
+        document.getElementById('btnCancelEdits').disabled = !hasDirty;
+    }
+
+    function formatSectionName(type) {
+        return type.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    }
+
+    function escapeHtml(text) {
+        const d = document.createElement('div');
+        d.textContent = text;
+        return d.innerHTML;
+    }
+
+    function escapeAttr(text) {
+        return text.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+    }
+
+    function showToast(message) {
+        let container = document.getElementById('toastContainer');
+        if (!container) {
+            container = document.createElement('div');
+            container.id = 'toastContainer';
+            container.className = 'toast-container position-fixed bottom-0 end-0 p-3';
+            container.style.zIndex = 1090;
+            document.body.appendChild(container);
+        }
+        const id = 'toast-' + Date.now();
+        container.insertAdjacentHTML('beforeend', `
+            <div id="${id}" class="toast align-items-center text-bg-success border-0" role="alert">
+                <div class="d-flex">
+                    <div class="toast-body"><i class="bi bi-check-circle me-1"></i>${message}</div>
+                    <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+                </div>
+            </div>
+        `);
+        const toastEl = document.getElementById(id);
+        new bootstrap.Toast(toastEl, { delay: 3000 }).show();
+        toastEl.addEventListener('hidden.bs.toast', () => toastEl.remove());
+    }
+
+    // Warn on unsaved changes
+    window.addEventListener('beforeunload', (e) => {
+        if (Object.keys(editedSections).length > 0) {
+            e.preventDefault();
+            e.returnValue = '';
+        }
+    });
+
+    // ── Workflow Status ───────────────────────────────────
+    function statusBadgeClass(status) {
+        switch (status) {
+            case 'draft': return 'bg-secondary';
+            case 'in_review': return 'bg-warning text-dark';
+            case 'approved': return 'bg-success';
+            case 'rejected': return 'bg-danger';
+            case 'superseded': return 'bg-dark';
+            default: return 'bg-secondary';
+        }
+    }
+
+    function formatStatus(status) {
+        return (status || 'draft').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    }
+
+    function updateWorkflowBar(status) {
+        currentBrdStatus = status;
+        const bar = document.getElementById('workflowBar');
+        bar.style.display = '';
+
+        // Update status badge on project bar
+        const badge = document.getElementById('activeBrdStatus');
+        badge.className = `badge ms-1 ${statusBadgeClass(status)}`;
+        badge.textContent = formatStatus(status);
+
+        // Update pipeline steps visual
+        const steps = {
+            'stepDraft': status === 'draft' ? 'bg-primary' : (status !== 'draft' ? 'bg-primary bg-opacity-50' : 'bg-light text-muted'),
+            'stepInReview': status === 'in_review' ? 'bg-warning text-dark' : (status === 'approved' || status === 'rejected' ? 'bg-warning bg-opacity-50' : 'bg-light text-muted'),
+            'stepApproved': status === 'approved' ? 'bg-success' : 'bg-light text-muted'
+        };
+        for (const [id, cls] of Object.entries(steps)) {
+            document.getElementById(id).className = `badge rounded-pill ${cls}`;
+        }
+
+        // Show/hide action buttons based on status
+        document.getElementById('btnSubmitReview').style.display = status === 'draft' ? '' : 'none';
+        document.getElementById('btnApprove').style.display = status === 'in_review' ? '' : 'none';
+        document.getElementById('btnReject').style.display = status === 'in_review' ? '' : 'none';
+        document.getElementById('btnRequestChanges').style.display = status === 'in_review' ? '' : 'none';
+
+        // Show pipeline progress if approved
+        document.getElementById('pipelineProgress').style.display = status === 'approved' ? '' : 'none';
+    }
+
+    async function loadBrdStatus() {
+        if (!selectedProjectId) return;
+        try {
+            const res = await fetch(`/api/brd/${selectedProjectId}/status`);
+            if (res.ok) {
+                const data = await res.json();
+                updateWorkflowBar(data.status);
+                if (data.approvedAt) {
+                    document.getElementById('approvalInfo').style.display = '';
+                    document.getElementById('approvalInfo').textContent =
+                        `Approved by ${data.approvedBy || 'user'} on ${new Date(data.approvedAt).toLocaleString()}`;
+                }
+            }
+        } catch (e) { /* silent */ }
+    }
+
+    async function submitForReview() {
+        if (!selectedProjectId) return;
+        if (Object.keys(editedSections).length > 0) {
+            if (!confirm('You have unsaved changes. Save them before submitting?')) return;
+            await saveAllSections();
+        }
+        const res = await fetch(`/api/brd/${selectedProjectId}/submit`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ reviewer: 'user' })
+        });
+        const data = await res.json();
+        if (res.ok) {
+            showToast(data.message);
+            updateWorkflowBar('in_review');
+        } else {
+            alert(data.error || 'Submit failed');
+        }
+    }
+
+    async function approveBrd() {
+        if (!selectedProjectId) return;
+        const comment = prompt('Approval comment (optional):');
+        const res = await fetch(`/api/brd/${selectedProjectId}/approve`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ reviewer: 'user', comment: comment || null })
+        });
+        const data = await res.json();
+        if (res.ok) {
+            showToast(data.message);
+            updateWorkflowBar('approved');
+            if (data.approvedAt) {
+                document.getElementById('approvalInfo').style.display = '';
+                document.getElementById('approvalInfo').textContent =
+                    `Approved by ${data.approvedBy || 'user'} on ${new Date(data.approvedAt).toLocaleString()}`;
+            }
+        } else {
+            alert(data.error || 'Approval failed');
+        }
+    }
+
+    async function rejectBrd() {
+        if (!selectedProjectId) return;
+        const reason = prompt('Rejection reason (required):');
+        if (!reason) return;
+        const res = await fetch(`/api/brd/${selectedProjectId}/reject`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ reviewer: 'user', reason })
+        });
+        const data = await res.json();
+        if (res.ok) {
+            showToast(data.message);
+            updateWorkflowBar('rejected');
+        } else {
+            alert(data.error || 'Rejection failed');
+        }
+    }
+
+    async function requestChanges() {
+        if (!selectedProjectId) return;
+        const feedback = prompt('Feedback / changes needed (required):');
+        if (!feedback) return;
+        const res = await fetch(`/api/brd/${selectedProjectId}/request-changes`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ reviewer: 'user', feedback })
+        });
+        const data = await res.json();
+        if (res.ok) {
+            showToast(data.message);
+            updateWorkflowBar('draft');
+        } else {
+            alert(data.error || 'Request changes failed');
+        }
+    }
+
+    // ── SignalR for pipeline events ───────────────────────
+    let hubConnection = null;
+    function connectSignalR() {
+        if (hubConnection) return;
+        if (typeof signalR === 'undefined') return;
+        hubConnection = new signalR.HubConnectionBuilder()
+            .withUrl('/hubs/pipeline')
+            .withAutomaticReconnect()
+            .build();
+
+        hubConnection.on('PipelineEvent', (evt) => {
+            if (currentBrdStatus === 'approved') {
+                const statusEl = document.getElementById('pipelineStatus');
+                if (statusEl) statusEl.textContent = evt.message || '';
+            }
+        });
+
+        hubConnection.on('BrdUpdated', (data) => {
+            if (data.projectId === selectedProjectId) {
+                showToast(`BRD updated: ${data.message || 'Status changed'}`);
+                loadBrdStatus();
+            }
+        });
+
+        hubConnection.start().catch(err => console.warn('SignalR connect failed:', err));
+    }
+
+    // Connect when project is selected
+    const origSelect = selectProject;
+    // Already wired — just ensure SignalR is up on section load
+    const origLoadSections = loadSectionsForProject;
+    loadSectionsForProject = async function(projectId) {
+        connectSignalR();
+        await origLoadSections(projectId);
+        await loadBrdStatus();
+    };
+</script>
+}

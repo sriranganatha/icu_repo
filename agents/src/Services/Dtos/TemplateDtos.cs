@@ -114,3 +114,7 @@ public sealed record BrdFileResult(
 
 public sealed record BrdSectionDto(
     string Id, string SectionType, int Order, string Content, string DiagramsJson);
+
+public sealed record BrdProjectSummaryDto(
+    string ProjectId, string ProjectName, string ProjectType, int SectionCount, DateTimeOffset LastUpdated,
+    string BrdStatus = "draft", DateTimeOffset? BrdApprovedAt = null, string? BrdApprovedBy = null);

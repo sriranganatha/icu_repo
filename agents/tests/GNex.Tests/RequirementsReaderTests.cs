@@ -1,6 +1,7 @@
 using FluentAssertions;
 using GNex.Agents.Requirements;
 using GNex.Core.Enums;
+using GNex.Core.Interfaces;
 using GNex.Core.Models;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -56,7 +57,7 @@ Encounter
         try
         {
             var parser = new RequirementParser(new Mock<ILogger<RequirementParser>>().Object, new Mock<IServiceScopeFactory>().Object);
-            var agent = new RequirementsReaderAgent(parser, new Mock<ILogger<RequirementsReaderAgent>>().Object);
+            var agent = new RequirementsReaderAgent(parser, new Mock<ILlmProvider>().Object, new Mock<ILogger<RequirementsReaderAgent>>().Object);
             var ctx = new AgentContext { RequirementsBasePath = tempDir };
 
             // Act
@@ -78,7 +79,7 @@ Encounter
     {
         // Arrange — parser returns empty list for nonexistent path (no exception)
         var parser = new RequirementParser(new Mock<ILogger<RequirementParser>>().Object, new Mock<IServiceScopeFactory>().Object);
-        var agent = new RequirementsReaderAgent(parser, new Mock<ILogger<RequirementsReaderAgent>>().Object);
+        var agent = new RequirementsReaderAgent(parser, new Mock<ILlmProvider>().Object, new Mock<ILogger<RequirementsReaderAgent>>().Object);
         var ctx = new AgentContext { RequirementsBasePath = @"C:\nonexistent\path\12345" };
 
         // Act

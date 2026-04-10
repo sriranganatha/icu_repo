@@ -25,15 +25,17 @@ namespace GNex.Agents.Planning;
 public sealed class PlanningAgent : IAgent
 {
     private readonly IContextBroker _broker;
+    private readonly ILlmProvider _llm;
     private readonly ILogger<PlanningAgent> _logger;
 
     public AgentType Type => AgentType.Planning;
     public string Name => "Planning & Reasoning Agent";
     public string Description => "Analyzes requirements holistically and creates structured implementation plans for code-gen agents to follow, ensuring coordinated, context-aware development.";
 
-    public PlanningAgent(IContextBroker broker, ILogger<PlanningAgent> logger)
+    public PlanningAgent(IContextBroker broker, ILlmProvider llm, ILogger<PlanningAgent> logger)
     {
         _broker = broker;
+        _llm = llm;
         _logger = logger;
     }
 
@@ -124,7 +126,10 @@ public sealed class PlanningAgent : IAgent
         // ─── Phase 6: Identify standards and patterns that must be followed ───
         plan.Standards = IdentifyStandards(context);
 
-        // ─── Phase 7: Store the plan in context for downstream agents ───
+        // ─── Phase 7: LLM-enhanced plan review ───
+        await EnhancePlanWithLlmAsync(plan, context, ct);
+
+        // ─── Phase 8: Store the plan in context for downstream agents ───
         context.ImplementationPlan = plan;
 
         // Also publish as an orchestrator instruction for agents to read
@@ -508,6 +513,49 @@ public sealed class PlanningAgent : IAgent
             "Observability — OpenTelemetry, Prometheus, structured logging, correlation IDs",
             "Testing — xUnit + Moq, arrange-act-assert, test coverage > 80%"
         ];
+    }
+
+    private async Task EnhancePlanWithLlmAsync(ImplementationPlan plan, AgentContext context, CancellationToken ct)
+    {
+        var serviceSummary = string.Join(", ", plan.AffectedServices.Take(10).Select(s => s.ServiceName));
+        var reqCount = context.Requirements.Count;
+        var concerns = string.Join(", ", plan.CrossCuttingConcerns.Take(5));
+
+        var prompt = new LlmPrompt
+        {
+            SystemPrompt = """
+                You are a senior architect reviewing an implementation plan for a healthcare HMS.
+                Identify any missing concerns, risky execution orderings, or overlooked dependencies.
+                Be concise. Output a numbered list of recommendations (max 10).
+                """,
+            UserPrompt = $"""
+                Implementation plan review:
+                - {reqCount} requirements, {plan.AffectedServices.Count} affected services: {serviceSummary}
+                - Execution order: {string.Join(" → ", plan.ExecutionOrder.Take(8).Select(e => $"{e.ServiceName}:{e.Layer}"))}
+                - Cross-cutting: {concerns}
+                - {plan.AgentInstructions.Count} agent instructions defined
+
+                What risks or gaps exist? What should be added or reordered?
+                """,
+            Temperature = 0.3,
+            MaxTokens = 1500,
+            RequestingAgent = Name
+        };
+
+        try
+        {
+            var response = await _llm.GenerateAsync(prompt, ct);
+            if (response.Success && !string.IsNullOrWhiteSpace(response.Content))
+            {
+                plan.LlmReviewNotes = response.Content;
+                context.OrchestratorInstructions.Add($"[PLAN-LLM-REVIEW] {response.Content}");
+                _logger.LogInformation("LLM reviewed implementation plan — added notes");
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "LLM plan review skipped");
+        }
     }
 
     private static string FormatPlanSummary(ImplementationPlan plan)

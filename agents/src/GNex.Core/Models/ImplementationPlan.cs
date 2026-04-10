@@ -31,6 +31,9 @@ public sealed class ImplementationPlan
 
     /// <summary>Standards and regulatory requirements that generated code must meet.</summary>
     public List<string> Standards { get; set; } = [];
+
+    /// <summary>LLM-generated review notes identifying risks, gaps, and recommendations.</summary>
+    public string? LlmReviewNotes { get; set; }
 }
 
 /// <summary>Per-service context gathered during planning.</summary>

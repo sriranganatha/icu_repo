@@ -104,7 +104,7 @@ public class SprintPlannerTests
         context.ExpandedRequirements.Add(new ExpandedRequirement { Id = "1", Title = "Task 1", Priority = 5, SourceRequirementId = "R1" });
         context.ExpandedRequirements.Add(new ExpandedRequirement { Id = "2", Title = "Task 2", Priority = 3, SourceRequirementId = "R1" });
 
-        var agent = new SprintPlannerAgent(new Microsoft.Extensions.Logging.Abstractions.NullLogger<SprintPlannerAgent>());
+        var agent = new SprintPlannerAgent(new Moq.Mock<GNex.Core.Interfaces.ILlmProvider>().Object, new Microsoft.Extensions.Logging.Abstractions.NullLogger<SprintPlannerAgent>());
         var result = await agent.ExecuteAsync(context);
 
         Assert.True(result.Success);

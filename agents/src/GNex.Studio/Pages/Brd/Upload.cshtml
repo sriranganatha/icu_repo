@@ -74,6 +74,22 @@
             <strong>BRD Draft Created!</strong>
             <span id="resultDetails"></span>
         </div>
+
+        <!-- Save / Clear / Cancel action bar -->
+        <div class="d-flex justify-content-between align-items-center mb-3" id="sectionActions">
+            <div class="d-flex gap-2">
+                <button class="btn btn-success" id="btnSaveAll" onclick="saveAllSections()" disabled>
+                    <i class="bi bi-save me-1"></i>Save All Changes
+                </button>
+                <button class="btn btn-outline-secondary" id="btnCancelEdits" onclick="cancelEdits()" disabled>
+                    <i class="bi bi-x-circle me-1"></i>Cancel Edits
+                </button>
+            </div>
+            <button class="btn btn-outline-danger" id="btnClearAll" onclick="clearAllSections()">
+                <i class="bi bi-trash me-1"></i>Clear All Sections
+            </button>
+        </div>
+
         <div id="sectionsPreview" class="mt-3"></div>
     </div>
 </div>
@@ -274,33 +290,225 @@
         }
     }
 
+    let loadedSections = []; // original content for cancel
+    let editedSections = {}; // track dirty sections: { sectionId: newContent }
+
     async function loadSections(projectId) {
         const res = await fetch(`/api/brd/${projectId}/sections`);
         if (!res.ok) return;
         const sections = await res.json();
+        loadedSections = sections.map(s => ({ ...s }));
+        editedSections = {};
+        updateActionButtons();
+
         const container = document.getElementById('sectionsPreview');
         container.innerHTML = `
             <h5><i class="bi bi-list-ol me-1"></i>Generated BRD Sections</h5>
             <div class="accordion" id="sectionsAccordion">
                 ${sections.map((s, i) => `
-                    <div class="accordion-item">
-                        <h2 class="accordion-header">
+                    <div class="accordion-item" data-section-id="${s.id}">
+                        <h2 class="accordion-header d-flex">
                             <button class="accordion-button ${i > 0 ? 'collapsed' : ''}" type="button"
                                     data-bs-toggle="collapse" data-bs-target="#section${i}">
                                 <span class="badge bg-secondary me-2">${s.order}</span>
                                 ${s.sectionType.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}
+                                <span class="badge bg-warning ms-2 dirty-badge" style="display:none;">Modified</span>
                             </button>
                         </h2>
                         <div id="section${i}" class="accordion-collapse collapse ${i === 0 ? 'show' : ''}"
                              data-bs-parent="#sectionsAccordion">
                             <div class="accordion-body">
-                                <pre class="bg-light p-3 rounded small" style="white-space:pre-wrap">${s.content}</pre>
+                                <div class="d-flex justify-content-end mb-2">
+                                    <button class="btn btn-sm btn-outline-primary me-2 btn-edit" onclick="toggleEdit('${s.id}', ${i})">
+                                        <i class="bi bi-pencil me-1"></i>Edit
+                                    </button>
+                                    <button class="btn btn-sm btn-success btn-save-one" onclick="saveOneSection('${s.id}', ${i})" style="display:none;">
+                                        <i class="bi bi-check-lg me-1"></i>Save
+                                    </button>
+                                    <button class="btn btn-sm btn-outline-secondary btn-cancel-one ms-1" onclick="cancelOneEdit('${s.id}', ${i})" style="display:none;">
+                                        Cancel
+                                    </button>
+                                </div>
+                                <pre class="bg-light p-3 rounded small section-view" id="view-${i}" style="white-space:pre-wrap">${escapeHtml(s.content)}</pre>
+                                <textarea class="form-control font-monospace small section-editor" id="editor-${i}" rows="16" style="display:none; white-space:pre;">${escapeHtml(s.content)}</textarea>
                             </div>
                         </div>
                     </div>
                 `).join('')}
             </div>
         `;
+    }
+
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    function toggleEdit(sectionId, idx) {
+        const view = document.getElementById(`view-${idx}`);
+        const editor = document.getElementById(`editor-${idx}`);
+        const item = document.querySelector(`[data-section-id="${sectionId}"]`);
+        const editBtn = item.querySelector('.btn-edit');
+        const saveBtn = item.querySelector('.btn-save-one');
+        const cancelBtn = item.querySelector('.btn-cancel-one');
+
+        view.style.display = 'none';
+        editor.style.display = '';
+        editBtn.style.display = 'none';
+        saveBtn.style.display = '';
+        cancelBtn.style.display = '';
+
+        editor.oninput = () => {
+            const original = loadedSections.find(s => s.id === sectionId);
+            if (editor.value !== original.content) {
+                editedSections[sectionId] = editor.value;
+                item.querySelector('.dirty-badge').style.display = '';
+            } else {
+                delete editedSections[sectionId];
+                item.querySelector('.dirty-badge').style.display = 'none';
+            }
+            updateActionButtons();
+        };
+    }
+
+    function cancelOneEdit(sectionId, idx) {
+        const view = document.getElementById(`view-${idx}`);
+        const editor = document.getElementById(`editor-${idx}`);
+        const item = document.querySelector(`[data-section-id="${sectionId}"]`);
+        const editBtn = item.querySelector('.btn-edit');
+        const saveBtn = item.querySelector('.btn-save-one');
+        const cancelBtn = item.querySelector('.btn-cancel-one');
+
+        // Restore original content
+        const original = loadedSections.find(s => s.id === sectionId);
+        editor.value = original.content;
+        view.textContent = original.content;
+        delete editedSections[sectionId];
+        item.querySelector('.dirty-badge').style.display = 'none';
+
+        editor.style.display = 'none';
+        view.style.display = '';
+        editBtn.style.display = '';
+        saveBtn.style.display = 'none';
+        cancelBtn.style.display = 'none';
+        updateActionButtons();
+    }
+
+    async function saveOneSection(sectionId, idx) {
+        const editor = document.getElementById(`editor-${idx}`);
+        const content = editor.value;
+
+        const res = await fetch(`/api/brd/sections/${sectionId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ content })
+        });
+
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            alert('Save failed: ' + (err.error || res.statusText));
+            return;
+        }
+
+        // Update internal state
+        const orig = loadedSections.find(s => s.id === sectionId);
+        if (orig) orig.content = content;
+        delete editedSections[sectionId];
+
+        // Refresh view
+        const view = document.getElementById(`view-${idx}`);
+        view.textContent = content;
+        cancelOneEdit(sectionId, idx);
+
+        showToast('Section saved successfully.');
+    }
+
+    async function saveAllSections() {
+        const ids = Object.keys(editedSections);
+        if (ids.length === 0) return;
+
+        document.getElementById('btnSaveAll').disabled = true;
+        let saved = 0, failed = 0;
+
+        for (const id of ids) {
+            const res = await fetch(`/api/brd/sections/${id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ content: editedSections[id] })
+            });
+
+            if (res.ok) {
+                const orig = loadedSections.find(s => s.id === id);
+                if (orig) orig.content = editedSections[id];
+                delete editedSections[id];
+                const item = document.querySelector(`[data-section-id="${id}"]`);
+                if (item) item.querySelector('.dirty-badge').style.display = 'none';
+                saved++;
+            } else {
+                failed++;
+            }
+        }
+
+        updateActionButtons();
+        showToast(`${saved} section(s) saved.${failed > 0 ? ` ${failed} failed.` : ''}`);
+
+        // Close all editors and refresh views
+        if (selectedProjectId) await loadSections(selectedProjectId);
+    }
+
+    function cancelEdits() {
+        if (Object.keys(editedSections).length > 0 && !confirm('Discard all unsaved changes?')) return;
+
+        editedSections = {};
+        if (selectedProjectId) loadSections(selectedProjectId);
+    }
+
+    async function clearAllSections() {
+        if (!selectedProjectId) return;
+        if (!confirm('This will remove all BRD sections for this project. Continue?')) return;
+
+        const res = await fetch(`/api/brd/${selectedProjectId}/sections`, { method: 'DELETE' });
+        if (!res.ok) {
+            alert('Clear failed: ' + res.statusText);
+            return;
+        }
+
+        const data = await res.json();
+        loadedSections = [];
+        editedSections = {};
+        document.getElementById('sectionsPreview').innerHTML = '';
+        document.getElementById('resultSection').style.display = 'none';
+        showToast(`${data.count} section(s) cleared.`);
+    }
+
+    function updateActionButtons() {
+        const hasDirty = Object.keys(editedSections).length > 0;
+        document.getElementById('btnSaveAll').disabled = !hasDirty;
+        document.getElementById('btnCancelEdits').disabled = !hasDirty;
+    }
+
+    function showToast(message) {
+        let container = document.getElementById('toastContainer');
+        if (!container) {
+            container = document.createElement('div');
+            container.id = 'toastContainer';
+            container.className = 'toast-container position-fixed bottom-0 end-0 p-3';
+            container.style.zIndex = 1090;
+            document.body.appendChild(container);
+        }
+        const id = 'toast-' + Date.now();
+        container.insertAdjacentHTML('beforeend', `
+            <div id="${id}" class="toast align-items-center text-bg-success border-0" role="alert">
+                <div class="d-flex">
+                    <div class="toast-body"><i class="bi bi-check-circle me-1"></i>${message}</div>
+                    <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+                </div>
+            </div>
+        `);
+        const toastEl = document.getElementById(id);
+        new bootstrap.Toast(toastEl, { delay: 3000 }).show();
+        toastEl.addEventListener('hidden.bs.toast', () => toastEl.remove());
     }
 
     // Init

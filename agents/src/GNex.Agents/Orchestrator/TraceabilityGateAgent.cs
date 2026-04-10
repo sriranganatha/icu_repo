@@ -11,13 +11,18 @@ namespace GNex.Agents.Orchestrator;
 /// </summary>
 public sealed class TraceabilityGateAgent : IAgent
 {
+    private readonly ILlmProvider _llm;
     private readonly ILogger<TraceabilityGateAgent> _logger;
 
     public AgentType Type => AgentType.TraceabilityGate;
     public string Name => "Traceability Gate";
     public string Description => "Builds requirement-to-artifact traceability matrix and blocks release on gaps.";
 
-    public TraceabilityGateAgent(ILogger<TraceabilityGateAgent> logger) => _logger = logger;
+    public TraceabilityGateAgent(ILlmProvider llm, ILogger<TraceabilityGateAgent> logger)
+    {
+        _llm = llm;
+        _logger = logger;
+    }
 
     public async Task<AgentResult> ExecuteAsync(AgentContext context, CancellationToken ct = default)
     {
@@ -29,6 +34,10 @@ public sealed class TraceabilityGateAgent : IAgent
 
         var matrix = BuildMatrix(context);
         var uncovered = matrix.Where(e => !e.FullyCovered).ToList();
+
+        // LLM-enhanced gap analysis for uncovered requirements
+        if (uncovered.Count > 0)
+            await AnalyzeGapsWithLlmAsync(uncovered, context, ct);
 
         // Produce traceability artifact
         context.Artifacts.Add(new CodeArtifact
@@ -68,6 +77,70 @@ public sealed class TraceabilityGateAgent : IAgent
             Summary = $"Traceability: {matrix.Count - uncovered.Count}/{matrix.Count} requirements fully covered.",
             Duration = sw.Elapsed
         };
+    }
+
+    private async Task AnalyzeGapsWithLlmAsync(List<TraceabilityEntry> uncovered, AgentContext context, CancellationToken ct)
+    {
+        var gapSummary = string.Join("\n", uncovered.Take(20).Select(u =>
+            $"- {u.RequirementId}: {u.ImplementingArtifacts.Count} artifacts, {u.VerifyingTests.Count} tests"));
+
+        var reqContext = string.Join("\n", uncovered.Take(20).Select(u =>
+        {
+            var req = context.Requirements.FirstOrDefault(r => r.Id == u.RequirementId);
+            return req is not null ? $"- {req.Id}: {req.Title}" : $"- {u.RequirementId}: (title unknown)";
+        }));
+
+        var prompt = new LlmPrompt
+        {
+            SystemPrompt = """
+                You are a quality assurance engineer analyzing traceability gaps in a healthcare HMS system.
+                For each gap, suggest what artifacts or tests are missing and why they matter.
+                Be concise — one line per gap.
+                """,
+            UserPrompt = $"""
+                These {uncovered.Count} requirements have traceability gaps:
+
+                Requirements:
+                {reqContext}
+
+                Gap details:
+                {gapSummary}
+
+                For each, suggest: what artifact type is missing (DB migration, service, API endpoint, test) and the risk of not covering it.
+                Format: REQ_ID|missing_artifact_type|risk_description
+                """,
+            Temperature = 0.2,
+            MaxTokens = 1500,
+            RequestingAgent = Name
+        };
+
+        try
+        {
+            var response = await _llm.GenerateAsync(prompt, ct);
+            if (response.Success && !string.IsNullOrWhiteSpace(response.Content))
+            {
+                foreach (var line in response.Content.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                {
+                    var parts = line.TrimStart('-', ' ').Split('|');
+                    if (parts.Length >= 3)
+                    {
+                        context.Findings.Add(new ReviewFinding
+                        {
+                            Category = "TRACE-GAP-LLM",
+                            Severity = ReviewSeverity.Warning,
+                            Message = $"{parts[0].Trim()}: Missing {parts[1].Trim()} — {parts[2].Trim()}",
+                            Suggestion = $"Create {parts[1].Trim()} for requirement {parts[0].Trim()}"
+                        });
+                    }
+                }
+                _logger.LogInformation("LLM gap analysis produced {Count} findings", 
+                    context.Findings.Count(f => f.Category == "TRACE-GAP-LLM"));
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "LLM gap analysis skipped");
+        }
     }
 
     internal static List<TraceabilityEntry> BuildMatrix(AgentContext context)

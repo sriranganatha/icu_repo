@@ -30,18 +30,26 @@ public sealed class SmartLlmRouter : ILlmProvider
     {
         if (_gemini.IsAvailable)
         {
-            _logger.LogInformation("SmartLlmRouter: routing [{Agent}] to Gemini ({Provider})",
-                prompt.RequestingAgent, _gemini.ProviderName);
-            var result = await _gemini.GenerateAsync(prompt, ct);
-            if (result.Success && !string.IsNullOrWhiteSpace(result.Content))
+            try
             {
-                _logger.LogInformation("SmartLlmRouter: Gemini returned {Len} chars for [{Agent}]",
-                    result.Content.Length, prompt.RequestingAgent);
-                return result;
-            }
+                _logger.LogInformation("SmartLlmRouter: routing [{Agent}] to Gemini ({Provider})",
+                    prompt.RequestingAgent, _gemini.ProviderName);
+                var result = await _gemini.GenerateAsync(prompt, ct);
+                if (result.Success && !string.IsNullOrWhiteSpace(result.Content))
+                {
+                    _logger.LogInformation("SmartLlmRouter: Gemini returned {Len} chars for [{Agent}]",
+                        result.Content.Length, prompt.RequestingAgent);
+                    return result;
+                }
 
-            _logger.LogWarning("Gemini call failed for [{Agent}], falling back to template. Error: {Error}",
-                prompt.RequestingAgent, result.Error);
+                _logger.LogWarning("Gemini call failed for [{Agent}], falling back to template. Error: {Error}",
+                    prompt.RequestingAgent, result.Error);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "SmartLlmRouter: Gemini threw for [{Agent}], falling back to template",
+                    prompt.RequestingAgent);
+            }
         }
         else
         {

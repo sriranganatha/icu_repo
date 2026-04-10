@@ -6,7 +6,7 @@ namespace GNex.Studio.Api;
 
 [ApiController]
 [Route("api/brd")]
-public class BrdUploadController(IBrdUploadService svc) : ControllerBase
+public class BrdUploadController(IBrdUploadService svc, IBrdWorkflowService workflow) : ControllerBase
 {
     private static readonly HashSet<string> AllowedExtensions = [".txt", ".md", ".csv", ".json", ".pdf", ".docx"];
     private const long MaxFileSize = 10 * 1024 * 1024; // 10 MB
@@ -78,8 +78,90 @@ public class BrdUploadController(IBrdUploadService svc) : ControllerBase
         return Created($"/api/brd/{projectId}/sections", result);
     }
 
+    /// <summary>List all projects that have BRD sections.</summary>
+    [HttpGet("projects")]
+    public async Task<IActionResult> ListBrdProjects(CancellationToken ct)
+        => Ok(await svc.ListBrdProjectsAsync(ct));
+
     /// <summary>Get BRD draft sections for a project.</summary>
     [HttpGet("{projectId}/sections")]
     public async Task<IActionResult> GetSections(string projectId, CancellationToken ct)
         => Ok(await svc.GetBrdSectionsAsync(projectId, ct));
+
+    /// <summary>Save (update) a single BRD section's content.</summary>
+    [HttpPut("sections/{sectionId}")]
+    public async Task<IActionResult> SaveSection(string sectionId, [FromBody] SaveSectionRequest request, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(request?.Content))
+            return BadRequest(new { error = "Content is required." });
+
+        var updated = await svc.SaveSectionAsync(sectionId, request.Content, ct);
+        return updated ? Ok(new { message = "Section saved." }) : NotFound(new { error = "Section not found." });
+    }
+
+    /// <summary>Clear (soft-delete) all BRD sections for a project.</summary>
+    [HttpDelete("{projectId}/sections")]
+    public async Task<IActionResult> ClearSections(string projectId, CancellationToken ct)
+    {
+        var count = await svc.ClearBrdSectionsAsync(projectId, ct);
+        return Ok(new { message = $"{count} section(s) cleared.", count });
+    }
+
+    // ── BRD Workflow endpoints ────────────────────────────────
+
+    /// <summary>Get BRD workflow status for a project.</summary>
+    [HttpGet("{projectId}/status")]
+    public async Task<IActionResult> GetBrdStatus(string projectId, CancellationToken ct)
+    {
+        var result = await workflow.GetStatusAsync(projectId, ct);
+        return result.Success ? Ok(result) : NotFound(new { error = result.Message });
+    }
+
+    /// <summary>Submit a BRD for review (Draft → InReview).</summary>
+    [HttpPost("{projectId}/submit")]
+    public async Task<IActionResult> SubmitForReview(string projectId, [FromBody] BrdWorkflowRequest request, CancellationToken ct)
+    {
+        var reviewer = request?.Reviewer ?? "user";
+        var result = await workflow.SubmitForReviewAsync(projectId, reviewer, ct);
+        return result.Success ? Ok(result) : BadRequest(new { error = result.Message, status = result.Status });
+    }
+
+    /// <summary>Approve a BRD and trigger the agent pipeline (InReview → Approved).</summary>
+    [HttpPost("{projectId}/approve")]
+    public async Task<IActionResult> Approve(string projectId, [FromBody] BrdApprovalRequest request, CancellationToken ct)
+    {
+        var reviewer = request?.Reviewer ?? "user";
+        var result = await workflow.ApproveAsync(projectId, reviewer, request?.Comment, ct);
+        return result.Success ? Ok(result) : BadRequest(new { error = result.Message, status = result.Status });
+    }
+
+    /// <summary>Reject a BRD (InReview → Rejected).</summary>
+    [HttpPost("{projectId}/reject")]
+    public async Task<IActionResult> Reject(string projectId, [FromBody] BrdRejectRequest request, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(request?.Reason))
+            return BadRequest(new { error = "Reason is required." });
+
+        var reviewer = request.Reviewer ?? "user";
+        var result = await workflow.RejectAsync(projectId, reviewer, request.Reason, ct);
+        return result.Success ? Ok(result) : BadRequest(new { error = result.Message, status = result.Status });
+    }
+
+    /// <summary>Request changes on a BRD (InReview → Draft).</summary>
+    [HttpPost("{projectId}/request-changes")]
+    public async Task<IActionResult> RequestChanges(string projectId, [FromBody] BrdRequestChangesRequest request, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(request?.Feedback))
+            return BadRequest(new { error = "Feedback is required." });
+
+        var reviewer = request.Reviewer ?? "user";
+        var result = await workflow.RequestChangesAsync(projectId, reviewer, request.Feedback, ct);
+        return result.Success ? Ok(result) : BadRequest(new { error = result.Message, status = result.Status });
+    }
 }
+
+public sealed record SaveSectionRequest(string Content);
+public sealed record BrdWorkflowRequest(string? Reviewer);
+public sealed record BrdApprovalRequest(string? Reviewer, string? Comment);
+public sealed record BrdRejectRequest(string? Reviewer, string Reason);
+public sealed record BrdRequestChangesRequest(string? Reviewer, string Feedback);

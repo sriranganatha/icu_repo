@@ -11,13 +11,18 @@ namespace GNex.Agents.Orchestrator;
 /// </summary>
 public sealed class SprintPlannerAgent : IAgent
 {
+    private readonly ILlmProvider _llm;
     private readonly ILogger<SprintPlannerAgent> _logger;
 
     public AgentType Type => AgentType.SprintPlanner;
     public string Name => "Sprint Planner";
     public string Description => "Estimates effort and allocates backlog items into sprints based on capacity.";
 
-    public SprintPlannerAgent(ILogger<SprintPlannerAgent> logger) => _logger = logger;
+    public SprintPlannerAgent(ILlmProvider llm, ILogger<SprintPlannerAgent> logger)
+    {
+        _llm = llm;
+        _logger = logger;
+    }
 
     public async Task<AgentResult> ExecuteAsync(AgentContext context, CancellationToken ct = default)
     {
@@ -34,8 +39,11 @@ public sealed class SprintPlannerAgent : IAgent
         if (context.ReportProgress is not null)
             await context.ReportProgress(Type, $"Planning sprints for {items.Count} items");
 
+        // LLM-enhanced estimation
+        await EnhanceEstimatesWithLlmAsync(items, ct);
+
         // Estimate points per item
-        var estimated = items.Select(i => (Item: i, Points: EstimatePoints(i))).ToList();
+        var estimated = items.Select(i => (Item: i, Points: i.StoryPoints > 0 ? i.StoryPoints : EstimatePoints(i))).ToList();
 
         // Allocate into sprints (default 40 pts capacity)
         const int sprintCapacity = 40;
@@ -92,6 +100,62 @@ public sealed class SprintPlannerAgent : IAgent
         if (tags.Contains("migration") || tags.Contains("database")) points += 1;
 
         return Math.Min(points, 13); // Cap at 13 (Fibonacci ceiling)
+    }
+
+    private async Task EnhanceEstimatesWithLlmAsync(List<ExpandedRequirement> items, CancellationToken ct)
+    {
+        var stories = items.Where(i => i.ItemType == WorkItemType.UserStory && i.StoryPoints <= 0).Take(30).ToList();
+        if (stories.Count == 0) return;
+
+        var summary = string.Join("\n", stories.Select(s =>
+            $"- {s.Id}|{s.Title}|Tags:{string.Join(",", s.Tags ?? [])}|DOD:{s.DefinitionOfDone?.Count ?? 0}"));
+
+        var prompt = new LlmPrompt
+        {
+            SystemPrompt = """
+                You are an agile estimation expert for a healthcare HMS system.
+                Estimate story points using Fibonacci: 1, 2, 3, 5, 8, 13.
+                Output ONLY lines in format: ID|POINTS
+                No explanations.
+                """,
+            UserPrompt = $"""
+                Estimate story points for these {stories.Count} user stories:
+                {summary}
+
+                Consider: database stories = 2-5, API stories = 3-5, integration stories = 5-8,
+                security/HIPAA stories = 5-8, simple CRUD = 2-3.
+                """,
+            Temperature = 0.2,
+            MaxTokens = 500,
+            RequestingAgent = Name
+        };
+
+        try
+        {
+            var response = await _llm.GenerateAsync(prompt, ct);
+            if (response.Success && !string.IsNullOrWhiteSpace(response.Content))
+            {
+                var count = 0;
+                foreach (var line in response.Content.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                {
+                    var parts = line.TrimStart('-', ' ').Split('|');
+                    if (parts.Length >= 2 && int.TryParse(parts[^1].Trim(), out var pts))
+                    {
+                        var item = stories.FirstOrDefault(s => s.Id == parts[0].Trim());
+                        if (item is not null)
+                        {
+                            item.StoryPoints = Math.Clamp(pts, 1, 13);
+                            count++;
+                        }
+                    }
+                }
+                _logger.LogInformation("LLM estimated {Count}/{Total} story points", count, stories.Count);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "LLM estimation skipped — using heuristic estimates");
+        }
     }
 
     internal static List<SprintPlan> AllocateSprints(

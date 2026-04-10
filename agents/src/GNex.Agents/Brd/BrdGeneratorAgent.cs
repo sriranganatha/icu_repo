@@ -13,13 +13,18 @@ namespace GNex.Agents.Brd;
 /// </summary>
 public sealed class BrdGeneratorAgent : IAgent
 {
+    private readonly ILlmProvider _llm;
     private readonly ILogger<BrdGeneratorAgent> _logger;
 
     public AgentType Type => AgentType.BrdGenerator;
     public string Name => "BRD Generator";
     public string Description => "Generates Business Requirement Documents with structured sections and Mermaid diagrams.";
 
-    public BrdGeneratorAgent(ILogger<BrdGeneratorAgent> logger) => _logger = logger;
+    public BrdGeneratorAgent(ILlmProvider llm, ILogger<BrdGeneratorAgent> logger)
+    {
+        _llm = llm;
+        _logger = logger;
+    }
 
     public async Task<AgentResult> ExecuteAsync(AgentContext context, CancellationToken ct = default)
     {
@@ -37,6 +42,10 @@ public sealed class BrdGeneratorAgent : IAgent
             await context.ReportProgress(Type, $"Generating BRD from {requirements.Count} requirements");
 
         var brd = BuildBrd(requirements, context);
+        
+        // Enrich key sections with LLM
+        await EnrichBrdWithLlmAsync(brd, requirements, ct);
+        
         context.BrdDocuments.Add(brd);
 
         // Generate Mermaid diagrams
@@ -116,6 +125,92 @@ public sealed class BrdGeneratorAgent : IAgent
             Summary = $"Generated BRD '{brd.Title}' with {CountSections(brd)} sections and {CountDiagrams(brd)} diagrams.",
             Duration = sw.Elapsed
         };
+    }
+
+    private async Task EnrichBrdWithLlmAsync(BrdDocument brd, List<Requirement> requirements, CancellationToken ct)
+    {
+        var reqSummary = string.Join("\n", requirements.Select(r => $"- [{r.Id}] {r.Title}: {Truncate(r.Description, 200)}").Take(50));
+
+        var prompt = new LlmPrompt
+        {
+            SystemPrompt = """
+                You are a senior healthcare business analyst writing BRD sections for a Hospital Management System.
+                Respond ONLY with the requested section content — no preamble, no markdown headers, no explanations.
+                Be specific, detailed, and tie every statement back to the requirements provided.
+                """,
+            UserPrompt = $"""
+                Given these {requirements.Count} requirements:
+                {reqSummary}
+
+                Generate an Executive Summary (2-3 paragraphs) that:
+                1. States the business problem being solved
+                2. Lists key capabilities being delivered
+                3. Summarizes expected outcomes and success metrics
+                4. References specific requirement IDs
+
+                Then on a new line starting with "===PROJECT_SCOPE===" generate a Project Scope (1-2 paragraphs):
+                1. What is in scope with specific deliverables
+                2. Key technical boundaries
+                3. Integration touchpoints
+
+                Then on a new line starting with "===RISKS===" generate 5 project-specific risks in format:
+                RISK|description|impact|likelihood|mitigation
+                """,
+            Temperature = 0.3,
+            MaxTokens = 3000,
+            RequestingAgent = Name
+        };
+
+        try
+        {
+            var response = await _llm.GenerateAsync(prompt, ct);
+            if (response.Success && !string.IsNullOrWhiteSpace(response.Content))
+            {
+                var content = response.Content;
+                var scopeIdx = content.IndexOf("===PROJECT_SCOPE===", StringComparison.OrdinalIgnoreCase);
+                var riskIdx = content.IndexOf("===RISKS===", StringComparison.OrdinalIgnoreCase);
+
+                if (scopeIdx > 0)
+                    brd.ExecutiveSummary = content[..scopeIdx].Trim();
+
+                if (scopeIdx > 0 && riskIdx > scopeIdx)
+                    brd.ProjectScope = content[(scopeIdx + "===PROJECT_SCOPE===".Length)..riskIdx].Trim();
+                else if (scopeIdx > 0)
+                    brd.ProjectScope = content[(scopeIdx + "===PROJECT_SCOPE===".Length)..].Trim();
+
+                if (riskIdx > 0)
+                {
+                    var riskSection = content[(riskIdx + "===RISKS===".Length)..].Trim();
+                    var riskLines = riskSection.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                    var parsedRisks = new List<BrdRisk>();
+                    foreach (var line in riskLines)
+                    {
+                        var parts = line.TrimStart('-', ' ').Split('|');
+                        if (parts.Length >= 4)
+                        {
+                            parsedRisks.Add(new BrdRisk
+                            {
+                                Description = parts[0].Replace("RISK", "").Trim(),
+                                Impact = parts[1].Trim(),
+                                Likelihood = parts[2].Trim(),
+                                Mitigation = parts[3].Trim()
+                            });
+                        }
+                    }
+                    if (parsedRisks.Count > 0) brd.Risks = parsedRisks;
+                }
+
+                _logger.LogInformation("BRD sections enriched via LLM ({Model})", response.Model);
+            }
+            else
+            {
+                _logger.LogWarning("LLM enrichment failed for BRD, using template defaults: {Error}", response.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "LLM enrichment skipped for BRD — using template content");
+        }
     }
 
     private static BrdDocument BuildBrd(List<Requirement> requirements, AgentContext context)

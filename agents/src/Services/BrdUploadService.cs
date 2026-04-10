@@ -19,6 +19,12 @@ public interface IBrdUploadService
         string projectId, List<(string FileName, string Content)> files, string? templateId = null, CancellationToken ct = default);
 
     Task<List<BrdSectionDto>> GetBrdSectionsAsync(string projectId, CancellationToken ct = default);
+
+    Task<bool> SaveSectionAsync(string sectionId, string content, CancellationToken ct = default);
+
+    Task<int> ClearBrdSectionsAsync(string projectId, CancellationToken ct = default);
+
+    Task<List<BrdProjectSummaryDto>> ListBrdProjectsAsync(CancellationToken ct = default);
 }
 
 public class BrdUploadService(GNexDbContext db, ILlmProvider llm, ILogger<BrdUploadService> logger) : IBrdUploadService
@@ -31,6 +37,7 @@ public class BrdUploadService(GNexDbContext db, ILlmProvider llm, ILogger<BrdUpl
         ["scope"] = ["scope", "in scope", "out of scope", "boundary", "feature"],
         ["functional_requirements"] = ["shall", "must", "feature", "workflow", "function", "requirement"],
         ["non_functional_requirements"] = ["performance", "latency", "availability", "security", "scalability", "nfr"],
+        ["user_personas"] = ["user", "persona", "patient", "clinician", "doctor", "nurse", "admin", "journey"],
         ["data_requirements"] = ["data", "entity", "table", "field", "schema", "record"],
         ["integration_points"] = ["api", "integration", "fhir", "hl7", "event", "kafka", "external"],
         ["security_requirements"] = ["security", "auth", "authorization", "rbac", "hipaa", "encrypt", "audit"],
@@ -143,6 +150,74 @@ public class BrdUploadService(GNexDbContext db, ILlmProvider llm, ILogger<BrdUpl
             .ToListAsync(ct);
     }
 
+    public async Task<bool> SaveSectionAsync(string sectionId, string content, CancellationToken ct = default)
+    {
+        var section = await db.BrdSectionRecords.FirstOrDefaultAsync(s => s.Id == sectionId && s.IsActive, ct);
+        if (section is null) return false;
+
+        section.Content = content;
+        section.UpdatedAt = DateTimeOffset.UtcNow;
+        section.UpdatedBy = "user";
+        section.VersionNo++;
+        await db.SaveChangesAsync(ct);
+        return true;
+    }
+
+    public async Task<int> ClearBrdSectionsAsync(string projectId, CancellationToken ct = default)
+    {
+        var sections = await db.BrdSectionRecords
+            .Where(s => s.BrdId == projectId && s.IsActive)
+            .ToListAsync(ct);
+
+        foreach (var s in sections)
+        {
+            s.IsActive = false;
+            s.ArchivedAt = DateTimeOffset.UtcNow;
+            s.UpdatedBy = "user";
+        }
+
+        await db.SaveChangesAsync(ct);
+        return sections.Count;
+    }
+
+    public async Task<List<BrdProjectSummaryDto>> ListBrdProjectsAsync(CancellationToken ct = default)
+    {
+        var results = await db.BrdSectionRecords
+            .Where(s => s.IsActive)
+            .GroupBy(s => s.BrdId)
+            .Select(g => new
+            {
+                ProjectId = g.Key,
+                SectionCount = g.Count(),
+                LastUpdated = g.Max(s => s.UpdatedAt)
+            })
+            .ToListAsync(ct);
+
+        if (results.Count == 0) return [];
+
+        var projectIds = results.Select(r => r.ProjectId).ToList();
+        var projects = await db.Projects
+            .Where(p => projectIds.Contains(p.Id) && p.IsActive)
+            .ToDictionaryAsync(p => p.Id, p => p, ct);
+
+        return results
+            .Select(r =>
+            {
+                projects.TryGetValue(r.ProjectId, out var proj);
+                return new BrdProjectSummaryDto(
+                    r.ProjectId,
+                    proj?.Name ?? r.ProjectId,
+                    proj?.ProjectType ?? "unknown",
+                    r.SectionCount,
+                    r.LastUpdated,
+                    proj?.BrdStatus ?? "draft",
+                    proj?.BrdApprovedAt,
+                    proj?.BrdApprovedBy);
+            })
+            .OrderByDescending(r => r.LastUpdated)
+            .ToList();
+    }
+
     private sealed record TemplateSectionDefinition(string Type, string Title, int Order, string Prompt);
 
     private async Task<int> RebuildBrdSectionsFromTemplateAsync(
@@ -174,9 +249,11 @@ public class BrdUploadService(GNexDbContext db, ILlmProvider llm, ILogger<BrdUpl
         var sourceItems = await db.RawRequirements
             .Where(r => r.ProjectId == projectId && r.IsActive)
             .OrderByDescending(r => r.SubmittedAt)
-            .Take(25)
             .Select(r => new { r.SubmittedBy, r.InputText })
             .ToListAsync(ct);
+
+        logger.LogInformation("BRD rebuild: {FileCount} requirement files loaded for project {ProjectId}",
+            sourceItems.Count, projectId);
 
         var sourceSummary = string.Join(", ", sourceItems
             .Select(s => s.SubmittedBy)
@@ -188,19 +265,32 @@ public class BrdUploadService(GNexDbContext db, ILlmProvider llm, ILogger<BrdUpl
         var enforceDiversity = llm.ProviderName.Contains("templatefallback", StringComparison.OrdinalIgnoreCase);
 
         var sectionRecords = new List<BrdSectionRecord>(normalized.Count);
+        var rawContents = new List<string>(normalized.Count);
         foreach (var s in normalized)
         {
             var sectionKey = s.Type.Trim().ToLowerInvariant();
             evidenceBySection.TryGetValue(sectionKey, out var evidenceLines);
-            var focusedCorpus = BuildCorpus(evidenceLines ?? [], 4500);
+            var focusedCorpus = BuildCorpus(evidenceLines ?? [], 12000);
             if (string.IsNullOrWhiteSpace(focusedCorpus) || focusedCorpus == "No uploaded requirement content available.")
-                focusedCorpus = BuildFocusedCorpus(s, allTexts, 4500);
+                focusedCorpus = BuildFocusedCorpus(s, allTexts, 12000);
 
             var content = await GenerateSectionWithLlmAsync(projectId, template, s, focusedCorpus, ct);
 
-            if (IsLowSignalFallback(content) || (enforceDiversity && IsDuplicateContent(content, sectionRecords.Select(r => r.Content))))
+            var isLow = IsLowSignalFallback(content);
+            var isDup = enforceDiversity && IsDuplicateContent(content, rawContents);
+            if (isLow || isDup)
+            {
+                logger.LogWarning("BRD section [{Section}] rejected: isLow={IsLow} isDup={IsDup} provider={Provider} contentStart={Start}",
+                    s.Type, isLow, isDup, llm.ProviderName, content[..Math.Min(80, content.Length)]);
                 content = BuildDeterministicSectionDraft(s, focusedCorpus);
+            }
+            else
+            {
+                logger.LogInformation("BRD section [{Section}] accepted from provider={Provider}, len={Len}",
+                    s.Type, llm.ProviderName, content.Length);
+            }
 
+            rawContents.Add(content);
             sectionRecords.Add(new BrdSectionRecord
             {
                 BrdId = projectId,
@@ -231,27 +321,34 @@ public class BrdUploadService(GNexDbContext db, ILlmProvider llm, ILogger<BrdUpl
             var response = await llm.GenerateAsync(new LlmPrompt
             {
                 RequestingAgent = "BrdUploadService",
-                Temperature = 0.2,
-                MaxTokens = 1200,
-                SystemPrompt = "You write concise, implementation-ready BRD sections in markdown. Avoid duplication and keep section scope tight.",
+                Temperature = 0.3,
+                MaxTokens = 3000,
+                SystemPrompt = """You are a senior BRD (Business Requirements Document) analyst with deep domain expertise. You produce comprehensive, implementation-ready BRD sections in markdown. Each section must be thorough, well-structured, and grounded entirely in the provided requirements corpus. Extract maximum detail from the source material — do not summarise when detail is available.""",
                 UserPrompt = $"""
-Generate BRD section content in markdown.
+You are writing the "{section.Title}" section of a BRD document.
 
-ProjectId: {projectId}
-Template: {template.Name} ({template.ProjectType})
 SectionType: {section.Type}
 SectionTitle: {section.Title}
+Template: {template.Name} ({template.ProjectType})
 
-Template guidance:
+Prompt:
 {section.Prompt}
 
-Source corpus:
+The requirements corpus below has been compiled from multiple uploaded requirement files. Analyse ALL of it thoroughly and produce a detailed, comprehensive section that addresses EVERY relevant point from the corpus.
+
+Requirements corpus:
 {corpus}
 
-Rules:
-- Output only this section body markdown (no outer document title).
-- Avoid repeating points already implied in section title.
-- Use short bullet lists where suitable.
+Output rules:
+- Write in markdown. Start with a level-2 heading (## {section.Title}).
+- Be DETAILED and COMPREHENSIVE — extract every relevant requirement, constraint, and specification from the corpus.
+- Group related items under level-3 sub-headings (### Sub-topic).
+- Use bullet lists for individual requirements; include specifics (numbers, names, standards, protocols).
+- Where the corpus contains measurable targets, thresholds, or SLAs, include them verbatim.
+- Cross-reference related requirements from different source files when they address the same topic.
+- Do NOT invent facts. Every statement must trace back to the corpus.
+- Do NOT repeat content that belongs in other BRD sections — stay focused on this section's scope.
+- Aim for thoroughness: a reader should not need to go back to the source files for this section's topic.
 """
             }, ct);
 
@@ -333,7 +430,7 @@ Rules:
             .ThenByDescending(x => x.Line.Length)
             .Select(x => x.Line)
             .Distinct(StringComparer.OrdinalIgnoreCase)
-            .Take(60)
+            .Take(200)
             .ToList();
 
         return BuildCorpus(selected, maxChars);
@@ -368,21 +465,21 @@ Rules:
                 map[bestSection].Add(line);
         }
 
-        // Ensure each section gets at least some context, without cloning full corpus everywhere.
-        var globalTop = allLines.Take(30).ToList();
+        // Ensure each section gets substantial evidence from across all files.
+        var globalTop = allLines.Take(80).ToList();
         foreach (var section in sections)
         {
             var key = section.Type.Trim().ToLowerInvariant();
             var current = map[key]
                 .Distinct(StringComparer.OrdinalIgnoreCase)
-                .Take(24)
+                .Take(80)
                 .ToList();
 
-            if (current.Count < 6)
+            if (current.Count < 15)
             {
                 var fallback = globalTop
                     .Where(l => !current.Contains(l, StringComparer.OrdinalIgnoreCase))
-                    .Take(6 - current.Count)
+                    .Take(15 - current.Count)
                     .ToList();
                 current.AddRange(fallback);
             }
@@ -447,13 +544,13 @@ Rules:
         var lines = focusedCorpus
             .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Distinct(StringComparer.OrdinalIgnoreCase)
-            .Take(8)
+            .Take(25)
             .Select(l => $"- {l}")
             .ToList();
 
         if (lines.Count == 0)
             lines.Add("- No direct requirement lines matched this section; review uploaded files for more detail.");
 
-        return $"# {section.Title}\n\n## Analysis Summary\nThe following points were derived from uploaded requirement files for this section.\n\n{string.Join("\n", lines)}";
+        return $"## {section.Title}\n\n*{section.Prompt}*\n\n### Key Requirements from Source Files\n\n{string.Join("\n", lines)}";
     }
 }

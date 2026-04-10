@@ -44,6 +44,10 @@ public sealed class TemplateFallbackLlmProvider : ILlmProvider
     {
         var user = prompt.UserPrompt.ToLowerInvariant();
 
+        // BRD section generation — produce section-specific content
+        if (prompt.RequestingAgent == "BrdUploadService" && user.Contains("sectiontype:"))
+            return GenerateBrdSectionContent(prompt.UserPrompt, user);
+
         // HIPAA compliance
         if (user.Contains("hipaa") || user.Contains("phi"))
         {
@@ -158,5 +162,96 @@ public sealed class TemplateFallbackLlmProvider : ILlmProvider
             // Context snippets provided: {prompt.ContextSnippets.Count}
             // Prompt length: {prompt.UserPrompt.Length} chars
             """;
+    }
+
+    private static string GenerateBrdSectionContent(string rawPrompt, string lowerPrompt)
+    {
+        // Extract SectionType, SectionTitle, and Prompt from the structured prompt
+        var sectionType = ExtractPromptField(rawPrompt, "SectionType:");
+        var sectionTitle = ExtractPromptField(rawPrompt, "SectionTitle:");
+        var templatePrompt = ExtractMultiLineField(rawPrompt, "Prompt:", "The requirements corpus below");
+        if (string.IsNullOrWhiteSpace(templatePrompt))
+            templatePrompt = ExtractMultiLineField(rawPrompt, "Prompt:", "Requirements corpus:");
+        if (string.IsNullOrWhiteSpace(templatePrompt))
+            templatePrompt = ExtractPromptField(rawPrompt, "Prompt:");
+
+        // Extract corpus lines to weave into the section
+        var corpusStart = rawPrompt.IndexOf("Requirements corpus:", StringComparison.OrdinalIgnoreCase);
+        var corpusLines = new List<string>();
+        if (corpusStart >= 0)
+        {
+            var corpus = rawPrompt[(corpusStart + "Requirements corpus:".Length)..];
+            var rulesIdx = corpus.IndexOf("Output rules:", StringComparison.OrdinalIgnoreCase);
+            if (rulesIdx > 0) corpus = corpus[..rulesIdx];
+            corpusLines = corpus
+                .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Where(l => l.Length >= 10 && !l.StartsWith("//"))
+                .ToList();
+        }
+
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"## {sectionTitle}");
+        sb.AppendLine();
+
+        // Use the template prompt as the section description
+        if (!string.IsNullOrWhiteSpace(templatePrompt))
+            sb.AppendLine($"*{templatePrompt}*");
+        else
+            sb.AppendLine($"*Analysis for the {sectionTitle} section based on uploaded requirements.*");
+        sb.AppendLine();
+
+        // Group corpus evidence into sub-topics by detecting heading-like lines
+        if (corpusLines.Count > 0)
+        {
+            sb.AppendLine("### Key Requirements from Source Files");
+            sb.AppendLine();
+
+            string? currentGroup = null;
+            foreach (var line in corpusLines)
+            {
+                var clean = line.TrimStart('-', '*', ' ', '\t', '#');
+                if (clean.Length < 8) continue;
+
+                // Detect heading-like lines (start with ## or are all-caps short lines)
+                if (line.TrimStart().StartsWith('#') || (clean.Length < 80 && clean == clean.ToUpperInvariant() && !clean.Contains(' ')))
+                {
+                    if (currentGroup != clean)
+                    {
+                        sb.AppendLine();
+                        sb.AppendLine($"**{clean}**");
+                        currentGroup = clean;
+                    }
+                }
+                else
+                {
+                    sb.AppendLine($"- {clean}");
+                }
+            }
+            sb.AppendLine();
+        }
+
+        sb.AppendLine("---");
+        sb.AppendLine("*Generated offline — set an API key in settings to enable full AI-powered generation.*");
+
+        return sb.ToString();
+    }
+
+    private static string ExtractPromptField(string prompt, string fieldName)
+    {
+        var idx = prompt.IndexOf(fieldName, StringComparison.OrdinalIgnoreCase);
+        if (idx < 0) return string.Empty;
+        var start = idx + fieldName.Length;
+        var endIdx = prompt.IndexOfAny(['\r', '\n'], start);
+        return endIdx < 0 ? prompt[start..].Trim() : prompt[start..endIdx].Trim();
+    }
+
+    private static string ExtractMultiLineField(string prompt, string fieldStart, string fieldEnd)
+    {
+        var startIdx = prompt.IndexOf(fieldStart, StringComparison.OrdinalIgnoreCase);
+        if (startIdx < 0) return string.Empty;
+        var contentStart = startIdx + fieldStart.Length;
+        var endIdx = prompt.IndexOf(fieldEnd, contentStart, StringComparison.OrdinalIgnoreCase);
+        if (endIdx < 0) return string.Empty;
+        return prompt[contentStart..endIdx].Trim();
     }
 }

@@ -14,6 +14,7 @@ namespace GNex.Agents.Backlog;
 /// </summary>
 public sealed class BacklogAgent : IAgent
 {
+    private readonly ILlmProvider _llm;
     private readonly ILogger<BacklogAgent> _logger;
     private const int MaxAutoBugsPerRun = 100;
 
@@ -21,9 +22,13 @@ public sealed class BacklogAgent : IAgent
     public string Name => "Backlog Manager";
     public string Description => "Tracks work items, manages backlog status, and coordinates iterative development.";
 
-    public BacklogAgent(ILogger<BacklogAgent> logger) => _logger = logger;
+    public BacklogAgent(ILlmProvider llm, ILogger<BacklogAgent> logger)
+    {
+        _llm = llm;
+        _logger = logger;
+    }
 
-    public Task<AgentResult> ExecuteAsync(AgentContext context, CancellationToken ct = default)
+    public async Task<AgentResult> ExecuteAsync(AgentContext context, CancellationToken ct = default)
     {
         var sw = Stopwatch.StartNew();
         context.AgentStatuses[Type] = AgentStatus.Running;
@@ -39,13 +44,13 @@ public sealed class BacklogAgent : IAgent
                     $"No expanded items available yet ({context.Requirements.Count} requirements). Waiting for RequirementsExpander output.");
 
                 context.AgentStatuses[Type] = AgentStatus.Idle;
-                return Task.FromResult(new AgentResult
+                return new AgentResult
                 {
                     Agent = Type,
                     Success = true,
                     Summary = $"Backlog waiting: {context.Requirements.Count} requirements pending expansion",
                     Duration = sw.Elapsed
-                });
+                };
             }
 
             // 1b. Convert cross-agent findings into standardized bug backlog items
@@ -63,6 +68,9 @@ public sealed class BacklogAgent : IAgent
             // 4. Identify blocked items and send directives to unblock them
             IdentifyBlockedItems(context);
 
+            // 5. LLM-based prioritization for new items
+            await PrioritizeWithLlmAsync(context, ct);
+
             var stats = GetBacklogStats(context);
             context.ReportProgress?.Invoke(Type,
                 $"Backlog summary: {stats.Total} items — {stats.New} new, {stats.ReadyBacklog} ready, {stats.ActiveQueue} active-queue, {stats.InDev} in-dev, {stats.Completed} done, {stats.Blocked} blocked");
@@ -73,7 +81,7 @@ public sealed class BacklogAgent : IAgent
             var allDone = actionable.Count > 0 && actionable.All(i => i.Status == WorkItemStatus.Completed);
             context.AgentStatuses[Type] = allDone ? AgentStatus.Completed : AgentStatus.Idle;
 
-            return Task.FromResult(new AgentResult
+            return new AgentResult
             {
                 Agent = Type,
                 Success = true,
@@ -81,19 +89,74 @@ public sealed class BacklogAgent : IAgent
                     ? $"Backlog COMPLETE: all {actionable.Count} actionable items done"
                     : $"Backlog: {stats.Total} items — {stats.New} new, {stats.ReadyBacklog} ready, {stats.ActiveQueue} active-queue, {stats.InDev} in-dev, {stats.Completed} done, {stats.Blocked} blocked",
                 Duration = sw.Elapsed
-            });
+            };
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "BacklogAgent failed — {ExType}: {Message}", ex.GetType().Name, ex.Message);
             context.AgentStatuses[Type] = AgentStatus.Failed;
-            return Task.FromResult(new AgentResult
+            return new AgentResult
             {
                 Agent = Type, Success = false,
                 Errors = [ex.ToString()],
                 Summary = $"Backlog failed: {ex.GetType().Name}: {ex.Message}",
                 Duration = sw.Elapsed
-            });
+            };
+        }
+    }
+
+    private async Task PrioritizeWithLlmAsync(AgentContext context, CancellationToken ct)
+    {
+        var newItems = context.ExpandedRequirements
+            .Where(i => i.Status is WorkItemStatus.New or WorkItemStatus.InQueue && i.ItemType == WorkItemType.UserStory)
+            .Take(30)
+            .ToList();
+        if (newItems.Count == 0) return;
+
+        var itemSummary = string.Join("\n", newItems.Select(i => $"- {i.Id}|{i.Title}|{i.Module}|P{i.Priority}|{i.StoryPoints}pts"));
+
+        var prompt = new LlmPrompt
+        {
+            SystemPrompt = """
+                You are a healthcare project backlog prioritizer. Given a list of backlog items,
+                re-rank them by business value and technical dependency order.
+                Output ONLY the item IDs in priority order (highest first), one per line. No explanations.
+                """,
+            UserPrompt = $"""
+                Prioritize these {newItems.Count} backlog items for a Hospital Management System:
+                {itemSummary}
+
+                Consider: patient safety > compliance > core workflows > enhancements.
+                Output IDs only, one per line, highest priority first.
+                """,
+            Temperature = 0.2,
+            MaxTokens = 1000,
+            RequestingAgent = Name
+        };
+
+        try
+        {
+            var response = await _llm.GenerateAsync(prompt, ct);
+            if (response.Success && !string.IsNullOrWhiteSpace(response.Content))
+            {
+                var rankedIds = response.Content.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    .Select(line => line.Trim('-', ' ', '*'))
+                    .Where(id => !string.IsNullOrEmpty(id))
+                    .ToList();
+
+                var priority = 1;
+                foreach (var id in rankedIds)
+                {
+                    var item = newItems.FirstOrDefault(i => i.Id == id);
+                    if (item is not null)
+                        item.Priority = priority++;
+                }
+                _logger.LogInformation("LLM re-prioritized {Count} backlog items", rankedIds.Count);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "LLM prioritization skipped — using existing priorities");
         }
     }
 

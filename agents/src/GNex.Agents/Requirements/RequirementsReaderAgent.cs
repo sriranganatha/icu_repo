@@ -9,15 +9,17 @@ namespace GNex.Agents.Requirements;
 public sealed class RequirementsReaderAgent : IAgent
 {
     private readonly IRequirementsReader _reader;
+    private readonly ILlmProvider _llm;
     private readonly ILogger<RequirementsReaderAgent> _logger;
 
     public AgentType Type => AgentType.RequirementsReader;
     public string Name => "Requirements Reader";
     public string Description => "Scans icu/docs and extracts structured requirements from markdown files.";
 
-    public RequirementsReaderAgent(IRequirementsReader reader, ILogger<RequirementsReaderAgent> logger)
+    public RequirementsReaderAgent(IRequirementsReader reader, ILlmProvider llm, ILogger<RequirementsReaderAgent> logger)
     {
         _reader = reader;
+        _llm = llm;
         _logger = logger;
     }
 
@@ -40,6 +42,10 @@ public sealed class RequirementsReaderAgent : IAgent
             var requirements = useBrd
                 ? await _reader.ReadFromBrdAsync(context.ProjectId!, ct)
                 : await _reader.ReadAllAsync(context.RequirementsBasePath, ct);
+            
+            // LLM-enhanced classification and tagging
+            await EnrichRequirementsWithLlmAsync(requirements, ct);
+            
             context.Requirements = requirements;
 
             if (context.ReportProgress is not null)
@@ -91,4 +97,75 @@ public sealed class RequirementsReaderAgent : IAgent
             };
         }
     }
+
+    private async Task EnrichRequirementsWithLlmAsync(List<Requirement> requirements, CancellationToken ct)
+    {
+        var untagged = requirements.Where(r => r.Tags.Count == 0).Take(30).ToList();
+        if (untagged.Count == 0) return;
+
+        var summary = string.Join("\n", untagged.Select(r => $"- {r.Id}|{r.Title}|{Truncate(r.Description, 150)}"));
+
+        var prompt = new LlmPrompt
+        {
+            SystemPrompt = """
+                You are a requirements classifier for a healthcare HMS.
+                Classify each requirement with module and tags.
+                Output ONLY lines in format: REQ_ID|module|tag1,tag2,tag3
+                Modules: Patient, Encounter, Billing, Emergency, Lab, Pharmacy, Admin, Security, Integration
+                Tags: database, api, service, ui, security, hipaa, nfr, integration, fhir, hl7
+                """,
+            UserPrompt = $"Classify these {untagged.Count} requirements:\n{summary}",
+            Temperature = 0.2,
+            MaxTokens = 1000,
+            RequestingAgent = Name
+        };
+
+        try
+        {
+            var response = await _llm.GenerateAsync(prompt, ct);
+            if (response.Success && !string.IsNullOrWhiteSpace(response.Content))
+            {
+                var count = 0;
+                foreach (var line in response.Content.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                {
+                    var parts = line.TrimStart('-', ' ').Split('|');
+                    if (parts.Length >= 3)
+                    {
+                        var reqId = parts[0].Trim();
+                        var idx = requirements.FindIndex(r => r.Id == reqId);
+                        if (idx >= 0)
+                        {
+                            var req = requirements[idx];
+                            var module = string.IsNullOrEmpty(req.Module) ? parts[1].Trim() : req.Module;
+                            var tags = new List<string>(req.Tags);
+                            tags.AddRange(parts[2].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+                            requirements[idx] = new Requirement
+                            {
+                                Id = req.Id,
+                                ProjectId = req.ProjectId,
+                                SourceFile = req.SourceFile,
+                                Section = req.Section,
+                                HeadingLevel = req.HeadingLevel,
+                                Title = req.Title,
+                                Description = req.Description,
+                                Module = module,
+                                Tags = tags,
+                                AcceptanceCriteria = req.AcceptanceCriteria,
+                                DependsOn = req.DependsOn
+                            };
+                            count++;
+                        }
+                    }
+                }
+                _logger.LogInformation("LLM classified {Count}/{Total} requirements", count, untagged.Count);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "LLM classification skipped — using parser-only tags");
+        }
+    }
+
+    private static string Truncate(string? s, int max) =>
+        string.IsNullOrEmpty(s) ? "" : s.Length <= max ? s : s[..max] + "…";
 }

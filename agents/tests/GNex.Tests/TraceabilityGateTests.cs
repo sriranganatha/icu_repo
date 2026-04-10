@@ -1,6 +1,8 @@
 using GNex.Agents.Orchestrator;
 using GNex.Core.Enums;
+using GNex.Core.Interfaces;
 using GNex.Core.Models;
+using Moq;
 
 namespace GNex.Tests;
 
@@ -67,7 +69,7 @@ public class TraceabilityGateTests
             Requirements = [new Requirement { Id = "R1", Title = "Feature" }]
         };
 
-        var agent = new TraceabilityGateAgent(new Microsoft.Extensions.Logging.Abstractions.NullLogger<TraceabilityGateAgent>());
+        var agent = new TraceabilityGateAgent(new Mock<ILlmProvider>().Object, new Microsoft.Extensions.Logging.Abstractions.NullLogger<TraceabilityGateAgent>());
         var result = await agent.ExecuteAsync(context);
 
         Assert.False(result.Success); // gap exists
@@ -85,7 +87,7 @@ public class TraceabilityGateTests
         context.Artifacts.Add(new CodeArtifact { RelativePath = "Svc.cs", Layer = ArtifactLayer.Service, TracedRequirementIds = ["R1"] });
         context.Artifacts.Add(new CodeArtifact { RelativePath = "Test.cs", Layer = ArtifactLayer.Test, TracedRequirementIds = ["R1"] });
 
-        var agent = new TraceabilityGateAgent(new Microsoft.Extensions.Logging.Abstractions.NullLogger<TraceabilityGateAgent>());
+        var agent = new TraceabilityGateAgent(new Mock<ILlmProvider>().Object, new Microsoft.Extensions.Logging.Abstractions.NullLogger<TraceabilityGateAgent>());
         var result = await agent.ExecuteAsync(context);
 
         Assert.True(result.Success);

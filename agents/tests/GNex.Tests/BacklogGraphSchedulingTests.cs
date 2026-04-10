@@ -1,5 +1,6 @@
 using GNex.Agents.Backlog;
 using GNex.Core.Enums;
+using GNex.Core.Interfaces;
 using GNex.Core.Models;
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
@@ -47,7 +48,7 @@ public class BacklogGraphSchedulingTests
     public async Task ExecuteAsync_DependencyWaitingItemsStayInPool_NotBlocked()
     {
         var logger = new Mock<ILogger<BacklogAgent>>();
-        var agent = new BacklogAgent(logger.Object);
+        var agent = new BacklogAgent(new Mock<ILlmProvider>().Object, logger.Object);
 
         var ctx = ContextWith(
             Task("DEP", WorkItemStatus.New),
@@ -64,7 +65,7 @@ public class BacklogGraphSchedulingTests
     public async Task ExecuteAsync_AdmitsQueueFromDependencyFrontier_ByGraphImpact()
     {
         var logger = new Mock<ILogger<BacklogAgent>>();
-        var agent = new BacklogAgent(logger.Object);
+        var agent = new BacklogAgent(new Mock<ILlmProvider>().Object, logger.Object);
         var t0 = new DateTimeOffset(2026, 04, 08, 0, 0, 0, TimeSpan.Zero);
 
         var ctx = ContextWith(
@@ -93,7 +94,7 @@ public class BacklogGraphSchedulingTests
     public async Task ExecuteAsync_DeterministicTieBreaker_UsesItemId()
     {
         var logger = new Mock<ILogger<BacklogAgent>>();
-        var agent = new BacklogAgent(logger.Object);
+        var agent = new BacklogAgent(new Mock<ILlmProvider>().Object, logger.Object);
         var t0 = new DateTimeOffset(2026, 04, 08, 0, 0, 0, TimeSpan.Zero);
 
         var ctx = ContextWith(
