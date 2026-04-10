@@ -1,0 +1,212 @@
+@page
+@{
+    ViewData["Title"] = "Technology Registry";
+}
+
+<div class="container-fluid px-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2><i class="bi bi-code-square me-2"></i>Technology Registry</h2>
+        <div class="btn-group">
+            <button class="btn btn-primary" onclick="showAddModal('language')"><i class="bi bi-plus-lg me-1"></i>Language</button>
+            <button class="btn btn-outline-primary" onclick="showAddModal('framework')"><i class="bi bi-plus-lg me-1"></i>Framework</button>
+            <button class="btn btn-outline-primary" onclick="showAddModal('database')"><i class="bi bi-plus-lg me-1"></i>Database</button>
+            <button class="btn btn-outline-primary" onclick="showAddModal('cloud')"><i class="bi bi-plus-lg me-1"></i>Cloud</button>
+            <button class="btn btn-outline-primary" onclick="showAddModal('devops')"><i class="bi bi-plus-lg me-1"></i>DevOps</button>
+        </div>
+    </div>
+
+    <ul class="nav nav-tabs mb-3" id="techTabs">
+        <li class="nav-item"><a class="nav-link active" href="#" data-tab="languages">Languages</a></li>
+        <li class="nav-item"><a class="nav-link" href="#" data-tab="frameworks">Frameworks</a></li>
+        <li class="nav-item"><a class="nav-link" href="#" data-tab="databases">Databases</a></li>
+        <li class="nav-item"><a class="nav-link" href="#" data-tab="cloud">Cloud Providers</a></li>
+        <li class="nav-item"><a class="nav-link" href="#" data-tab="devops">DevOps Tools</a></li>
+    </ul>
+
+    <div class="card">
+        <div class="card-body p-0">
+            <table class="table table-hover mb-0" id="techTable">
+                <thead class="table-light"><tr id="techTableHead"></tr></thead>
+                <tbody id="techTableBody">
+                    <tr><td colspan="6" class="text-center text-muted py-4">Loading...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Add/Edit Modal -->
+    <div class="modal fade" id="techModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header bg-primary text-white">
+                    <h5 class="modal-title" id="techModalTitle">Add Item</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body" id="techModalBody"></div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button class="btn btn-primary" id="btnSave" onclick="saveTech()">Save</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+<script>
+    const API = '/api/technologies';
+    let activeTab = 'languages';
+    let languages = [], frameworks = [], databases = [], clouds = [], devops = [];
+
+    document.querySelectorAll('#techTabs a').forEach(tab => {
+        tab.addEventListener('click', e => {
+            e.preventDefault();
+            document.querySelectorAll('#techTabs a').forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+            activeTab = tab.dataset.tab;
+            renderTable();
+        });
+    });
+
+    async function loadAll() {
+        [languages, frameworks, databases, clouds, devops] = await Promise.all([
+            fetch(`${API}/languages`).then(r => r.json()),
+            fetch(`${API}/frameworks`).then(r => r.json()),
+            fetch(`${API}/databases`).then(r => r.json()),
+            fetch(`${API}/cloud-providers`).then(r => r.json()),
+            fetch(`${API}/devops-tools`).then(r => r.json())
+        ]);
+        renderTable();
+    }
+
+    function renderTable() {
+        const head = document.getElementById('techTableHead');
+        const body = document.getElementById('techTableBody');
+        let headers = '', rows = '';
+
+        switch(activeTab) {
+            case 'languages':
+                headers = '<th>Name</th><th>Version</th><th>Status</th><th>Created</th><th></th>';
+                rows = languages.map(l => `<tr>
+                    <td><strong>${esc(l.name)}</strong></td><td>${esc(l.version)}</td>
+                    <td><span class="badge bg-${l.status==='active'?'success':'secondary'}">${esc(l.status)}</span></td>
+                    <td>${fmtDate(l.createdAt)}</td>
+                    <td><button class="btn btn-sm btn-outline-danger" onclick="deleteTech('languages','${l.id}')"><i class="bi bi-trash"></i></button></td>
+                </tr>`).join('');
+                break;
+            case 'frameworks':
+                headers = '<th>Name</th><th>Version</th><th>Category</th><th>Language</th><th></th>';
+                rows = frameworks.map(f => `<tr>
+                    <td><strong>${esc(f.name)}</strong></td><td>${esc(f.version)}</td>
+                    <td><span class="badge bg-info">${esc(f.category)}</span></td>
+                    <td>${esc(f.languageId?.substring(0,8) ?? '-')}</td>
+                    <td><button class="btn btn-sm btn-outline-danger" onclick="deleteTech('frameworks','${f.id}')"><i class="bi bi-trash"></i></button></td>
+                </tr>`).join('');
+                break;
+            case 'databases':
+                headers = '<th>Name</th><th>Version</th><th>Type</th><th>Port</th><th></th>';
+                rows = databases.map(d => `<tr>
+                    <td><strong>${esc(d.name)}</strong></td><td>${esc(d.version)}</td>
+                    <td><span class="badge bg-warning text-dark">${esc(d.dbType)}</span></td>
+                    <td>${d.defaultPort}</td>
+                    <td><button class="btn btn-sm btn-outline-danger" onclick="deleteTech('databases','${d.id}')"><i class="bi bi-trash"></i></button></td>
+                </tr>`).join('');
+                break;
+            case 'cloud':
+                headers = '<th>Name</th><th>Version</th><th>Created</th><th></th>';
+                rows = clouds.map(c => `<tr>
+                    <td><strong>${esc(c.name)}</strong></td><td>${esc(c.version)}</td>
+                    <td>${fmtDate(c.createdAt)}</td>
+                    <td><button class="btn btn-sm btn-outline-danger" onclick="deleteTech('cloud-providers','${c.id}')"><i class="bi bi-trash"></i></button></td>
+                </tr>`).join('');
+                break;
+            case 'devops':
+                headers = '<th>Name</th><th>Version</th><th>Category</th><th></th>';
+                rows = devops.map(d => `<tr>
+                    <td><strong>${esc(d.name)}</strong></td><td>${esc(d.version)}</td>
+                    <td><span class="badge bg-secondary">${esc(d.category)}</span></td>
+                    <td><button class="btn btn-sm btn-outline-danger" onclick="deleteTech('devops-tools','${d.id}')"><i class="bi bi-trash"></i></button></td>
+                </tr>`).join('');
+                break;
+        }
+        head.innerHTML = headers;
+        body.innerHTML = rows || '<tr><td colspan="6" class="text-center text-muted py-4">No items found</td></tr>';
+    }
+
+    function showAddModal(type) {
+        const title = document.getElementById('techModalTitle');
+        const body = document.getElementById('techModalBody');
+        let html = '';
+        switch(type) {
+            case 'language':
+                title.textContent = 'Add Language';
+                html = `<div class="mb-3"><label class="form-label">Name</label><input class="form-control" id="fName"></div>
+                    <div class="mb-3"><label class="form-label">Version</label><input class="form-control" id="fVersion"></div>
+                    <div class="mb-3"><label class="form-label">Status</label><select class="form-select" id="fStatus"><option>active</option><option>beta</option><option>deprecated</option></select></div>`;
+                break;
+            case 'framework':
+                title.textContent = 'Add Framework';
+                html = `<div class="mb-3"><label class="form-label">Name</label><input class="form-control" id="fName"></div>
+                    <div class="mb-3"><label class="form-label">Version</label><input class="form-control" id="fVersion"></div>
+                    <div class="mb-3"><label class="form-label">Category</label><select class="form-select" id="fCategory"><option>web</option><option>mobile</option><option>data</option><option>ml</option><option>desktop</option></select></div>
+                    <div class="mb-3"><label class="form-label">Language</label><select class="form-select" id="fLangId">${languages.map(l=>`<option value="${l.id}">${l.name}</option>`).join('')}</select></div>`;
+                break;
+            case 'database':
+                title.textContent = 'Add Database Technology';
+                html = `<div class="mb-3"><label class="form-label">Name</label><input class="form-control" id="fName"></div>
+                    <div class="mb-3"><label class="form-label">Version</label><input class="form-control" id="fVersion"></div>
+                    <div class="mb-3"><label class="form-label">DB Type</label><select class="form-select" id="fDbType"><option>relational</option><option>nosql</option><option>graph</option><option>vector</option><option>timeseries</option></select></div>
+                    <div class="mb-3"><label class="form-label">Default Port</label><input type="number" class="form-control" id="fPort" value="5432"></div>`;
+                break;
+            case 'cloud':
+                title.textContent = 'Add Cloud Provider';
+                html = `<div class="mb-3"><label class="form-label">Name</label><input class="form-control" id="fName"></div>
+                    <div class="mb-3"><label class="form-label">Version</label><input class="form-control" id="fVersion"></div>`;
+                break;
+            case 'devops':
+                title.textContent = 'Add DevOps Tool';
+                html = `<div class="mb-3"><label class="form-label">Name</label><input class="form-control" id="fName"></div>
+                    <div class="mb-3"><label class="form-label">Version</label><input class="form-control" id="fVersion"></div>
+                    <div class="mb-3"><label class="form-label">Category</label><select class="form-select" id="fCategory"><option>ci_cd</option><option>container</option><option>iac</option><option>monitoring</option></select></div>`;
+                break;
+        }
+        body.innerHTML = html;
+        document.getElementById('btnSave').dataset.type = type;
+        new bootstrap.Modal(document.getElementById('techModal')).show();
+    }
+
+    async function saveTech() {
+        const type = document.getElementById('btnSave').dataset.type;
+        const name = document.getElementById('fName')?.value;
+        const version = document.getElementById('fVersion')?.value;
+        let url = '', payload = {};
+
+        switch(type) {
+            case 'language':
+                url = `${API}/languages`; payload = { name, version, status: document.getElementById('fStatus').value }; break;
+            case 'framework':
+                url = `${API}/frameworks`; payload = { name, version, category: document.getElementById('fCategory').value, languageId: document.getElementById('fLangId').value }; break;
+            case 'database':
+                url = `${API}/databases`; payload = { name, version, dbType: document.getElementById('fDbType').value, defaultPort: parseInt(document.getElementById('fPort').value) }; break;
+            case 'cloud':
+                url = `${API}/cloud-providers`; payload = { name, version }; break;
+            case 'devops':
+                url = `${API}/devops-tools`; payload = { name, version, category: document.getElementById('fCategory').value }; break;
+        }
+        await fetch(url, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+        bootstrap.Modal.getInstance(document.getElementById('techModal')).hide();
+        loadAll();
+    }
+
+    async function deleteTech(endpoint, id) {
+        if (!confirm('Delete this item?')) return;
+        await fetch(`${API}/${endpoint}/${id}`, { method: 'DELETE' });
+        loadAll();
+    }
+
+    function esc(s) { const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML; }
+    function fmtDate(d) { return d ? new Date(d).toLocaleDateString() : '-'; }
+
+    loadAll();
+</script>
+}

@@ -1,0 +1,196 @@
+@page
+@{
+    ViewData["Title"] = "Agent Dashboard";
+}
+
+<div class="container-fluid px-4">
+    <nav aria-label="breadcrumb"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="/Projects">Projects</a></li><li class="breadcrumb-item" id="bcProj">Project</li><li class="breadcrumb-item active">Agents</li></ol></nav>
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2><i class="bi bi-cpu me-2"></i>Agent Dashboard</h2>
+        <div>
+            <button class="btn btn-outline-info me-1" onclick="toggleLive()"><i class="bi bi-broadcast me-1"></i><span id="liveLabel">Live</span></button>
+            <button class="btn btn-primary" onclick="triggerRun()"><i class="bi bi-play-fill me-1"></i>Trigger Run</button>
+        </div>
+    </div>
+
+    <!-- Summary Cards -->
+    <div class="row mb-4">
+        <div class="col-md-2"><div class="card"><div class="card-body py-2 text-center"><h6 class="text-muted mb-0">Total Runs</h6><h3 id="statTotal">0</h3></div></div></div>
+        <div class="col-md-2"><div class="card text-bg-success"><div class="card-body py-2 text-center"><h6 class="mb-0">Succeeded</h6><h3 id="statSuccess">0</h3></div></div></div>
+        <div class="col-md-2"><div class="card text-bg-danger"><div class="card-body py-2 text-center"><h6 class="mb-0">Failed</h6><h3 id="statFailed">0</h3></div></div></div>
+        <div class="col-md-2"><div class="card text-bg-warning"><div class="card-body py-2 text-center"><h6 class="mb-0">Running</h6><h3 id="statRunning">0</h3></div></div></div>
+        <div class="col-md-2"><div class="card"><div class="card-body py-2 text-center"><h6 class="text-muted mb-0">Total Tokens</h6><h3 id="statTokens">0</h3></div></div></div>
+        <div class="col-md-2"><div class="card"><div class="card-body py-2 text-center"><h6 class="text-muted mb-0">Avg Duration</h6><h3 id="statDuration">-</h3></div></div></div>
+    </div>
+
+    <div class="row">
+        <!-- Agent Assignment Grid -->
+        <div class="col-md-4">
+            <div class="card"><div class="card-header"><h6 class="mb-0">Agent Assignments</h6></div>
+            <div class="card-body p-0" style="max-height:500px;overflow-y:auto">
+                <div class="list-group list-group-flush" id="assignmentList"></div>
+            </div></div>
+        </div>
+
+        <!-- Execution Log -->
+        <div class="col-md-8">
+            <div class="card"><div class="card-header d-flex justify-content-between"><h6 class="mb-0">Execution Log</h6>
+                <div><select class="form-select form-select-sm d-inline-block" style="width:auto" id="logFilter" onchange="renderLogs()"><option value="">All Agents</option></select></div></div>
+            <div class="card-body p-0">
+                <div class="table-responsive" style="max-height:450px;overflow-y:auto">
+                    <table class="table table-sm table-hover mb-0">
+                        <thead class="table-light sticky-top"><tr><th>Agent</th><th>Task</th><th>Status</th><th>Tokens</th><th>Duration</th><th>Started</th><th></th></tr></thead>
+                        <tbody id="logBody"></tbody>
+                    </table>
+                </div>
+            </div></div>
+
+            <!-- Token Usage Timeline -->
+            <div class="card mt-3"><div class="card-header"><h6 class="mb-0">Token Usage</h6></div>
+            <div class="card-body">
+                <div class="d-flex gap-2 flex-wrap" id="tokenBars"></div>
+            </div></div>
+        </div>
+    </div>
+
+    <!-- Artifacts -->
+    <div class="card mt-3"><div class="card-header"><h6 class="mb-0"><i class="bi bi-file-earmark-code me-2"></i>Agent Artifacts</h6></div>
+    <div class="card-body">
+        <div class="table-responsive"><table class="table table-sm"><thead><tr><th>Agent</th><th>Type</th><th>Path</th><th>Size</th><th>Created</th></tr></thead><tbody id="artifactBody"></tbody></table></div>
+    </div></div>
+</div>
+
+<!-- Run Detail Modal -->
+<div class="modal fade" id="runModal" tabindex="-1"><div class="modal-dialog modal-lg"><div class="modal-content">
+    <div class="modal-header"><h5 class="modal-title" id="runTitle">Run Detail</h5><button class="btn-close" data-bs-dismiss="modal"></button></div>
+    <div class="modal-body">
+        <ul class="nav nav-tabs mb-3">
+            <li class="nav-item"><a class="nav-link active" data-bs-toggle="tab" href="#tabRunInfo">Info</a></li>
+            <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#tabRunOutput">Output</a></li>
+            <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#tabRunErrors">Errors</a></li>
+        </ul>
+        <div class="tab-content">
+            <div class="tab-pane active" id="tabRunInfo"><div id="runInfoContent"></div></div>
+            <div class="tab-pane" id="tabRunOutput"><pre class="bg-dark text-light p-3 rounded" id="runOutput" style="max-height:400px;overflow-y:auto;"></pre></div>
+            <div class="tab-pane" id="tabRunErrors"><div id="runErrorContent"></div></div>
+        </div>
+    </div>
+</div></div></div>
+
+@section Scripts {
+<script>
+    const params = new URLSearchParams(window.location.search);
+    const projectId = params.get('projectId');
+    let runs = [], assignments = [], artifacts = [];
+    let liveMode = false;
+
+    async function load() {
+        if (!projectId) { window.location.href = '/Projects'; return; }
+        const proj = await fetch(`/api/projects/${encodeURIComponent(projectId)}`).then(r=>r.json());
+        document.getElementById('bcProj').innerHTML = `<a href="/Projects">${esc(proj.name)}</a>`;
+        // Load data — these endpoints will be wired as agent execution progresses
+        try {
+            runs = await fetch(`/api/projects/${encodeURIComponent(projectId)}/agent-runs`).then(r=>r.ok?r.json():[]);
+            assignments = await fetch(`/api/projects/${encodeURIComponent(projectId)}/agent-assignments`).then(r=>r.ok?r.json():[]);
+            artifacts = await fetch(`/api/projects/${encodeURIComponent(projectId)}/agent-artifacts`).then(r=>r.ok?r.json():[]);
+        } catch(e) { runs = []; assignments = []; artifacts = []; }
+        renderAll();
+    }
+
+    function renderAll() {
+        renderStats();
+        renderAssignments();
+        renderLogs();
+        renderArtifacts();
+        renderTokenBars();
+    }
+
+    function renderStats() {
+        document.getElementById('statTotal').textContent = runs.length;
+        document.getElementById('statSuccess').textContent = runs.filter(r=>r.status==='completed').length;
+        document.getElementById('statFailed').textContent = runs.filter(r=>r.status==='failed').length;
+        document.getElementById('statRunning').textContent = runs.filter(r=>r.status==='running').length;
+        const totalTokens = runs.reduce((a,r)=>a+(r.tokensUsed||0),0);
+        document.getElementById('statTokens').textContent = totalTokens > 1000 ? `${(totalTokens/1000).toFixed(1)}k` : totalTokens;
+        const durations = runs.filter(r=>r.durationMs).map(r=>r.durationMs);
+        const avg = durations.length ? Math.round(durations.reduce((a,d)=>a+d,0)/durations.length/1000) : 0;
+        document.getElementById('statDuration').textContent = avg ? `${avg}s` : '-';
+    }
+
+    function renderAssignments() {
+        document.getElementById('assignmentList').innerHTML = assignments.map(a => `
+            <div class="list-group-item">
+                <div class="d-flex justify-content-between"><strong class="small">${esc(a.agentType)}</strong><span class="badge bg-${a.status==='active'?'success':'secondary'} rounded-pill">${esc(a.status)}</span></div>
+                <small class="text-muted">${esc(a.taskDescription||'')}</small>
+            </div>
+        `).join('') || '<div class="list-group-item text-muted small text-center">No assignments</div>';
+        document.getElementById('logFilter').innerHTML = '<option value="">All Agents</option>' +
+            [...new Set(runs.map(r=>r.agentType))].map(t=>`<option>${esc(t)}</option>`).join('');
+    }
+
+    function renderLogs() {
+        const filter = document.getElementById('logFilter').value;
+        const filtered = runs.filter(r => !filter || r.agentType === filter).sort((a,b) => new Date(b.startedAt) - new Date(a.startedAt));
+        document.getElementById('logBody').innerHTML = filtered.map(r => `
+            <tr onclick="openRun('${r.id}')" style="cursor:pointer">
+                <td><span class="badge bg-light text-dark">${esc(r.agentType)}</span></td>
+                <td class="small">${esc(r.taskSummary||'')}</td>
+                <td><span class="badge bg-${runStatusColor(r.status)}">${esc(r.status)}</span></td>
+                <td class="small">${r.tokensUsed||0}</td>
+                <td class="small">${r.durationMs ? `${(r.durationMs/1000).toFixed(1)}s` : '-'}</td>
+                <td class="small">${r.startedAt ? new Date(r.startedAt).toLocaleTimeString() : '-'}</td>
+                <td><button class="btn btn-sm btn-outline-secondary"><i class="bi bi-eye"></i></button></td>
+            </tr>
+        `).join('') || '<tr><td colspan="7" class="text-center text-muted py-3">No agent runs yet</td></tr>';
+    }
+
+    function renderArtifacts() {
+        document.getElementById('artifactBody').innerHTML = artifacts.map(a => `
+            <tr><td>${esc(a.agentType)}</td><td><span class="badge bg-light text-dark">${esc(a.artifactType)}</span></td>
+            <td><code class="small">${esc(a.filePath||a.path||'')}</code></td>
+            <td class="small">${a.sizeBytes ? `${(a.sizeBytes/1024).toFixed(1)} KB` : '-'}</td>
+            <td class="small">${a.createdAt ? new Date(a.createdAt).toLocaleString() : '-'}</td></tr>
+        `).join('') || '<tr><td colspan="5" class="text-center text-muted small">No artifacts</td></tr>';
+    }
+
+    function renderTokenBars() {
+        const byAgent = {};
+        runs.forEach(r => { byAgent[r.agentType] = (byAgent[r.agentType]||0) + (r.tokensUsed||0); });
+        const max = Math.max(1, ...Object.values(byAgent));
+        document.getElementById('tokenBars').innerHTML = Object.entries(byAgent).sort((a,b)=>b[1]-a[1]).map(([agent, tokens]) => `
+            <div class="text-center" style="min-width:60px">
+                <div class="bg-primary rounded-top" style="height:${Math.max(4, tokens/max*100)}px;width:40px;margin:0 auto"></div>
+                <small class="text-muted d-block" style="font-size:.65rem">${esc(agent)}</small>
+                <small>${tokens > 1000 ? `${(tokens/1000).toFixed(1)}k` : tokens}</small>
+            </div>
+        `).join('') || '<span class="text-muted small">No token data</span>';
+    }
+
+    function openRun(id) {
+        const r = runs.find(x=>x.id===id);
+        if (!r) return;
+        document.getElementById('runTitle').textContent = `${r.agentType} Run`;
+        document.getElementById('runInfoContent').innerHTML = `<table class="table table-sm"><tbody>
+            <tr><th>Agent</th><td>${esc(r.agentType)}</td></tr><tr><th>Status</th><td><span class="badge bg-${runStatusColor(r.status)}">${esc(r.status)}</span></td></tr>
+            <tr><th>Started</th><td>${new Date(r.startedAt).toLocaleString()}</td></tr><tr><th>Duration</th><td>${r.durationMs?`${(r.durationMs/1000).toFixed(1)}s`:'-'}</td></tr>
+            <tr><th>Tokens</th><td>${r.tokensUsed||0}</td></tr><tr><th>Model</th><td>${esc(r.modelUsed||'-')}</td></tr>
+        </tbody></table>`;
+        document.getElementById('runOutput').textContent = r.output || 'No output captured';
+        document.getElementById('runErrorContent').innerHTML = r.errorMessage ? `<div class="alert alert-danger">${esc(r.errorMessage)}</div><pre class="bg-light p-2 small">${esc(r.errorStackTrace||'')}</pre>` : '<p class="text-muted">No errors</p>';
+        new bootstrap.Modal(document.getElementById('runModal')).show();
+    }
+
+    function toggleLive() {
+        liveMode = !liveMode;
+        document.getElementById('liveLabel').textContent = liveMode ? 'Live ●' : 'Live';
+        if (liveMode) { loadInterval = setInterval(load, 5000); } else { clearInterval(loadInterval); }
+    }
+    let loadInterval;
+
+    function triggerRun() { alert('Agent run triggering will be integrated with the Orchestrator.'); }
+    function runStatusColor(s) { return { completed:'success', failed:'danger', running:'warning', pending:'secondary', cancelled:'dark' }[s] || 'secondary'; }
+    function esc(s) { const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML; }
+
+    load();
+</script>
+}

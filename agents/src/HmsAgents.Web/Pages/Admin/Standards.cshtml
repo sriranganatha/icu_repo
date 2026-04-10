@@ -1,0 +1,216 @@
+@page
+@{
+    ViewData["Title"] = "Standards & Quality";
+}
+
+<div class="container-fluid px-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2><i class="bi bi-check2-square me-2"></i>Standards &amp; Quality Gates</h2>
+        <button class="btn btn-primary" onclick="showAddForm()"><i class="bi bi-plus-lg me-1"></i>Add</button>
+    </div>
+
+    <ul class="nav nav-tabs mb-3" id="stdTabs">
+        <li class="nav-item"><a class="nav-link active" href="#" data-tab="coding">Coding Standards</a></li>
+        <li class="nav-item"><a class="nav-link" href="#" data-tab="naming">Naming Conventions</a></li>
+        <li class="nav-item"><a class="nav-link" href="#" data-tab="gates">Quality Gates</a></li>
+        <li class="nav-item"><a class="nav-link" href="#" data-tab="checklists">Review Checklists</a></li>
+        <li class="nav-item"><a class="nav-link" href="#" data-tab="security">Security Policies</a></li>
+    </ul>
+
+    <div class="card">
+        <div class="card-body p-0">
+            <table class="table table-hover mb-0">
+                <thead class="table-light"><tr id="stdHead"></tr></thead>
+                <tbody id="stdBody"><tr><td colspan="6" class="text-center text-muted py-4">Loading...</td></tr></tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Add Modal -->
+    <div class="modal fade" id="stdModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header bg-primary text-white">
+                    <h5 class="modal-title" id="stdModalTitle">Add</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body" id="stdModalBody"></div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button class="btn btn-primary" onclick="saveStandard()">Save</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+<script>
+    const API = '/api/standards';
+    let activeTab = 'coding';
+    let data = {};
+
+    document.querySelectorAll('#stdTabs a').forEach(tab => {
+        tab.addEventListener('click', e => {
+            e.preventDefault();
+            document.querySelectorAll('#stdTabs a').forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+            activeTab = tab.dataset.tab;
+            renderTable();
+        });
+    });
+
+    async function loadAll() {
+        const [coding, naming, gates, checklists, security] = await Promise.all([
+            fetch(`${API}/coding`).then(r => r.json()),
+            fetch(`${API}/naming-conventions`).then(r => r.json()),
+            fetch(`${API}/quality-gates`).then(r => r.json()),
+            fetch(`${API}/review-checklists`).then(r => r.json()),
+            fetch(`${API}/security-policies`).then(r => r.json())
+        ]);
+        data = { coding, naming, gates, checklists, security };
+        renderTable();
+    }
+
+    function renderTable() {
+        const head = document.getElementById('stdHead');
+        const body = document.getElementById('stdBody');
+        const items = data[activeTab] || [];
+        let headers = '', rows = '';
+
+        switch(activeTab) {
+            case 'coding':
+                headers = '<th>Name</th><th>Language</th><th>Rules</th><th>Created</th><th></th>';
+                rows = items.map(i => `<tr>
+                    <td><strong>${esc(i.name)}</strong></td>
+                    <td>${esc(i.languageId?.substring(0,8) || 'Global')}</td>
+                    <td><code class="small">${esc(i.rulesJson?.substring(0,60))}</code></td>
+                    <td>${fmtDate(i.createdAt)}</td>
+                    <td><button class="btn btn-sm btn-outline-danger" onclick="deleteItem('coding','${i.id}')"><i class="bi bi-trash"></i></button></td>
+                </tr>`).join('');
+                break;
+            case 'naming':
+                headers = '<th>Scope</th><th>Pattern</th><th>Examples</th><th></th>';
+                rows = items.map(i => `<tr>
+                    <td><span class="badge bg-info">${esc(i.scope)}</span></td>
+                    <td><strong>${esc(i.pattern)}</strong></td>
+                    <td><code class="small">${esc(i.examplesJson?.substring(0,60))}</code></td>
+                    <td><button class="btn btn-sm btn-outline-danger" onclick="deleteItem('naming-conventions','${i.id}')"><i class="bi bi-trash"></i></button></td>
+                </tr>`).join('');
+                break;
+            case 'gates':
+                headers = '<th>Name</th><th>Type</th><th>Threshold</th><th></th>';
+                rows = items.map(i => `<tr>
+                    <td><strong>${esc(i.name)}</strong></td>
+                    <td><span class="badge bg-warning text-dark">${esc(i.gateType)}</span></td>
+                    <td><code class="small">${esc(i.thresholdConfigJson?.substring(0,60))}</code></td>
+                    <td><button class="btn btn-sm btn-outline-danger" onclick="deleteItem('quality-gates','${i.id}')"><i class="bi bi-trash"></i></button></td>
+                </tr>`).join('');
+                break;
+            case 'checklists':
+                headers = '<th>Name</th><th>Scope</th><th>Items</th><th></th>';
+                rows = items.map(i => `<tr>
+                    <td><strong>${esc(i.name)}</strong></td>
+                    <td><span class="badge bg-secondary">${esc(i.scope)}</span></td>
+                    <td><code class="small">${esc(i.checklistItemsJson?.substring(0,60))}</code></td>
+                    <td><button class="btn btn-sm btn-outline-danger" onclick="deleteItem('review-checklists','${i.id}')"><i class="bi bi-trash"></i></button></td>
+                </tr>`).join('');
+                break;
+            case 'security':
+                headers = '<th>Name</th><th>Category</th><th>Severity</th><th></th>';
+                rows = items.map(i => `<tr>
+                    <td><strong>${esc(i.name)}</strong></td>
+                    <td><span class="badge bg-info">${esc(i.category)}</span></td>
+                    <td><span class="badge bg-${i.severity==='critical'?'danger':i.severity==='high'?'warning text-dark':'secondary'}">${esc(i.severity)}</span></td>
+                    <td><button class="btn btn-sm btn-outline-danger" onclick="deleteItem('security-policies','${i.id}')"><i class="bi bi-trash"></i></button></td>
+                </tr>`).join('');
+                break;
+        }
+        head.innerHTML = headers;
+        body.innerHTML = rows || '<tr><td colspan="6" class="text-center text-muted py-4">No items</td></tr>';
+    }
+
+    function showAddForm() {
+        const body = document.getElementById('stdModalBody');
+        const title = document.getElementById('stdModalTitle');
+        let html = '';
+
+        switch(activeTab) {
+            case 'coding':
+                title.textContent = 'Add Coding Standard';
+                html = `<div class="mb-3"><label class="form-label">Name</label><input class="form-control" id="fName"></div>
+                    <div class="mb-3"><label class="form-label">Rules JSON</label><textarea class="form-control" id="fRules" rows="4">[]</textarea></div>
+                    <div class="mb-3"><label class="form-label">Linter Config</label><textarea class="form-control" id="fLinter" rows="3"></textarea></div>`;
+                break;
+            case 'naming':
+                title.textContent = 'Add Naming Convention';
+                html = `<div class="mb-3"><label class="form-label">Scope</label><select class="form-select" id="fScope"><option>file</option><option>class</option><option>function</option><option>variable</option><option>db_table</option><option>db_column</option><option>api_endpoint</option></select></div>
+                    <div class="mb-3"><label class="form-label">Pattern</label><input class="form-control" id="fPattern" placeholder="PascalCase"></div>
+                    <div class="mb-3"><label class="form-label">Examples JSON</label><textarea class="form-control" id="fExamples" rows="2">[]</textarea></div>`;
+                break;
+            case 'gates':
+                title.textContent = 'Add Quality Gate';
+                html = `<div class="mb-3"><label class="form-label">Name</label><input class="form-control" id="fName"></div>
+                    <div class="mb-3"><label class="form-label">Gate Type</label><select class="form-select" id="fGateType"><option>coverage</option><option>complexity</option><option>duplication</option><option>review_score</option><option>security</option></select></div>
+                    <div class="mb-3"><label class="form-label">Threshold Config JSON</label><textarea class="form-control" id="fThreshold" rows="3">{}</textarea></div>`;
+                break;
+            case 'checklists':
+                title.textContent = 'Add Review Checklist';
+                html = `<div class="mb-3"><label class="form-label">Name</label><input class="form-control" id="fName"></div>
+                    <div class="mb-3"><label class="form-label">Scope</label><select class="form-select" id="fScope"><option>code</option><option>architecture</option><option>security</option><option>performance</option></select></div>
+                    <div class="mb-3"><label class="form-label">Checklist Items JSON</label><textarea class="form-control" id="fItems" rows="4">[]</textarea></div>`;
+                break;
+            case 'security':
+                title.textContent = 'Add Security Policy';
+                html = `<div class="mb-3"><label class="form-label">Name</label><input class="form-control" id="fName"></div>
+                    <div class="mb-3"><label class="form-label">Category</label><select class="form-select" id="fCategory"><option>auth</option><option>data</option><option>network</option><option>compliance</option></select></div>
+                    <div class="mb-3"><label class="form-label">Rules JSON</label><textarea class="form-control" id="fRules" rows="4">[]</textarea></div>
+                    <div class="mb-3"><label class="form-label">Severity</label><select class="form-select" id="fSeverity"><option>low</option><option>medium</option><option>high</option><option>critical</option></select></div>`;
+                break;
+        }
+        body.innerHTML = html;
+        new bootstrap.Modal(document.getElementById('stdModal')).show();
+    }
+
+    async function saveStandard() {
+        let url = '', payload = {};
+        switch(activeTab) {
+            case 'coding':
+                url = `${API}/coding`;
+                payload = { name: gv('fName'), rulesJson: gv('fRules'), linterConfig: gv('fLinter') || null };
+                break;
+            case 'naming':
+                url = `${API}/naming-conventions`;
+                payload = { scope: gv('fScope'), pattern: gv('fPattern'), examplesJson: gv('fExamples') };
+                break;
+            case 'gates':
+                url = `${API}/quality-gates`;
+                payload = { name: gv('fName'), gateType: gv('fGateType'), thresholdConfigJson: gv('fThreshold') };
+                break;
+            case 'checklists':
+                url = `${API}/review-checklists`;
+                payload = { name: gv('fName'), scope: gv('fScope'), checklistItemsJson: gv('fItems') };
+                break;
+            case 'security':
+                url = `${API}/security-policies`;
+                payload = { name: gv('fName'), category: gv('fCategory'), rulesJson: gv('fRules'), severity: gv('fSeverity') };
+                break;
+        }
+        await fetch(url, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+        bootstrap.Modal.getInstance(document.getElementById('stdModal')).hide();
+        loadAll();
+    }
+
+    async function deleteItem(endpoint, id) {
+        if (!confirm('Delete this item?')) return;
+        await fetch(`${API}/${endpoint}/${id}`, { method: 'DELETE' });
+        loadAll();
+    }
+
+    function gv(id) { return document.getElementById(id)?.value ?? ''; }
+    function esc(s) { const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML; }
+    function fmtDate(d) { return d ? new Date(d).toLocaleDateString() : '-'; }
+
+    loadAll();
+</script>
+}

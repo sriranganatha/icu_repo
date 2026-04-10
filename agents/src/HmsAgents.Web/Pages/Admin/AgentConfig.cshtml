@@ -1,0 +1,139 @@
+@page
+@{
+    ViewData["Title"] = "Agent Registry";
+}
+
+<div class="container-fluid px-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2><i class="bi bi-robot me-2"></i>Agent Registry</h2>
+        <button class="btn btn-primary" onclick="showAddAgent()"><i class="bi bi-plus-lg me-1"></i>Register Agent Type</button>
+    </div>
+
+    <div class="row mb-3">
+        <div class="col-md-4">
+            <input type="search" class="form-control" id="searchAgent" placeholder="Search agents..." oninput="renderAgents()">
+        </div>
+    </div>
+
+    <div class="row g-3" id="agentList">
+        <div class="col-12 text-center text-muted py-5">Loading agent types...</div>
+    </div>
+
+    <!-- Agent Detail / Edit Modal -->
+    <div class="modal fade" id="agentModal" tabindex="-1">
+        <div class="modal-dialog modal-xl modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header bg-primary text-white">
+                    <h5 class="modal-title" id="agentModalTitle">Agent Details</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body" id="agentModalBody"></div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                    <button class="btn btn-primary" id="btnSaveAgent" onclick="saveAgent()">Save</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+<script>
+    const API = '/api/agent-registry';
+    let agents = [];
+
+    async function loadAgents() {
+        agents = await fetch(`${API}/agent-types`).then(r => r.json());
+        renderAgents();
+    }
+
+    function renderAgents() {
+        const search = (document.getElementById('searchAgent').value || '').toLowerCase();
+        const filtered = agents.filter(a =>
+            a.agentTypeCode.toLowerCase().includes(search) ||
+            (a.description || '').toLowerCase().includes(search));
+        const container = document.getElementById('agentList');
+
+        if (filtered.length === 0) {
+            container.innerHTML = '<div class="col-12 text-center text-muted py-5">No agents found</div>';
+            return;
+        }
+
+        container.innerHTML = filtered.map(a => `
+            <div class="col-md-4 col-lg-3">
+                <div class="card h-100" style="cursor:pointer;" onclick="showAgentDetail('${a.id}')">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-start mb-2">
+                            <h6 class="card-title mb-0">${esc(a.agentTypeCode)}</h6>
+                            <span class="badge bg-${a.isActive?'success':'secondary'}">${a.isActive?'Active':'Inactive'}</span>
+                        </div>
+                        <p class="text-muted small mb-2">${esc(a.description || 'No description')}</p>
+                        <div class="d-flex gap-1 flex-wrap">
+                            ${(a.modelMappings||[]).map(m => `<span class="badge bg-info">${esc(m.modelId?.substring(0,8))}</span>`).join('')}
+                        </div>
+                        <div class="mt-2 small text-muted">
+                            <i class="bi bi-tools me-1"></i>${(a.tools||[]).length} tools
+                            &middot; <i class="bi bi-chat-dots me-1"></i>${(a.prompts||[]).length} prompts
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    function showAddAgent() {
+        document.getElementById('agentModalTitle').textContent = 'Register Agent Type';
+        document.getElementById('agentModalBody').innerHTML = `
+            <div class="mb-3"><label class="form-label">Agent Type Code</label><input class="form-control" id="fCode"></div>
+            <div class="mb-3"><label class="form-label">Description</label><textarea class="form-control" id="fDesc" rows="3"></textarea></div>
+            <div class="mb-3"><label class="form-label">Capabilities (JSON array)</label><textarea class="form-control" id="fCaps" rows="2">[]</textarea></div>
+            <div class="mb-3"><label class="form-label">Input Schema (JSON)</label><textarea class="form-control" id="fInput" rows="2">{}</textarea></div>
+            <div class="mb-3"><label class="form-label">Output Schema (JSON)</label><textarea class="form-control" id="fOutput" rows="2">{}</textarea></div>`;
+        document.getElementById('btnSaveAgent').dataset.mode = 'create';
+        new bootstrap.Modal(document.getElementById('agentModal')).show();
+    }
+
+    async function showAgentDetail(id) {
+        const a = await fetch(`${API}/agent-types/${id}`).then(r => r.json());
+        document.getElementById('agentModalTitle').textContent = a.agentTypeCode;
+        document.getElementById('agentModalBody').innerHTML = `
+            <ul class="nav nav-tabs mb-3" id="agentDetailTabs">
+                <li class="nav-item"><a class="nav-link active" href="#" data-dtab="config">Config</a></li>
+                <li class="nav-item"><a class="nav-link" href="#" data-dtab="models">Model Mappings (${(a.modelMappings||[]).length})</a></li>
+                <li class="nav-item"><a class="nav-link" href="#" data-dtab="tools">Tools (${(a.tools||[]).length})</a></li>
+                <li class="nav-item"><a class="nav-link" href="#" data-dtab="prompts">Prompts</a></li>
+            </ul>
+            <div id="agentDetailContent">
+                <div class="row">
+                    <div class="col-md-6 mb-3"><label class="form-label fw-bold">Agent Type Code</label><p>${esc(a.agentTypeCode)}</p></div>
+                    <div class="col-md-6 mb-3"><label class="form-label fw-bold">Default Model</label><p>${esc(a.defaultModelId || 'None')}</p></div>
+                </div>
+                <div class="mb-3"><label class="form-label fw-bold">Description</label><p>${esc(a.description || '-')}</p></div>
+                <div class="mb-3"><label class="form-label fw-bold">Capabilities</label><pre class="bg-light p-2 rounded">${esc(a.capabilitiesJson)}</pre></div>
+                <div class="row">
+                    <div class="col-md-6 mb-3"><label class="form-label fw-bold">Input Schema</label><pre class="bg-light p-2 rounded" style="max-height:200px;overflow:auto">${esc(a.inputSchemaJson)}</pre></div>
+                    <div class="col-md-6 mb-3"><label class="form-label fw-bold">Output Schema</label><pre class="bg-light p-2 rounded" style="max-height:200px;overflow:auto">${esc(a.outputSchemaJson)}</pre></div>
+                </div>
+            </div>`;
+        document.getElementById('btnSaveAgent').style.display = 'none';
+        new bootstrap.Modal(document.getElementById('agentModal')).show();
+    }
+
+    async function saveAgent() {
+        const payload = {
+            agentTypeCode: document.getElementById('fCode').value,
+            description: document.getElementById('fDesc').value,
+            capabilitiesJson: document.getElementById('fCaps').value,
+            inputSchemaJson: document.getElementById('fInput').value,
+            outputSchemaJson: document.getElementById('fOutput').value
+        };
+        await fetch(`${API}/agent-types`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+        bootstrap.Modal.getInstance(document.getElementById('agentModal')).hide();
+        loadAgents();
+    }
+
+    function esc(s) { const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML; }
+
+    loadAgents();
+</script>
+}

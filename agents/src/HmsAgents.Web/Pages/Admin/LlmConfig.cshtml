@@ -1,0 +1,203 @@
+@page
+@{
+    ViewData["Title"] = "LLM Configuration";
+}
+
+<div class="container-fluid px-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2><i class="bi bi-cpu me-2"></i>LLM Configuration</h2>
+        <button class="btn btn-primary" onclick="showAddForm()"><i class="bi bi-plus-lg me-1"></i>Add</button>
+    </div>
+
+    <ul class="nav nav-tabs mb-3" id="llmTabs">
+        <li class="nav-item"><a class="nav-link active" href="#" data-tab="providers">Providers</a></li>
+        <li class="nav-item"><a class="nav-link" href="#" data-tab="models">Models</a></li>
+        <li class="nav-item"><a class="nav-link" href="#" data-tab="routing">Routing Rules</a></li>
+        <li class="nav-item"><a class="nav-link" href="#" data-tab="budgets">Token Budgets</a></li>
+    </ul>
+
+    <div class="card">
+        <div class="card-body p-0">
+            <table class="table table-hover mb-0">
+                <thead class="table-light"><tr id="llmHead"></tr></thead>
+                <tbody id="llmBody"><tr><td colspan="6" class="text-center text-muted py-4">Loading...</td></tr></tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Add Modal -->
+    <div class="modal fade" id="llmModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header bg-primary text-white">
+                    <h5 class="modal-title" id="llmModalTitle">Add</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body" id="llmModalBody"></div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button class="btn btn-primary" onclick="saveItem()">Save</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+<script>
+    const API = '/api/llm-config';
+    let activeTab = 'providers';
+    let providers = [], models = [], routing = [], budgets = [];
+
+    document.querySelectorAll('#llmTabs a').forEach(tab => {
+        tab.addEventListener('click', e => {
+            e.preventDefault();
+            document.querySelectorAll('#llmTabs a').forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+            activeTab = tab.dataset.tab;
+            renderTable();
+        });
+    });
+
+    async function loadAll() {
+        [providers, models, routing, budgets] = await Promise.all([
+            fetch(`${API}/providers`).then(r => r.json()),
+            fetch(`${API}/models`).then(r => r.json()),
+            fetch(`${API}/routing-rules`).then(r => r.json()),
+            fetch(`${API}/token-budgets`).then(r => r.json())
+        ]);
+        renderTable();
+    }
+
+    function renderTable() {
+        const head = document.getElementById('llmHead');
+        const body = document.getElementById('llmBody');
+        let headers = '', rows = '';
+
+        switch(activeTab) {
+            case 'providers':
+                headers = '<th>Name</th><th>API Base URL</th><th>Auth</th><th>Rate Limit</th><th>Status</th><th></th>';
+                rows = providers.map(p => `<tr>
+                    <td><strong>${esc(p.name)}</strong></td>
+                    <td><code class="small">${esc(p.apiBaseUrl)}</code></td>
+                    <td>${esc(p.authType)}</td>
+                    <td>${p.rateLimitPerMinute}/min</td>
+                    <td><span class="badge bg-${p.isAvailable?'success':'danger'}">${p.isAvailable?'Available':'Unavailable'}</span></td>
+                    <td><button class="btn btn-sm btn-outline-danger" onclick="deleteItem('providers','${p.id}')"><i class="bi bi-trash"></i></button></td>
+                </tr>`).join('');
+                break;
+            case 'models':
+                headers = '<th>Model</th><th>Provider</th><th>Context</th><th>Cost In</th><th>Cost Out</th><th>Capabilities</th><th></th>';
+                rows = models.map(m => `<tr>
+                    <td><strong>${esc(m.modelName)}</strong></td>
+                    <td>${esc(m.providerId?.substring(0,8))}</td>
+                    <td>${(m.contextWindow/1000).toFixed(0)}K</td>
+                    <td>$${m.costInputPer1kTokens}</td>
+                    <td>$${m.costOutputPer1kTokens}</td>
+                    <td><code class="small">${esc(m.capabilitiesJson?.substring(0,40))}</code></td>
+                    <td><button class="btn btn-sm btn-outline-danger" onclick="deleteItem('models','${m.id}')"><i class="bi bi-trash"></i></button></td>
+                </tr>`).join('');
+                break;
+            case 'routing':
+                headers = '<th>Task Type</th><th>Primary Model</th><th>Fallback</th><th>Priority</th><th></th>';
+                rows = routing.map(r => `<tr>
+                    <td><span class="badge bg-info">${esc(r.taskType)}</span></td>
+                    <td>${esc(r.primaryModelId?.substring(0,8))}</td>
+                    <td>${esc(r.fallbackModelId?.substring(0,8) || '-')}</td>
+                    <td>${r.priority}</td>
+                    <td><button class="btn btn-sm btn-outline-danger" onclick="deleteItem('routing-rules','${r.id}')"><i class="bi bi-trash"></i></button></td>
+                </tr>`).join('');
+                break;
+            case 'budgets':
+                headers = '<th>Scope</th><th>Budget (tokens)</th><th>Alert Threshold</th><th>Project</th><th></th>';
+                rows = budgets.map(b => `<tr>
+                    <td><span class="badge bg-warning text-dark">${esc(b.scope)}</span></td>
+                    <td>${b.budgetTokens.toLocaleString()}</td>
+                    <td>${(b.alertThreshold * 100).toFixed(0)}%</td>
+                    <td>${esc(b.projectId?.substring(0,8) || 'Global')}</td>
+                    <td><button class="btn btn-sm btn-outline-danger" onclick="deleteItem('token-budgets','${b.id}')"><i class="bi bi-trash"></i></button></td>
+                </tr>`).join('');
+                break;
+        }
+        head.innerHTML = headers;
+        body.innerHTML = rows || '<tr><td colspan="7" class="text-center text-muted py-4">No items</td></tr>';
+    }
+
+    function showAddForm() {
+        const body = document.getElementById('llmModalBody');
+        const title = document.getElementById('llmModalTitle');
+        let html = '';
+
+        switch(activeTab) {
+            case 'providers':
+                title.textContent = 'Add LLM Provider';
+                html = `<div class="mb-3"><label class="form-label">Name</label><input class="form-control" id="fName" placeholder="gemini"></div>
+                    <div class="mb-3"><label class="form-label">API Base URL</label><input class="form-control" id="fUrl"></div>
+                    <div class="mb-3"><label class="form-label">Auth Type</label><select class="form-select" id="fAuth"><option>api_key</option><option>bearer</option><option>none</option></select></div>
+                    <div class="mb-3"><label class="form-label">Rate Limit/min</label><input type="number" class="form-control" id="fRate" value="60"></div>`;
+                break;
+            case 'models':
+                title.textContent = 'Add LLM Model';
+                html = `<div class="mb-3"><label class="form-label">Provider</label><select class="form-select" id="fProvider">${providers.map(p=>`<option value="${p.id}">${p.name}</option>`).join('')}</select></div>
+                    <div class="mb-3"><label class="form-label">Model Name</label><input class="form-control" id="fModel" placeholder="gemini-2.5-pro"></div>
+                    <div class="mb-3"><label class="form-label">Context Window</label><input type="number" class="form-control" id="fCtx" value="128000"></div>
+                    <div class="row"><div class="col"><div class="mb-3"><label class="form-label">Cost In/1K</label><input type="number" step="0.001" class="form-control" id="fCostIn" value="0"></div></div>
+                    <div class="col"><div class="mb-3"><label class="form-label">Cost Out/1K</label><input type="number" step="0.001" class="form-control" id="fCostOut" value="0"></div></div></div>
+                    <div class="mb-3"><label class="form-label">Capabilities JSON</label><textarea class="form-control" id="fCaps" rows="2">["code","reasoning"]</textarea></div>`;
+                break;
+            case 'routing':
+                title.textContent = 'Add Routing Rule';
+                html = `<div class="mb-3"><label class="form-label">Task Type</label><select class="form-select" id="fTaskType"><option>code_generation</option><option>review</option><option>testing</option><option>documentation</option><option>reasoning</option></select></div>
+                    <div class="mb-3"><label class="form-label">Primary Model</label><select class="form-select" id="fPrimary">${models.map(m=>`<option value="${m.id}">${m.modelName}</option>`).join('')}</select></div>
+                    <div class="mb-3"><label class="form-label">Fallback Model</label><select class="form-select" id="fFallback"><option value="">None</option>${models.map(m=>`<option value="${m.id}">${m.modelName}</option>`).join('')}</select></div>
+                    <div class="mb-3"><label class="form-label">Priority</label><input type="number" class="form-control" id="fPriority" value="100"></div>`;
+                break;
+            case 'budgets':
+                title.textContent = 'Add Token Budget';
+                html = `<div class="mb-3"><label class="form-label">Scope</label><select class="form-select" id="fScope"><option>per_task</option><option>per_story</option><option>per_project</option></select></div>
+                    <div class="mb-3"><label class="form-label">Budget (tokens)</label><input type="number" class="form-control" id="fBudget" value="1000000"></div>
+                    <div class="mb-3"><label class="form-label">Alert Threshold (0-1)</label><input type="number" step="0.05" class="form-control" id="fThreshold" value="0.8"></div>`;
+                break;
+        }
+        body.innerHTML = html;
+        new bootstrap.Modal(document.getElementById('llmModal')).show();
+    }
+
+    async function saveItem() {
+        let url = '', payload = {};
+        switch(activeTab) {
+            case 'providers':
+                url = `${API}/providers`;
+                payload = { name: gv('fName'), apiBaseUrl: gv('fUrl'), authType: gv('fAuth'), rateLimitPerMinute: parseInt(gv('fRate')) };
+                break;
+            case 'models':
+                url = `${API}/models`;
+                payload = { providerId: gv('fProvider'), modelName: gv('fModel'), contextWindow: parseInt(gv('fCtx')),
+                    costInputPer1kTokens: parseFloat(gv('fCostIn')), costOutputPer1kTokens: parseFloat(gv('fCostOut')), capabilitiesJson: gv('fCaps') };
+                break;
+            case 'routing':
+                url = `${API}/routing-rules`;
+                payload = { taskType: gv('fTaskType'), primaryModelId: gv('fPrimary'), fallbackModelId: gv('fFallback') || null, priority: parseInt(gv('fPriority')) };
+                break;
+            case 'budgets':
+                url = `${API}/token-budgets`;
+                payload = { scope: gv('fScope'), budgetTokens: parseInt(gv('fBudget')), alertThreshold: parseFloat(gv('fThreshold')) };
+                break;
+        }
+        await fetch(url, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+        bootstrap.Modal.getInstance(document.getElementById('llmModal')).hide();
+        loadAll();
+    }
+
+    async function deleteItem(endpoint, id) {
+        if (!confirm('Delete this item?')) return;
+        await fetch(`${API}/${endpoint}/${id}`, { method: 'DELETE' });
+        loadAll();
+    }
+
+    function gv(id) { return document.getElementById(id)?.value ?? ''; }
+    function esc(s) { const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML; }
+
+    loadAll();
+</script>
+}

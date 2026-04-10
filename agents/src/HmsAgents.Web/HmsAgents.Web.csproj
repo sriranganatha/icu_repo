@@ -3,10 +3,12 @@
   <ItemGroup>
     <ProjectReference Include="..\HmsAgents.Core\HmsAgents.Core.csproj" />
     <ProjectReference Include="..\HmsAgents.Agents\HmsAgents.Agents.csproj" />
+    <ProjectReference Include="..\Database\Hms.Database.csproj" />
+    <ProjectReference Include="..\Services\Hms.Services.csproj" />
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Npgsql" Version="8.0.6" />
+    <PackageReference Include="Npgsql" Version="9.0.3" />
   </ItemGroup>
 
   <PropertyGroup>

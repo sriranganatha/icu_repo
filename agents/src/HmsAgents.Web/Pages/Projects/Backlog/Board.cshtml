@@ -1,0 +1,211 @@
+@page
+@{
+    ViewData["Title"] = "Backlog Board";
+}
+
+<div class="container-fluid px-4">
+    <nav aria-label="breadcrumb"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="/Projects">Projects</a></li><li class="breadcrumb-item" id="bcProj">Project</li><li class="breadcrumb-item active">Backlog Board</li></ol></nav>
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h2><i class="bi bi-kanban me-2"></i>Backlog Board</h2>
+        <div>
+            <a class="btn btn-outline-secondary me-1" id="linkList" href="#"><i class="bi bi-list me-1"></i>List View</a>
+            <button class="btn btn-outline-primary me-1" onclick="showSprintModal()"><i class="bi bi-calendar3 me-1"></i>Sprints</button>
+            <button class="btn btn-primary" onclick="showCreateModal()"><i class="bi bi-plus-lg me-1"></i>Add Story</button>
+        </div>
+    </div>
+
+    <!-- Epic Filter -->
+    <div class="row mb-3">
+        <div class="col-md-3"><select class="form-select form-select-sm" id="epicFilter" onchange="renderBoard()"><option value="">All Epics</option></select></div>
+        <div class="col-md-3"><select class="form-select form-select-sm" id="sprintFilter" onchange="renderBoard()"><option value="">All Sprints</option></select></div>
+        <div class="col-md-3"><input class="form-control form-control-sm" id="search" placeholder="Search..." oninput="renderBoard()"></div>
+        <div class="col-md-3 text-end"><span class="badge bg-primary" id="storyCount">0 stories</span></div>
+    </div>
+
+    <!-- Kanban Columns -->
+    <div class="row flex-nowrap overflow-auto pb-3" id="kanbanBoard" style="min-height: 500px;">
+        <div class="col" style="min-width: 280px;"><div class="card bg-light h-100"><div class="card-header py-2 d-flex justify-content-between"><strong>Backlog</strong><span class="badge bg-secondary" id="countBacklog">0</span></div><div class="card-body p-2" id="colBacklog" data-status="backlog"></div></div></div>
+        <div class="col" style="min-width: 280px;"><div class="card bg-light h-100"><div class="card-header py-2 d-flex justify-content-between"><strong>To Do</strong><span class="badge bg-info" id="countTodo">0</span></div><div class="card-body p-2" id="colTodo" data-status="todo"></div></div></div>
+        <div class="col" style="min-width: 280px;"><div class="card bg-light h-100"><div class="card-header py-2 d-flex justify-content-between"><strong>In Progress</strong><span class="badge bg-warning" id="countInProgress">0</span></div><div class="card-body p-2" id="colInProgress" data-status="in_progress"></div></div></div>
+        <div class="col" style="min-width: 280px;"><div class="card bg-light h-100"><div class="card-header py-2 d-flex justify-content-between"><strong>Review</strong><span class="badge bg-primary" id="countReview">0</span></div><div class="card-body p-2" id="colReview" data-status="review"></div></div></div>
+        <div class="col" style="min-width: 280px;"><div class="card bg-light h-100"><div class="card-header py-2 d-flex justify-content-between"><strong>Done</strong><span class="badge bg-success" id="countDone">0</span></div><div class="card-body p-2" id="colDone" data-status="done"></div></div></div>
+    </div>
+</div>
+
+<!-- Story Detail Modal -->
+<div class="modal fade" id="storyModal" tabindex="-1"><div class="modal-dialog modal-lg"><div class="modal-content">
+    <div class="modal-header"><h5 class="modal-title" id="storyTitle">Story</h5><button class="btn-close" data-bs-dismiss="modal"></button></div>
+    <div class="modal-body">
+        <ul class="nav nav-tabs mb-3">
+            <li class="nav-item"><a class="nav-link active" data-bs-toggle="tab" href="#tabStoryDetail">Details</a></li>
+            <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#tabStoryTasks">Tasks</a></li>
+            <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#tabStoryDeps">Dependencies</a></li>
+        </ul>
+        <div class="tab-content">
+            <div class="tab-pane active" id="tabStoryDetail"><div id="storyDetailContent"></div></div>
+            <div class="tab-pane" id="tabStoryTasks"><div id="storyTasksContent"></div></div>
+            <div class="tab-pane" id="tabStoryDeps"><div id="storyDepsContent"></div></div>
+        </div>
+    </div>
+</div></div></div>
+
+<!-- Create Story Modal -->
+<div class="modal fade" id="createModal" tabindex="-1"><div class="modal-dialog"><div class="modal-content">
+    <div class="modal-header"><h5>Create Story</h5><button class="btn-close" data-bs-dismiss="modal"></button></div>
+    <div class="modal-body">
+        <div class="mb-3"><label class="form-label">Title</label><input class="form-control" id="newTitle"></div>
+        <div class="mb-3"><label class="form-label">Description</label><textarea class="form-control" id="newDesc" rows="3"></textarea></div>
+        <div class="row">
+            <div class="col-md-6 mb-3"><label class="form-label">Epic</label><select class="form-select" id="newEpic"><option value="">None</option></select></div>
+            <div class="col-md-6 mb-3"><label class="form-label">Story Points</label><input class="form-control" id="newPoints" type="number" value="3"></div>
+        </div>
+        <div class="row">
+            <div class="col-md-6 mb-3"><label class="form-label">Priority</label><select class="form-select" id="newPriority"><option>medium</option><option>critical</option><option>high</option><option>low</option></select></div>
+            <div class="col-md-6 mb-3"><label class="form-label">Assigned Agent</label><select class="form-select" id="newAgent"><option value="">Unassigned</option></select></div>
+        </div>
+    </div>
+    <div class="modal-footer"><button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button><button class="btn btn-primary" onclick="createStory()">Create</button></div>
+</div></div></div>
+
+<!-- Sprint Modal -->
+<div class="modal fade" id="sprintModal" tabindex="-1"><div class="modal-dialog"><div class="modal-content">
+    <div class="modal-header"><h5>Sprint Management</h5><button class="btn-close" data-bs-dismiss="modal"></button></div>
+    <div class="modal-body">
+        <div id="sprintList"></div>
+        <hr>
+        <h6>Create Sprint</h6>
+        <div class="row">
+            <div class="col-md-6 mb-3"><label class="form-label">Name</label><input class="form-control" id="sprintName"></div>
+            <div class="col-md-3 mb-3"><label class="form-label">Start</label><input class="form-control" id="sprintStart" type="date"></div>
+            <div class="col-md-3 mb-3"><label class="form-label">End</label><input class="form-control" id="sprintEnd" type="date"></div>
+        </div>
+        <button class="btn btn-primary btn-sm" onclick="createSprint()">Create Sprint</button>
+    </div>
+</div></div></div>
+
+@section Scripts {
+<script>
+    const params = new URLSearchParams(window.location.search);
+    const projectId = params.get('projectId');
+    let stories = [], epics = [], sprints = [], tasks = [];
+
+    async function load() {
+        if (!projectId) { window.location.href = '/Projects'; return; }
+        document.getElementById('linkList').href = `/Projects/Backlog/List?projectId=${projectId}`;
+        const [proj, epicData, storyData, sprintData] = await Promise.all([
+            fetch(`/api/projects/${encodeURIComponent(projectId)}`).then(r=>r.json()),
+            fetch(`/api/projects/${encodeURIComponent(projectId)}/epics`).then(r=>r.ok?r.json():[]),
+            fetch(`/api/projects/${encodeURIComponent(projectId)}/stories`).then(r=>r.ok?r.json():[]),
+            fetch(`/api/projects/${encodeURIComponent(projectId)}/sprints`).then(r=>r.ok?r.json():[])
+        ]);
+        document.getElementById('bcProj').innerHTML = `<a href="/Projects">${esc(proj.name)}</a>`;
+        epics = epicData; stories = storyData; sprints = sprintData;
+        fillEpicFilter();
+        fillSprintFilter();
+        renderBoard();
+    }
+
+    function fillEpicFilter() {
+        const el = document.getElementById('epicFilter');
+        el.innerHTML = '<option value="">All Epics</option>' + epics.map(e => `<option value="${e.id}">${esc(e.title)}</option>`).join('');
+        document.getElementById('newEpic').innerHTML = '<option value="">None</option>' + epics.map(e => `<option value="${e.id}">${esc(e.title)}</option>`).join('');
+    }
+
+    function fillSprintFilter() {
+        document.getElementById('sprintFilter').innerHTML = '<option value="">All Sprints</option>' + sprints.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
+    }
+
+    function renderBoard() {
+        const q = document.getElementById('search').value.toLowerCase();
+        const epicId = document.getElementById('epicFilter').value;
+        const sprintId = document.getElementById('sprintFilter').value;
+        const filtered = stories.filter(s =>
+            (!q || s.title.toLowerCase().includes(q)) &&
+            (!epicId || s.epicId === epicId) &&
+            (!sprintId || s.sprintId === sprintId)
+        );
+        const cols = { backlog: [], todo: [], in_progress: [], review: [], done: [] };
+        filtered.forEach(s => { const st = s.status || 'backlog'; if (cols[st]) cols[st].push(s); else cols['backlog'].push(s); });
+
+        Object.entries(cols).forEach(([status, items]) => {
+            const colId = 'col' + status.split('_').map(w=>w[0].toUpperCase()+w.slice(1)).join('');
+            const countId = 'count' + status.split('_').map(w=>w[0].toUpperCase()+w.slice(1)).join('');
+            const el = document.getElementById(colId);
+            const cnt = document.getElementById(countId);
+            if (cnt) cnt.textContent = items.length;
+            if (el) el.innerHTML = items.map(s => `
+                <div class="card mb-2 story-card" draggable="true" data-id="${s.id}" onclick="openStory('${s.id}')">
+                    <div class="card-body py-2 px-3">
+                        <div class="d-flex justify-content-between"><small class="text-muted">${esc(s.storyKey||'')}</small><span class="badge bg-${priColor(s.priority)} rounded-pill">${s.storyPoints||0}sp</span></div>
+                        <div class="fw-semibold small">${esc(s.title)}</div>
+                        ${s.epicTitle ? `<small class="text-muted"><i class="bi bi-bookmark me-1"></i>${esc(s.epicTitle)}</small>` : ''}
+                    </div>
+                </div>
+            `).join('') || '<div class="text-muted small text-center py-3">Empty</div>';
+        });
+        document.getElementById('storyCount').textContent = `${filtered.length} stories`;
+    }
+
+    function openStory(id) {
+        const s = stories.find(x => x.id === id);
+        if (!s) return;
+        document.getElementById('storyTitle').textContent = `${s.storyKey || 'Story'}: ${s.title}`;
+        document.getElementById('storyDetailContent').innerHTML = `
+            <div class="row"><div class="col-md-8">
+                <p>${esc(s.description||'No description')}</p>
+                <h6>Acceptance Criteria</h6><pre class="bg-light p-2 rounded small">${esc(s.acceptanceCriteria||'Not defined')}</pre>
+            </div><div class="col-md-4">
+                <table class="table table-sm"><tbody>
+                    <tr><th>Priority</th><td><span class="badge bg-${priColor(s.priority)}">${esc(s.priority)}</span></td></tr>
+                    <tr><th>Points</th><td>${s.storyPoints||0}</td></tr>
+                    <tr><th>Status</th><td>${esc(s.status)}</td></tr>
+                    <tr><th>Sprint</th><td>${esc(s.sprintName||'None')}</td></tr>
+                </tbody></table>
+            </div></div>`;
+        new bootstrap.Modal(document.getElementById('storyModal')).show();
+    }
+
+    async function createStory() {
+        const body = {
+            title: document.getElementById('newTitle').value,
+            description: document.getElementById('newDesc').value,
+            epicId: document.getElementById('newEpic').value || null,
+            storyPoints: parseInt(document.getElementById('newPoints').value) || 3,
+            priority: document.getElementById('newPriority').value
+        };
+        const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/stories`, {
+            method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body)
+        });
+        if (res.ok) { bootstrap.Modal.getInstance(document.getElementById('createModal')).hide(); load(); }
+        else alert('Failed to create story');
+    }
+
+    async function createSprint() {
+        const body = {
+            name: document.getElementById('sprintName').value,
+            startDate: document.getElementById('sprintStart').value,
+            endDate: document.getElementById('sprintEnd').value
+        };
+        const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/sprints`, {
+            method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body)
+        });
+        if (res.ok) { bootstrap.Modal.getInstance(document.getElementById('sprintModal')).hide(); load(); }
+    }
+
+    function showCreateModal() { new bootstrap.Modal(document.getElementById('createModal')).show(); }
+    function showSprintModal() {
+        document.getElementById('sprintList').innerHTML = sprints.map(s => `
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <div><strong>${esc(s.name)}</strong><br><small class="text-muted">${s.startDate ? new Date(s.startDate).toLocaleDateString() : '?'} — ${s.endDate ? new Date(s.endDate).toLocaleDateString() : '?'}</small></div>
+                <span class="badge bg-${s.status==='active'?'success':'secondary'}">${esc(s.status)}</span>
+            </div>
+        `).join('') || '<p class="text-muted">No sprints yet</p>';
+        new bootstrap.Modal(document.getElementById('sprintModal')).show();
+    }
+
+    function priColor(p) { return { critical:'danger', high:'warning', medium:'info', low:'secondary' }[p] || 'secondary'; }
+    function esc(s) { const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML; }
+
+    load();
+</script>
+}

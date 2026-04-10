@@ -1,0 +1,97 @@
+@page
+@{
+    ViewData["Title"] = "Cost Analytics";
+}
+
+<div class="container-fluid px-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2><i class="bi bi-currency-dollar me-2"></i>Cost Analytics</h2>
+        <div>
+            <select class="form-select d-inline-block" style="width:auto" id="projectFilter" onchange="load()"><option value="">All Projects</option></select>
+            <select class="form-select d-inline-block ms-2" style="width:auto" id="periodFilter" onchange="renderAll()"><option value="7d">Last 7 Days</option><option value="30d" selected>Last 30 Days</option><option value="90d">Last 90 Days</option></select>
+        </div>
+    </div>
+
+    <!-- Summary -->
+    <div class="row mb-4">
+        <div class="col-md-3"><div class="card text-bg-primary"><div class="card-body py-2"><h6 class="mb-0">Total Cost</h6><h3 id="totalCost">$0.00</h3></div></div></div>
+        <div class="col-md-3"><div class="card"><div class="card-body py-2"><h6 class="text-muted mb-0">Total Tokens</h6><h3 id="totalTokens">0</h3></div></div></div>
+        <div class="col-md-3"><div class="card"><div class="card-body py-2"><h6 class="text-muted mb-0">Avg Cost/Project</h6><h3 id="avgCostProject">$0.00</h3></div></div></div>
+        <div class="col-md-3"><div class="card"><div class="card-body py-2"><h6 class="text-muted mb-0">Avg Cost/Agent Run</h6><h3 id="avgCostRun">$0.00</h3></div></div></div>
+    </div>
+
+    <div class="row">
+        <!-- Cost by Model -->
+        <div class="col-md-6">
+            <div class="card"><div class="card-header"><h6 class="mb-0">Cost by Model</h6></div>
+            <div class="card-body">
+                <div id="costByModel"></div>
+            </div></div>
+        </div>
+
+        <!-- Cost by Agent Type -->
+        <div class="col-md-6">
+            <div class="card"><div class="card-header"><h6 class="mb-0">Cost by Agent Type</h6></div>
+            <div class="card-body">
+                <div id="costByAgent"></div>
+            </div></div>
+        </div>
+    </div>
+
+    <!-- Token Budget Status -->
+    <div class="card mt-3"><div class="card-header"><h6 class="mb-0">Token Budget Status</h6></div>
+    <div class="card-body">
+        <div class="table-responsive"><table class="table table-sm">
+            <thead><tr><th>Budget</th><th>Model</th><th>Limit</th><th>Used</th><th>Remaining</th><th>Usage</th></tr></thead>
+            <tbody id="budgetBody"></tbody>
+        </table></div>
+    </div></div>
+
+    <!-- Daily Cost Trend -->
+    <div class="card mt-3"><div class="card-header"><h6 class="mb-0">Daily Cost Trend</h6></div>
+    <div class="card-body">
+        <div class="d-flex align-items-end gap-1" id="dailyBars" style="height:200px"></div>
+    </div></div>
+</div>
+
+@section Scripts {
+<script>
+    let projects = [], budgets = [], runs = [];
+
+    async function load() {
+        projects = await fetch('/api/projects').then(r=>r.json());
+        document.getElementById('projectFilter').innerHTML = '<option value="">All Projects</option>' + projects.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('');
+        try {
+            budgets = await fetch('/api/llm-config/token-budgets').then(r=>r.ok?r.json():[]);
+        } catch(e) { budgets = []; }
+        renderAll();
+    }
+
+    function renderAll() {
+        renderBudgets();
+        // Placeholder data rendering — real data will flow from agent runs
+        document.getElementById('totalCost').textContent = '$0.00';
+        document.getElementById('totalTokens').textContent = '0';
+        document.getElementById('avgCostProject').textContent = '$0.00';
+        document.getElementById('avgCostRun').textContent = '$0.00';
+
+        document.getElementById('costByModel').innerHTML = '<div class="text-muted text-center py-3">Cost data will be available after agent runs</div>';
+        document.getElementById('costByAgent').innerHTML = '<div class="text-muted text-center py-3">Cost data will be available after agent runs</div>';
+        document.getElementById('dailyBars').innerHTML = '<div class="text-muted text-center w-100 align-self-center">No daily data yet</div>';
+    }
+
+    function renderBudgets() {
+        document.getElementById('budgetBody').innerHTML = budgets.map(b => {
+            const pct = b.maxTokens ? Math.round((b.usedTokens||0)/b.maxTokens*100) : 0;
+            const remaining = (b.maxTokens||0) - (b.usedTokens||0);
+            return `<tr><td>${esc(b.name)}</td><td>${esc(b.modelId||'All')}</td>
+                <td>${(b.maxTokens||0).toLocaleString()}</td><td>${(b.usedTokens||0).toLocaleString()}</td>
+                <td class="${remaining<0?'text-danger':''}">${remaining.toLocaleString()}</td>
+                <td><div class="progress" style="height:6px;width:100px"><div class="progress-bar bg-${pct>90?'danger':pct>70?'warning':'success'}" style="width:${pct}%"></div></div></td></tr>`;
+        }).join('') || '<tr><td colspan="6" class="text-center text-muted">No token budgets configured</td></tr>';
+    }
+
+    function esc(s) { const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML; }
+    load();
+</script>
+}

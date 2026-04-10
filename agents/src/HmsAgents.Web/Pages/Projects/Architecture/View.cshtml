@@ -1,0 +1,183 @@
+@page
+@{
+    ViewData["Title"] = "Architecture Viewer";
+}
+
+<div class="container-fluid px-4">
+    <nav aria-label="breadcrumb"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="/Projects">Projects</a></li><li class="breadcrumb-item" id="bcProj">Project</li><li class="breadcrumb-item active">Architecture</li></ol></nav>
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2><i class="bi bi-diagram-3 me-2"></i>Architecture Viewer</h2>
+        <div>
+            <div class="btn-group me-2">
+                <button class="btn btn-outline-secondary active" onclick="showView('modules')">Modules</button>
+                <button class="btn btn-outline-secondary" onclick="showView('api')">API Surface</button>
+                <button class="btn btn-outline-secondary" onclick="showView('data')">Data Model</button>
+                <button class="btn btn-outline-secondary" onclick="showView('adr')">ADRs</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Module View -->
+    <div class="arch-view" id="viewModules">
+        <div class="row">
+            <div class="col-md-8">
+                <div class="card"><div class="card-header"><h6 class="mb-0">Module Dependency Graph</h6></div>
+                <div class="card-body text-center" id="moduleGraph" style="min-height:400px">
+                    <div class="d-flex flex-wrap gap-3 justify-content-center" id="moduleCards"></div>
+                </div></div>
+            </div>
+            <div class="col-md-4">
+                <div class="card"><div class="card-header"><h6 class="mb-0">Module Details</h6></div>
+                <div class="card-body" id="moduleDetail"><p class="text-muted">Select a module to view details</p></div></div>
+
+                <div class="card mt-3"><div class="card-header"><h6 class="mb-0">Architecture Pattern</h6></div>
+                <div class="card-body">
+                    <div id="archPattern" class="text-center py-3"><i class="bi bi-box fs-1 text-muted"></i><h6 class="text-muted mt-2" id="patternName">Loading...</h6></div>
+                </div></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- API Surface View -->
+    <div class="arch-view d-none" id="viewApi">
+        <div class="card"><div class="card-header d-flex justify-content-between"><h6 class="mb-0">API Contracts</h6>
+            <select class="form-select form-select-sm" style="width:auto" id="apiFilter" onchange="renderApis()"><option value="">All</option><option>REST</option><option>GraphQL</option><option>gRPC</option><option>WebSocket</option></select></div>
+        <div class="card-body p-0"><table class="table table-hover mb-0">
+            <thead><tr><th>Method</th><th>Endpoint</th><th>Description</th><th>Auth</th><th>Version</th></tr></thead>
+            <tbody id="apiBody"></tbody>
+        </table></div></div>
+    </div>
+
+    <!-- Data Model View -->
+    <div class="arch-view d-none" id="viewData">
+        <div class="row">
+            <div class="col-md-8">
+                <div class="card"><div class="card-header"><h6 class="mb-0">Entity Relationship Diagram</h6></div>
+                <div class="card-body" id="erdContent" style="min-height:400px">
+                    <div class="d-flex flex-wrap gap-3" id="entityCards"></div>
+                </div></div>
+            </div>
+            <div class="col-md-4">
+                <div class="card"><div class="card-header"><h6 class="mb-0">Entity Details</h6></div>
+                <div class="card-body" id="entityDetail"><p class="text-muted">Select an entity</p></div></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ADR Timeline View -->
+    <div class="arch-view d-none" id="viewAdr">
+        <div class="card"><div class="card-header d-flex justify-content-between"><h6 class="mb-0">Architecture Decision Records</h6>
+            <button class="btn btn-sm btn-primary" onclick="createAdr()"><i class="bi bi-plus-lg me-1"></i>New ADR</button></div>
+        <div class="card-body">
+            <div id="adrTimeline"></div>
+        </div></div>
+    </div>
+</div>
+
+@section Scripts {
+<script>
+    const params = new URLSearchParams(window.location.search);
+    const projectId = params.get('projectId');
+    let modules = [], apis = [], entities = [], adrs = [], architecture = {};
+
+    async function load() {
+        if (!projectId) { window.location.href = '/Projects'; return; }
+        const proj = await fetch(`/api/projects/${encodeURIComponent(projectId)}`).then(r=>r.json());
+        document.getElementById('bcProj').innerHTML = `<a href="/Projects">${esc(proj.name)}</a>`;
+        document.getElementById('patternName').textContent = proj.architecturePattern || 'Not defined';
+        // These will be populated from architecture agent output
+        try {
+            const arch = await fetch(`/api/projects/${encodeURIComponent(projectId)}/architecture`).then(r=>r.ok?r.json():null);
+            if (arch) {
+                architecture = arch;
+                modules = arch.modules || [];
+                apis = arch.apiContracts || [];
+                entities = arch.dataModels || [];
+                adrs = arch.adrs || [];
+            }
+        } catch(e) {}
+        renderModules();
+        renderApis();
+        renderEntities();
+        renderAdrs();
+    }
+
+    function showView(view) {
+        document.querySelectorAll('.arch-view').forEach(v => v.classList.add('d-none'));
+        document.getElementById('view' + view.charAt(0).toUpperCase() + view.slice(1)).classList.remove('d-none');
+        document.querySelectorAll('.btn-group .btn').forEach(b => b.classList.remove('active'));
+        event.target.classList.add('active');
+    }
+
+    function renderModules() {
+        document.getElementById('moduleCards').innerHTML = modules.map(m => `
+            <div class="card" style="width:180px;cursor:pointer" onclick="showModuleDetail('${m.id}')">
+                <div class="card-body text-center py-3">
+                    <i class="bi bi-${m.type==='service'?'gear':'box'} fs-3 text-primary"></i>
+                    <h6 class="mt-2 mb-0">${esc(m.name)}</h6>
+                    <small class="text-muted">${esc(m.type||'module')}</small>
+                </div>
+            </div>
+        `).join('') || '<div class="text-muted py-5">No modules defined. Run the Architecture Agent to generate the module structure.</div>';
+    }
+
+    function showModuleDetail(id) {
+        const m = modules.find(x=>x.id===id);
+        if (!m) return;
+        document.getElementById('moduleDetail').innerHTML = `
+            <h6>${esc(m.name)}</h6><p class="small text-muted">${esc(m.description||'')}</p>
+            <table class="table table-sm"><tbody>
+                <tr><th>Type</th><td>${esc(m.type)}</td></tr>
+                <tr><th>Technology</th><td>${esc(m.technology||'-')}</td></tr>
+                <tr><th>Dependencies</th><td>${(m.dependencies||[]).map(d=>`<span class="badge bg-light text-dark me-1">${esc(d)}</span>`).join('')||'None'}</td></tr>
+            </tbody></table>`;
+    }
+
+    function renderApis() {
+        const filter = document.getElementById('apiFilter')?.value || '';
+        const filtered = apis.filter(a => !filter || a.protocol === filter);
+        document.getElementById('apiBody').innerHTML = filtered.map(a => `
+            <tr><td><span class="badge bg-${methodColor(a.method)}">${esc(a.method||'GET')}</span></td>
+            <td><code>${esc(a.endpoint)}</code></td><td class="small">${esc(a.description||'')}</td>
+            <td>${a.requiresAuth ? '<i class="bi bi-lock-fill text-warning"></i>' : '<i class="bi bi-unlock text-muted"></i>'}</td>
+            <td><span class="badge bg-light text-dark">${esc(a.version||'v1')}</span></td></tr>
+        `).join('') || '<tr><td colspan="5" class="text-center text-muted py-3">No API contracts defined</td></tr>';
+    }
+
+    function renderEntities() {
+        document.getElementById('entityCards').innerHTML = entities.map(e => `
+            <div class="card" style="width:200px;cursor:pointer" onclick="showEntityDetail('${e.id}')">
+                <div class="card-header py-1 bg-primary text-white small">${esc(e.name)}</div>
+                <div class="card-body py-2"><ul class="list-unstyled mb-0 small">${(e.fields||[]).slice(0,5).map(f=>`<li>${esc(f.name)} <span class="text-muted">${esc(f.type)}</span></li>`).join('')}${(e.fields||[]).length>5?`<li class="text-muted">+${(e.fields||[]).length-5} more</li>`:''}</ul></div>
+            </div>
+        `).join('') || '<div class="text-muted py-5">No data models defined</div>';
+    }
+
+    function showEntityDetail(id) {
+        const e = entities.find(x=>x.id===id);
+        if (!e) return;
+        document.getElementById('entityDetail').innerHTML = `
+            <h6>${esc(e.name)}</h6><p class="small text-muted">${esc(e.description||'')}</p>
+            <table class="table table-sm"><thead><tr><th>Field</th><th>Type</th><th>Required</th></tr></thead><tbody>
+            ${(e.fields||[]).map(f=>`<tr><td>${esc(f.name)}</td><td><code>${esc(f.type)}</code></td><td>${f.isRequired?'<i class="bi bi-check text-success"></i>':''}</td></tr>`).join('')}
+            </tbody></table>`;
+    }
+
+    function renderAdrs() {
+        document.getElementById('adrTimeline').innerHTML = adrs.map((a,i) => `
+            <div class="d-flex mb-3"><div class="me-3 text-center" style="width:40px"><div class="rounded-circle bg-${a.status==='accepted'?'success':a.status==='superseded'?'warning':'secondary'} text-white d-inline-flex align-items-center justify-content-center" style="width:32px;height:32px">${i+1}</div></div>
+            <div class="flex-grow-1"><div class="card"><div class="card-body py-2">
+                <div class="d-flex justify-content-between"><strong>${esc(a.title)}</strong><span class="badge bg-${a.status==='accepted'?'success':'secondary'}">${esc(a.status)}</span></div>
+                <p class="small text-muted mb-1">${esc(a.context||'')}</p>
+                <small class="text-muted">${a.createdAt ? new Date(a.createdAt).toLocaleDateString() : ''}</small>
+            </div></div></div></div>
+        `).join('') || '<div class="text-muted text-center py-5">No ADRs recorded. These will be generated by the Architecture Agent.</div>';
+    }
+
+    function createAdr() { alert('ADR creation will be integrated with the Architecture Agent.'); }
+    function methodColor(m) { return { GET:'primary', POST:'success', PUT:'warning', PATCH:'info', DELETE:'danger' }[m] || 'secondary'; }
+    function esc(s) { const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML; }
+
+    load();
+</script>
+}

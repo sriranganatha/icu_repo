@@ -1,0 +1,153 @@
+@page
+@{
+    ViewData["Title"] = "SDLC Workflows";
+}
+
+<div class="container-fluid px-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2><i class="bi bi-arrow-repeat me-2"></i>SDLC Workflows</h2>
+        <button class="btn btn-primary" onclick="showAddWorkflow()"><i class="bi bi-plus-lg me-1"></i>New Workflow</button>
+    </div>
+
+    <div class="row g-3" id="workflowList">
+        <div class="col-12 text-center text-muted py-5">Loading workflows...</div>
+    </div>
+
+    <!-- Workflow Detail Modal -->
+    <div class="modal fade" id="wfModal" tabindex="-1">
+        <div class="modal-dialog modal-xl modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header bg-primary text-white">
+                    <h5 class="modal-title" id="wfModalTitle">Workflow</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body" id="wfModalBody"></div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add Workflow Modal -->
+    <div class="modal fade" id="addWfModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header bg-primary text-white">
+                    <h5 class="modal-title">Create Workflow</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3"><label class="form-label">Name</label><input class="form-control" id="fWfName"></div>
+                    <div class="mb-3"><label class="form-label">Description</label><textarea class="form-control" id="fWfDesc" rows="3"></textarea></div>
+                    <div class="form-check mb-3">
+                        <input class="form-check-input" type="checkbox" id="fWfDefault">
+                        <label class="form-check-label" for="fWfDefault">Default Workflow</label>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button class="btn btn-primary" onclick="createWorkflow()">Create</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+<script>
+    const API = '/api/workflows';
+    let workflows = [];
+
+    async function loadWorkflows() {
+        workflows = await fetch(API).then(r => r.json());
+        renderWorkflows();
+    }
+
+    function renderWorkflows() {
+        const container = document.getElementById('workflowList');
+        if (workflows.length === 0) {
+            container.innerHTML = '<div class="col-12 text-center text-muted py-5">No workflows configured</div>';
+            return;
+        }
+        container.innerHTML = workflows.map(w => `
+            <div class="col-md-6 col-lg-4">
+                <div class="card h-100" style="cursor:pointer;" onclick="showWorkflow('${w.id}')">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-start mb-2">
+                            <h5 class="card-title mb-0">${esc(w.name)}</h5>
+                            <div>
+                                ${w.isDefault ? '<span class="badge bg-success me-1">Default</span>' : ''}
+                                <button class="btn btn-sm btn-outline-danger" onclick="event.stopPropagation();deleteWorkflow('${w.id}')"><i class="bi bi-trash"></i></button>
+                            </div>
+                        </div>
+                        <p class="text-muted small mb-2">${esc(w.description || 'No description')}</p>
+                        <div class="d-flex gap-1 flex-wrap">
+                            ${(w.stages||[]).sort((a,b)=>a.order-b.order).map(s =>
+                                `<span class="badge bg-info">${s.order}. ${esc(s.name)}</span>`
+                            ).join('<i class="bi bi-arrow-right text-muted mx-1"></i>')}
+                        </div>
+                        <div class="small text-muted mt-2">${(w.stages||[]).length} stages</div>
+                    </div>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    async function showWorkflow(id) {
+        const w = await fetch(`${API}/${id}`).then(r => r.json());
+        document.getElementById('wfModalTitle').textContent = w.name;
+        const stages = (w.stages || []).sort((a,b) => a.order - b.order);
+        document.getElementById('wfModalBody').innerHTML = `
+            <p class="text-muted">${esc(w.description)}</p>
+            <h6>Stages</h6>
+            <div class="list-group mb-3">
+                ${stages.map(s => `
+                    <div class="list-group-item">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <strong>${s.order}. ${esc(s.name)}</strong>
+                                <div class="small text-muted">Entry: ${esc(s.entryCriteria || 'None')} | Exit: ${esc(s.exitCriteria || 'None')}</div>
+                                <div class="small">Agents: <code>${esc(s.agentsInvolvedJson)}</code></div>
+                            </div>
+                            <div>
+                                <span class="badge bg-secondary">${(s.approvalGates||[]).length} gates</span>
+                                <span class="badge bg-info">${(s.transitionsFrom||[]).length} transitions</span>
+                            </div>
+                        </div>
+                    </div>
+                `).join('')}
+            </div>
+            <button class="btn btn-sm btn-outline-primary" onclick="showAddStage('${id}')"><i class="bi bi-plus-lg me-1"></i>Add Stage</button>`;
+        new bootstrap.Modal(document.getElementById('wfModal')).show();
+    }
+
+    function showAddWorkflow() {
+        new bootstrap.Modal(document.getElementById('addWfModal')).show();
+    }
+
+    async function createWorkflow() {
+        await fetch(API, {
+            method: 'POST',
+            headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({
+                name: document.getElementById('fWfName').value,
+                description: document.getElementById('fWfDesc').value,
+                isDefault: document.getElementById('fWfDefault').checked
+            })
+        });
+        bootstrap.Modal.getInstance(document.getElementById('addWfModal')).hide();
+        loadWorkflows();
+    }
+
+    async function deleteWorkflow(id) {
+        if (!confirm('Delete this workflow?')) return;
+        await fetch(`${API}/${id}`, { method: 'DELETE' });
+        loadWorkflows();
+    }
+
+    function esc(s) { const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML; }
+
+    loadWorkflows();
+</script>
+}

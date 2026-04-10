@@ -37,6 +37,9 @@ using HmsAgents.Agents.UiUx;
 using HmsAgents.Core.Interfaces;
 using HmsAgents.Web.Hubs;
 using HmsAgents.Web.Services;
+using Hms.Database.Entities.Platform;
+using Hms.Database.Repositories;
+using Hms.Services.Platform;
 using ApplicationAgent = HmsAgents.Agents.Application.ApplicationAgent;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -63,6 +66,19 @@ builder.Services.AddSingleton<AgentPipelineDb>();
 builder.Services.AddSingleton<IAuditLogger, AuditLogger>();
 builder.Services.AddSingleton<IHumanGate, HumanGate>();
 builder.Services.AddSingleton<IPipelineEventSink, SignalRPipelineEventSink>();
+
+// ── Platform repositories & services ──
+builder.Services.AddScoped(typeof(IPlatformRepository<>), typeof(PlatformRepository<>));
+builder.Services.AddScoped<IProjectRepository, ProjectRepository>();
+builder.Services.AddScoped<IAgentRegistryRepository, AgentRegistryRepository>();
+builder.Services.AddScoped<ITemplateRepository, TemplateRepository>();
+builder.Services.AddScoped<ITechnologyService, TechnologyService>();
+builder.Services.AddScoped<IAgentRegistryService, AgentRegistryService>();
+builder.Services.AddScoped<IProjectManagementService, ProjectManagementService>();
+builder.Services.AddScoped<IWorkflowService, WorkflowService>();
+builder.Services.AddScoped<ILlmConfigService, LlmConfigService>();
+builder.Services.AddScoped<IStandardsService, StandardsService>();
+builder.Services.AddScoped<ITemplateService, TemplateService>();
 
 // Core pipeline agents
 builder.Services.AddSingleton<IAgent, RequirementsReaderAgent>();

@@ -1,0 +1,194 @@
+@page
+@{
+    ViewData["Title"] = "Create Project";
+}
+
+<div class="container px-4" style="max-width: 800px;">
+    <h2 class="mb-4"><i class="bi bi-folder-plus me-2"></i>Create New Project</h2>
+
+    <!-- Step Indicator -->
+    <div class="d-flex justify-content-between mb-4">
+        <div class="text-center step-indicator active" data-step="1"><div class="rounded-circle bg-primary text-white d-inline-flex align-items-center justify-content-center" style="width:36px;height:36px;">1</div><div class="small mt-1">Basics</div></div>
+        <div class="text-center step-indicator" data-step="2"><div class="rounded-circle bg-secondary text-white d-inline-flex align-items-center justify-content-center" style="width:36px;height:36px;">2</div><div class="small mt-1">Tech Stack</div></div>
+        <div class="text-center step-indicator" data-step="3"><div class="rounded-circle bg-secondary text-white d-inline-flex align-items-center justify-content-center" style="width:36px;height:36px;">3</div><div class="small mt-1">Architecture</div></div>
+        <div class="text-center step-indicator" data-step="4"><div class="rounded-circle bg-secondary text-white d-inline-flex align-items-center justify-content-center" style="width:36px;height:36px;">4</div><div class="small mt-1">Workflow</div></div>
+        <div class="text-center step-indicator" data-step="5"><div class="rounded-circle bg-secondary text-white d-inline-flex align-items-center justify-content-center" style="width:36px;height:36px;">5</div><div class="small mt-1">Review</div></div>
+    </div>
+
+    <!-- Step 1: Basics -->
+    <div class="card mb-3 wizard-step" id="step1">
+        <div class="card-body">
+            <h5>Project Basics</h5>
+            <div class="mb-3"><label class="form-label">Name</label><input class="form-control" id="fName" placeholder="My Application"></div>
+            <div class="mb-3"><label class="form-label">Description</label><textarea class="form-control" id="fDesc" rows="3"></textarea></div>
+            <div class="row">
+                <div class="col-md-6 mb-3"><label class="form-label">Project Type</label>
+                    <select class="form-select" id="fType"><option>web_app</option><option>api</option><option>mobile_app</option><option>microservices</option><option>library</option><option>cli_tool</option><option>data_pipeline</option></select></div>
+                <div class="col-md-6 mb-3"><label class="form-label">Repository URL (optional)</label><input class="form-control" id="fRepo"></div>
+            </div>
+            <h6 class="mt-3">Quick Start (optional)</h6>
+            <div class="row g-2" id="starterKits">
+                <div class="col-4"><button class="btn btn-outline-primary w-100 starter-kit" data-kit="saas_api" onclick="selectKit(this)"><i class="bi bi-cloud me-1"></i>SaaS API</button></div>
+                <div class="col-4"><button class="btn btn-outline-primary w-100 starter-kit" data-kit="fullstack_web" onclick="selectKit(this)"><i class="bi bi-globe me-1"></i>Full Stack Web</button></div>
+                <div class="col-4"><button class="btn btn-outline-primary w-100 starter-kit" data-kit="data_pipeline" onclick="selectKit(this)"><i class="bi bi-diagram-3 me-1"></i>Data Pipeline</button></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Step 2: Tech Stack -->
+    <div class="card mb-3 wizard-step d-none" id="step2">
+        <div class="card-body">
+            <h5>Technology Stack</h5>
+            <div class="row">
+                <div class="col-md-6 mb-3"><label class="form-label">Language</label><select class="form-select" id="fLang"></select></div>
+                <div class="col-md-6 mb-3"><label class="form-label">Framework</label><select class="form-select" id="fFramework"></select></div>
+            </div>
+            <div class="row">
+                <div class="col-md-6 mb-3"><label class="form-label">Database</label><select class="form-select" id="fDb"></select></div>
+                <div class="col-md-6 mb-3"><label class="form-label">Cloud Provider</label><select class="form-select" id="fCloud"><option value="">None</option></select></div>
+            </div>
+            <div id="selectedTech" class="d-flex gap-1 flex-wrap"></div>
+        </div>
+    </div>
+
+    <!-- Step 3: Architecture -->
+    <div class="card mb-3 wizard-step d-none" id="step3">
+        <div class="card-body">
+            <h5>Architecture Pattern</h5>
+            <div class="row g-3" id="archPatterns">
+                <div class="col-md-6"><div class="card arch-card" onclick="selectArch('monolith',this)"><div class="card-body text-center"><i class="bi bi-box fs-1"></i><h6>Monolith</h6><small class="text-muted">Single deployable unit, ideal for MVPs</small></div></div></div>
+                <div class="col-md-6"><div class="card arch-card" onclick="selectArch('microservices',this)"><div class="card-body text-center"><i class="bi bi-diagram-3 fs-1"></i><h6>Microservices</h6><small class="text-muted">Independent services, scale individually</small></div></div></div>
+                <div class="col-md-6"><div class="card arch-card" onclick="selectArch('modular_monolith',this)"><div class="card-body text-center"><i class="bi bi-grid fs-1"></i><h6>Modular Monolith</h6><small class="text-muted">Modules within monolith, easy migration</small></div></div></div>
+                <div class="col-md-6"><div class="card arch-card" onclick="selectArch('serverless',this)"><div class="card-body text-center"><i class="bi bi-cloud-arrow-up fs-1"></i><h6>Serverless</h6><small class="text-muted">Event-driven, pay-per-use</small></div></div></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Step 4: Workflow -->
+    <div class="card mb-3 wizard-step d-none" id="step4">
+        <div class="card-body">
+            <h5>SDLC Workflow</h5>
+            <div id="workflowList" class="list-group"></div>
+        </div>
+    </div>
+
+    <!-- Step 5: Review -->
+    <div class="card mb-3 wizard-step d-none" id="step5">
+        <div class="card-body">
+            <h5>Review &amp; Create</h5>
+            <div id="reviewSummary"></div>
+        </div>
+    </div>
+
+    <div class="d-flex justify-content-between">
+        <button class="btn btn-outline-secondary" id="btnPrev" onclick="prevStep()" disabled><i class="bi bi-arrow-left me-1"></i>Previous</button>
+        <button class="btn btn-primary" id="btnNext" onclick="nextStep()">Next<i class="bi bi-arrow-right ms-1"></i></button>
+    </div>
+</div>
+
+@section Scripts {
+<script>
+    let currentStep = 1;
+    const totalSteps = 5;
+    let project = { techStack: [], architecture: 'monolith', workflowId: null };
+    let languages = [], frameworks = [], databases = [], clouds = [], workflows = [];
+
+    async function loadOptions() {
+        [languages, frameworks, databases, clouds, workflows] = await Promise.all([
+            fetch('/api/technologies/languages').then(r => r.json()),
+            fetch('/api/technologies/frameworks').then(r => r.json()),
+            fetch('/api/technologies/databases').then(r => r.json()),
+            fetch('/api/technologies/cloud-providers').then(r => r.json()),
+            fetch('/api/workflows').then(r => r.json())
+        ]);
+        fillSelect('fLang', languages);
+        fillSelect('fFramework', frameworks);
+        fillSelect('fDb', databases);
+        clouds.forEach(c => document.getElementById('fCloud').innerHTML += `<option value="${c.id}">${esc(c.name)}</option>`);
+        document.getElementById('workflowList').innerHTML = workflows.map(w => `
+            <label class="list-group-item d-flex gap-2">
+                <input class="form-check-input" type="radio" name="workflow" value="${w.id}" ${w.isDefault?'checked':''}>
+                <div><strong>${esc(w.name)}</strong> ${w.isDefault?'<span class="badge bg-success">Default</span>':''}<br><small class="text-muted">${esc(w.description)} — ${(w.stages||[]).length} stages</small></div>
+            </label>
+        `).join('') || '<div class="text-muted p-3">No workflows configured. Create one in Admin → Workflows</div>';
+    }
+
+    function fillSelect(id, items) {
+        const el = document.getElementById(id);
+        el.innerHTML = '<option value="">Select...</option>' + items.map(i => `<option value="${i.id}">${esc(i.name)} ${i.version||''}</option>`).join('');
+    }
+
+    function goToStep(step) {
+        document.querySelectorAll('.wizard-step').forEach(s => s.classList.add('d-none'));
+        document.getElementById(`step${step}`).classList.remove('d-none');
+        document.querySelectorAll('.step-indicator').forEach(s => {
+            const sn = parseInt(s.dataset.step);
+            s.querySelector('div').className = `rounded-circle ${sn <= step ? 'bg-primary' : 'bg-secondary'} text-white d-inline-flex align-items-center justify-content-center`;
+            s.querySelector('div').style.cssText = 'width:36px;height:36px;';
+        });
+        document.getElementById('btnPrev').disabled = step === 1;
+        document.getElementById('btnNext').textContent = step === totalSteps ? 'Create Project' : 'Next';
+        document.getElementById('btnNext').innerHTML = step === totalSteps
+            ? '<i class="bi bi-check-lg me-1"></i>Create Project'
+            : 'Next<i class="bi bi-arrow-right ms-1"></i>';
+        currentStep = step;
+        if (step === 5) renderReview();
+    }
+
+    function nextStep() {
+        if (currentStep === totalSteps) { createProject(); return; }
+        goToStep(currentStep + 1);
+    }
+    function prevStep() { if (currentStep > 1) goToStep(currentStep - 1); }
+
+    function selectKit(btn) {
+        document.querySelectorAll('.starter-kit').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+    }
+
+    function selectArch(pattern, card) {
+        document.querySelectorAll('.arch-card').forEach(c => c.classList.remove('border-primary'));
+        card.classList.add('border-primary');
+        project.architecture = pattern;
+    }
+
+    function renderReview() {
+        const name = document.getElementById('fName').value;
+        const type = document.getElementById('fType').value;
+        const lang = document.getElementById('fLang').selectedOptions[0]?.text || '-';
+        const fw = document.getElementById('fFramework').selectedOptions[0]?.text || '-';
+        const db = document.getElementById('fDb').selectedOptions[0]?.text || '-';
+        const wf = document.querySelector('input[name="workflow"]:checked');
+        const wfName = wf ? workflows.find(w => w.id === wf.value)?.name || '-' : '-';
+        document.getElementById('reviewSummary').innerHTML = `
+            <table class="table"><tbody>
+                <tr><th>Name</th><td>${esc(name)}</td></tr>
+                <tr><th>Type</th><td>${esc(type)}</td></tr>
+                <tr><th>Language</th><td>${esc(lang)}</td></tr>
+                <tr><th>Framework</th><td>${esc(fw)}</td></tr>
+                <tr><th>Database</th><td>${esc(db)}</td></tr>
+                <tr><th>Architecture</th><td>${esc(project.architecture)}</td></tr>
+                <tr><th>Workflow</th><td>${esc(wfName)}</td></tr>
+            </tbody></table>`;
+    }
+
+    async function createProject() {
+        const res = await fetch('/api/projects', {
+            method: 'POST',
+            headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({
+                name: document.getElementById('fName').value,
+                description: document.getElementById('fDesc').value,
+                projectType: document.getElementById('fType').value,
+                repositoryUrl: document.getElementById('fRepo').value || null
+            })
+        });
+        if (res.ok) window.location.href = '/Admin/Projects';
+        else alert('Failed to create project');
+    }
+
+    function esc(s) { const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML; }
+
+    loadOptions();
+</script>
+}

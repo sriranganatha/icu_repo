@@ -1,0 +1,15 @@
+global using Hms.Database.Entities.Mpi;
+global using Hms.Database.Entities.Clinical;
+global using Hms.Database.Entities.Inpatient;
+global using Hms.Database.Entities.Emergency;
+global using Hms.Database.Entities.Diagnostics;
+global using Hms.Database.Entities.Revenue;
+global using Hms.Database.Entities.Governance;
+global using Hms.Database.Entities.Ai;
+global using Hms.Database.Entities.Platform;
+global using Hms.Database.Entities.Platform.Technology;
+global using Hms.Database.Entities.Platform.AgentRegistry;
+global using Hms.Database.Entities.Platform.Standards;
+global using Hms.Database.Entities.Platform.LlmConfig;
+global using Hms.Database.Entities.Platform.Workflows;
+global using Hms.Database.Entities.Platform.Projects;

@@ -1,0 +1,126 @@
+@page
+@{
+    ViewData["Title"] = "Backlog List";
+}
+
+<div class="container-fluid px-4">
+    <nav aria-label="breadcrumb"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="/Projects">Projects</a></li><li class="breadcrumb-item" id="bcProj">Project</li><li class="breadcrumb-item active">Backlog List</li></ol></nav>
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h2><i class="bi bi-list-ul me-2"></i>Backlog List</h2>
+        <div>
+            <a class="btn btn-outline-secondary me-1" id="linkBoard" href="#"><i class="bi bi-kanban me-1"></i>Board View</a>
+            <button class="btn btn-primary" onclick="showCreate('epic')"><i class="bi bi-plus-lg me-1"></i>Add Epic</button>
+        </div>
+    </div>
+
+    <div class="row mb-3">
+        <div class="col-md-4"><input class="form-control" id="search" placeholder="Search epics and stories..." oninput="renderList()"></div>
+        <div class="col-md-2"><select class="form-select" id="filterPri" onchange="renderList()"><option value="">All Priorities</option><option>critical</option><option>high</option><option>medium</option><option>low</option></select></div>
+    </div>
+
+    <div id="epicList"></div>
+</div>
+
+<!-- Create Epic/Story Modal -->
+<div class="modal fade" id="createModal" tabindex="-1"><div class="modal-dialog"><div class="modal-content">
+    <div class="modal-header"><h5 id="createTitle">Create</h5><button class="btn-close" data-bs-dismiss="modal"></button></div>
+    <div class="modal-body">
+        <div class="mb-3"><label class="form-label">Title</label><input class="form-control" id="cTitle"></div>
+        <div class="mb-3"><label class="form-label">Description</label><textarea class="form-control" id="cDesc" rows="3"></textarea></div>
+        <div class="mb-3"><label class="form-label">Priority</label><select class="form-select" id="cPriority"><option>medium</option><option>critical</option><option>high</option><option>low</option></select></div>
+        <div class="mb-3 d-none" id="cPointsGroup"><label class="form-label">Story Points</label><input class="form-control" id="cPoints" type="number" value="3"></div>
+        <input type="hidden" id="cType" value="epic">
+        <input type="hidden" id="cEpicId" value="">
+    </div>
+    <div class="modal-footer"><button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button><button class="btn btn-primary" onclick="createItem()">Create</button></div>
+</div></div></div>
+
+@section Scripts {
+<script>
+    const params = new URLSearchParams(window.location.search);
+    const projectId = params.get('projectId');
+    let epics = [], stories = [];
+
+    async function load() {
+        if (!projectId) { window.location.href = '/Projects'; return; }
+        document.getElementById('linkBoard').href = `/Projects/Backlog/Board?projectId=${projectId}`;
+        const [proj, epicData, storyData] = await Promise.all([
+            fetch(`/api/projects/${encodeURIComponent(projectId)}`).then(r=>r.json()),
+            fetch(`/api/projects/${encodeURIComponent(projectId)}/epics`).then(r=>r.ok?r.json():[]),
+            fetch(`/api/projects/${encodeURIComponent(projectId)}/stories`).then(r=>r.ok?r.json():[])
+        ]);
+        document.getElementById('bcProj').innerHTML = `<a href="/Projects">${esc(proj.name)}</a>`;
+        epics = epicData; stories = storyData;
+        renderList();
+    }
+
+    function renderList() {
+        const q = document.getElementById('search').value.toLowerCase();
+        const fp = document.getElementById('filterPri').value;
+        const filtered = epics.filter(e => !q || e.title.toLowerCase().includes(q) || stories.some(s => s.epicId===e.id && s.title.toLowerCase().includes(q)));
+        document.getElementById('epicList').innerHTML = filtered.map(e => {
+            const eStories = stories.filter(s => s.epicId === e.id && (!fp || s.priority === fp));
+            const totalPts = eStories.reduce((a,s)=>a+(s.storyPoints||0),0);
+            const donePts = eStories.filter(s=>s.status==='done').reduce((a,s)=>a+(s.storyPoints||0),0);
+            const pct = totalPts ? Math.round(donePts/totalPts*100) : 0;
+            return `
+            <div class="card mb-3">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <div><i class="bi bi-bookmark-fill text-primary me-2"></i><strong>${esc(e.title)}</strong> <span class="badge bg-secondary">${eStories.length} stories</span> <span class="badge bg-info">${totalPts} pts</span></div>
+                    <div><div class="progress" style="width:120px;height:8px"><div class="progress-bar" style="width:${pct}%"></div></div><small class="text-muted ms-2">${pct}%</small>
+                        <button class="btn btn-sm btn-outline-primary ms-2" onclick="showCreate('story','${e.id}')"><i class="bi bi-plus"></i> Story</button>
+                    </div>
+                </div>
+                <div class="card-body p-0"><table class="table table-hover mb-0"><tbody>
+                    ${eStories.map(s => `
+                        <tr><td style="width:100px"><small class="text-muted">${esc(s.storyKey||'')}</small></td>
+                        <td>${esc(s.title)}</td>
+                        <td><span class="badge bg-${priColor(s.priority)}">${esc(s.priority)}</span></td>
+                        <td><span class="badge bg-${statusColor(s.status)}">${esc(s.status||'backlog')}</span></td>
+                        <td class="text-end">${s.storyPoints||0} pts</td></tr>
+                    `).join('')}
+                    ${eStories.length===0?'<tr><td colspan="5" class="text-muted text-center small py-2">No stories</td></tr>':''}
+                </tbody></table></div>
+            </div>`;
+        }).join('') || '<div class="text-center text-muted py-5">No epics yet.</div>';
+
+        // Unassigned stories
+        const unassigned = stories.filter(s => !s.epicId && (!q || s.title.toLowerCase().includes(q)) && (!fp || s.priority === fp));
+        if (unassigned.length) {
+            document.getElementById('epicList').innerHTML += `
+            <div class="card mb-3"><div class="card-header"><i class="bi bi-inbox me-2"></i><strong>Unassigned Stories</strong> <span class="badge bg-secondary">${unassigned.length}</span></div>
+            <div class="card-body p-0"><table class="table table-hover mb-0"><tbody>
+                ${unassigned.map(s => `<tr><td style="width:100px"><small class="text-muted">${esc(s.storyKey||'')}</small></td><td>${esc(s.title)}</td><td><span class="badge bg-${priColor(s.priority)}">${esc(s.priority)}</span></td><td><span class="badge bg-${statusColor(s.status)}">${esc(s.status||'backlog')}</span></td><td class="text-end">${s.storyPoints||0} pts</td></tr>`).join('')}
+            </tbody></table></div></div>`;
+        }
+    }
+
+    function showCreate(type, epicId) {
+        document.getElementById('cType').value = type;
+        document.getElementById('cEpicId').value = epicId || '';
+        document.getElementById('createTitle').textContent = type === 'epic' ? 'Create Epic' : 'Create Story';
+        document.getElementById('cPointsGroup').classList.toggle('d-none', type === 'epic');
+        document.getElementById('cTitle').value = '';
+        document.getElementById('cDesc').value = '';
+        new bootstrap.Modal(document.getElementById('createModal')).show();
+    }
+
+    async function createItem() {
+        const type = document.getElementById('cType').value;
+        const url = type === 'epic'
+            ? `/api/projects/${encodeURIComponent(projectId)}/epics`
+            : `/api/projects/${encodeURIComponent(projectId)}/stories`;
+        const body = { title: document.getElementById('cTitle').value, description: document.getElementById('cDesc').value, priority: document.getElementById('cPriority').value };
+        if (type === 'story') { body.epicId = document.getElementById('cEpicId').value || null; body.storyPoints = parseInt(document.getElementById('cPoints').value) || 3; }
+        const res = await fetch(url, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+        if (res.ok) { bootstrap.Modal.getInstance(document.getElementById('createModal')).hide(); load(); }
+        else alert('Failed to create');
+    }
+
+    function priColor(p) { return { critical:'danger', high:'warning', medium:'info', low:'secondary' }[p] || 'secondary'; }
+    function statusColor(s) { return { backlog:'secondary', todo:'info', in_progress:'warning', review:'primary', done:'success' }[s] || 'secondary'; }
+    function esc(s) { const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML; }
+
+    load();
+</script>
+}

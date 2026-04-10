@@ -1,0 +1,145 @@
+@page
+@{
+    ViewData["Title"] = "Input Requirements";
+}
+
+<div class="container px-4" style="max-width: 1000px;">
+    <nav aria-label="breadcrumb"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="/Projects">Projects</a></li><li class="breadcrumb-item" id="bcProj">Project</li><li class="breadcrumb-item active">Requirements Input</li></ol></nav>
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2><i class="bi bi-pencil-square me-2"></i>Input Requirements</h2>
+        <div>
+            <button class="btn btn-outline-secondary me-2" onclick="importFile()"><i class="bi bi-upload me-1"></i>Import File</button>
+            <button class="btn btn-primary" onclick="submitRequirements()"><i class="bi bi-send me-1"></i>Submit for Analysis</button>
+        </div>
+    </div>
+
+    <ul class="nav nav-tabs mb-3">
+        <li class="nav-item"><a class="nav-link active" data-bs-toggle="tab" href="#tabText">Free Text</a></li>
+        <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#tabStructured">Structured</a></li>
+        <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#tabUpload">Upload Document</a></li>
+    </ul>
+
+    <div class="tab-content">
+        <!-- Free Text Input -->
+        <div class="tab-pane active" id="tabText">
+            <div class="card"><div class="card-body">
+                <p class="text-muted small mb-2">Describe your application requirements in natural language. The AI will analyze, enrich, and structure them.</p>
+                <textarea class="form-control font-monospace" id="rawText" rows="20" placeholder="Describe your application requirements here...
+
+Example:
+I need a healthcare management system that supports:
+- Patient registration and demographic management
+- Appointment scheduling with calendar view
+- Electronic health records (EHR) with FHIR compliance
+- Billing and claims processing
+- Role-based access control (Admin, Doctor, Nurse, Receptionist)
+- Real-time notifications via WebSocket
+- RESTful API for third-party integrations
+- PostgreSQL database with audit logging
+- Docker-based deployment to AWS ECS"></textarea>
+                <div class="mt-2 d-flex justify-content-between align-items-center">
+                    <small class="text-muted"><span id="charCount">0</span> characters</small>
+                    <div>
+                        <button class="btn btn-sm btn-outline-info me-1" onclick="loadTemplate('saas')"><i class="bi bi-file-text me-1"></i>SaaS Template</button>
+                        <button class="btn btn-sm btn-outline-info" onclick="loadTemplate('api')"><i class="bi bi-file-text me-1"></i>API Template</button>
+                    </div>
+                </div>
+            </div></div>
+        </div>
+
+        <!-- Structured Input -->
+        <div class="tab-pane" id="tabStructured">
+            <div class="card"><div class="card-body">
+                <div class="d-flex justify-content-between mb-3"><h6>Requirement Items</h6><button class="btn btn-sm btn-primary" onclick="addReqItem()"><i class="bi bi-plus-lg me-1"></i>Add</button></div>
+                <div id="reqItems">
+                    <div class="card mb-2 req-item">
+                        <div class="card-body py-2">
+                            <div class="row g-2">
+                                <div class="col-md-3"><select class="form-select form-select-sm"><option>Functional</option><option>Non-Functional</option><option>Technical</option><option>Business Rule</option><option>Constraint</option></select></div>
+                                <div class="col-md-3"><select class="form-select form-select-sm"><option>High</option><option>Medium</option><option>Low</option></select></div>
+                                <div class="col-md-5"><input class="form-control form-control-sm" placeholder="Requirement description"></div>
+                                <div class="col-md-1"><button class="btn btn-sm btn-outline-danger" onclick="this.closest('.req-item').remove()"><i class="bi bi-trash"></i></button></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div></div>
+        </div>
+
+        <!-- Document Upload -->
+        <div class="tab-pane" id="tabUpload">
+            <div class="card"><div class="card-body text-center py-5">
+                <i class="bi bi-cloud-upload fs-1 text-muted"></i>
+                <h5 class="mt-3">Upload Requirements Document</h5>
+                <p class="text-muted">Supports .txt, .md, .docx, .pdf</p>
+                <input type="file" class="form-control mx-auto" style="max-width:400px" id="reqFile" accept=".txt,.md,.docx,.pdf">
+                <div id="uploadPreview" class="mt-3 text-start d-none"><pre class="bg-light p-3 rounded" id="previewContent" style="max-height:300px;overflow-y:auto;"></pre></div>
+            </div></div>
+        </div>
+    </div>
+
+    <!-- Analysis Results -->
+    <div class="card mt-4 d-none" id="analysisCard">
+        <div class="card-header d-flex justify-content-between"><h6 class="mb-0"><i class="bi bi-robot me-2"></i>AI Analysis Results</h6><span class="badge bg-info" id="analysisStatus">Processing...</span></div>
+        <div class="card-body">
+            <div id="analysisResults"></div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+<script>
+    const params = new URLSearchParams(window.location.search);
+    const projectId = params.get('projectId');
+
+    document.getElementById('rawText').addEventListener('input', function() {
+        document.getElementById('charCount').textContent = this.value.length;
+    });
+
+    document.getElementById('reqFile').addEventListener('change', function(e) {
+        const file = e.target.files[0];
+        if (file && file.name.endsWith('.txt') || file.name.endsWith('.md')) {
+            const reader = new FileReader();
+            reader.onload = ev => {
+                document.getElementById('previewContent').textContent = ev.target.result;
+                document.getElementById('uploadPreview').classList.remove('d-none');
+            };
+            reader.readAsText(file);
+        }
+    });
+
+    function addReqItem() {
+        const tpl = document.querySelector('.req-item').cloneNode(true);
+        tpl.querySelector('input').value = '';
+        document.getElementById('reqItems').appendChild(tpl);
+    }
+
+    function loadTemplate(type) {
+        const templates = {
+            saas: `Application Overview:\n- SaaS multi-tenant application\n- User self-registration and subscription management\n\nFunctional Requirements:\n- User authentication (email/password, OAuth)\n- Dashboard with analytics widgets\n- CRUD operations for core entities\n- Search and filtering\n- Notification system (email + in-app)\n\nNon-Functional Requirements:\n- Response time < 200ms\n- 99.9% uptime SLA\n- GDPR compliance\n- Supports 10,000 concurrent users`,
+            api: `API Service Overview:\n- RESTful API with OpenAPI documentation\n- Authentication via JWT tokens\n\nEndpoints:\n- CRUD for resources\n- Batch operations\n- Webhook integrations\n\nNon-Functional:\n- Rate limiting (1000 req/min)\n- Response time < 100ms\n- API versioning strategy`
+        };
+        document.getElementById('rawText').value = templates[type] || '';
+        document.getElementById('charCount').textContent = (templates[type] || '').length;
+    }
+
+    async function submitRequirements() {
+        const text = document.getElementById('rawText').value;
+        if (!text.trim()) { alert('Enter requirements first'); return; }
+        document.getElementById('analysisCard').classList.remove('d-none');
+        document.getElementById('analysisStatus').textContent = 'Processing...';
+        document.getElementById('analysisResults').innerHTML = '<div class="spinner-border spinner-border-sm"></div> Analyzing requirements...';
+        // TODO: integrate with AI agent for requirement analysis
+        setTimeout(() => {
+            document.getElementById('analysisStatus').textContent = 'Complete';
+            document.getElementById('analysisStatus').className = 'badge bg-success';
+            document.getElementById('analysisResults').innerHTML = '<p class="text-muted">AI requirement analysis will be integrated with the Requirements Agent.</p>';
+        }, 2000);
+    }
+
+    function importFile() { document.querySelector('[href="#tabUpload"]').click(); }
+    function esc(s) { const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML; }
+
+    if (projectId) fetch(`/api/projects/${encodeURIComponent(projectId)}`).then(r=>r.json()).then(p => document.getElementById('bcProj').innerHTML = `<a href="/Projects">${esc(p.name)}</a>`);
+</script>
+}

@@ -1,0 +1,73 @@
+@page
+@{
+    ViewData["Title"] = "Performance Analytics";
+}
+
+<div class="container-fluid px-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2><i class="bi bi-speedometer2 me-2"></i>Performance Analytics</h2>
+        <select class="form-select d-inline-block" style="width:auto" id="periodFilter" onchange="load()"><option value="7d">Last 7 Days</option><option value="30d" selected>Last 30 Days</option><option value="90d">Last 90 Days</option></select>
+    </div>
+
+    <!-- Summary -->
+    <div class="row mb-4">
+        <div class="col-md-2"><div class="card"><div class="card-body py-2 text-center"><h6 class="text-muted mb-0">Avg Response</h6><h3 id="avgResponse">-</h3></div></div></div>
+        <div class="col-md-2"><div class="card"><div class="card-body py-2 text-center"><h6 class="text-muted mb-0">P95 Response</h6><h3 id="p95Response">-</h3></div></div></div>
+        <div class="col-md-2"><div class="card"><div class="card-body py-2 text-center"><h6 class="text-muted mb-0">Success Rate</h6><h3 id="successRate">-</h3></div></div></div>
+        <div class="col-md-2"><div class="card"><div class="card-body py-2 text-center"><h6 class="text-muted mb-0">Total Runs</h6><h3 id="totalRuns">0</h3></div></div></div>
+        <div class="col-md-2"><div class="card"><div class="card-body py-2 text-center"><h6 class="text-muted mb-0">Throughput</h6><h3 id="throughput">-</h3></div></div></div>
+        <div class="col-md-2"><div class="card"><div class="card-body py-2 text-center"><h6 class="text-muted mb-0">Error Rate</h6><h3 id="errorRate" class="text-danger">-</h3></div></div></div>
+    </div>
+
+    <div class="row">
+        <!-- Agent Performance -->
+        <div class="col-md-8">
+            <div class="card"><div class="card-header"><h6 class="mb-0">Agent Performance by Type</h6></div>
+            <div class="card-body p-0"><table class="table table-hover mb-0">
+                <thead><tr><th>Agent Type</th><th>Runs</th><th>Avg Time</th><th>P95 Time</th><th>Success</th><th>Tokens/Run</th><th>Trend</th></tr></thead>
+                <tbody id="agentPerfBody"></tbody>
+            </table></div></div>
+
+            <!-- Response Time Distribution -->
+            <div class="card mt-3"><div class="card-header"><h6 class="mb-0">Response Time Distribution</h6></div>
+            <div class="card-body">
+                <div class="d-flex align-items-end gap-1" id="responseDistribution" style="height:150px"></div>
+                <div class="d-flex justify-content-between mt-1 small text-muted"><span>&lt;1s</span><span>1-5s</span><span>5-15s</span><span>15-30s</span><span>30-60s</span><span>&gt;60s</span></div>
+            </div></div>
+        </div>
+
+        <!-- Error Breakdown -->
+        <div class="col-md-4">
+            <div class="card"><div class="card-header"><h6 class="mb-0">Error Breakdown</h6></div>
+            <div class="card-body" id="errorBreakdown"><div class="text-muted text-center py-3">No errors recorded</div></div></div>
+
+            <!-- Model Performance -->
+            <div class="card mt-3"><div class="card-header"><h6 class="mb-0">Model Performance</h6></div>
+            <div class="card-body p-0"><table class="table table-sm mb-0">
+                <thead><tr><th>Model</th><th>Calls</th><th>Avg Time</th><th>Tokens</th></tr></thead>
+                <tbody id="modelPerfBody"></tbody>
+            </table></div></div>
+
+            <!-- SLA Compliance -->
+            <div class="card mt-3"><div class="card-header"><h6 class="mb-0">SLA Compliance</h6></div>
+            <div class="card-body">
+                <div class="d-flex justify-content-between mb-2"><span>Response Time &lt; 30s</span><strong id="slaResponse">-</strong></div>
+                <div class="d-flex justify-content-between mb-2"><span>Success Rate &gt; 95%</span><strong id="slaSuccess">-</strong></div>
+                <div class="d-flex justify-content-between"><span>Availability &gt; 99%</span><strong id="slaAvail">-</strong></div>
+            </div></div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+<script>
+    async function load() {
+        // Metrics will come from agent run data aggregated server-side
+        document.getElementById('agentPerfBody').innerHTML = '<tr><td colspan="7" class="text-center text-muted py-3">Performance data will be available after agent runs</td></tr>';
+        document.getElementById('modelPerfBody').innerHTML = '<tr><td colspan="4" class="text-center text-muted">No model data</td></tr>';
+        document.getElementById('responseDistribution').innerHTML = '<div class="text-muted text-center w-100 align-self-center">No data</div>';
+    }
+    function esc(s) { const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML; }
+    load();
+</script>
+}

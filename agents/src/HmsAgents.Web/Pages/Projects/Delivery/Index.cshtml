@@ -1,0 +1,186 @@
+@page
+@{
+    ViewData["Title"] = "Delivery Dashboard";
+}
+
+<div class="container-fluid px-4">
+    <nav aria-label="breadcrumb"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="/Projects">Projects</a></li><li class="breadcrumb-item" id="bcProj">Project</li><li class="breadcrumb-item active">Delivery</li></ol></nav>
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2><i class="bi bi-rocket-takeoff me-2"></i>Delivery Dashboard</h2>
+        <div>
+            <button class="btn btn-outline-info me-1" onclick="exportDelivery()"><i class="bi bi-download me-1"></i>Export</button>
+            <button class="btn btn-primary" onclick="triggerPipeline()"><i class="bi bi-play-fill me-1"></i>Run Pipeline</button>
+        </div>
+    </div>
+
+    <!-- Pipeline Overview -->
+    <div class="card mb-4"><div class="card-header"><h6 class="mb-0">Workflow Pipeline</h6></div>
+    <div class="card-body">
+        <div class="d-flex align-items-center gap-2 overflow-auto pb-2" id="pipelineStages"></div>
+    </div></div>
+
+    <div class="row">
+        <!-- Progress Overview -->
+        <div class="col-md-4">
+            <div class="card"><div class="card-header"><h6 class="mb-0">Project Progress</h6></div>
+            <div class="card-body">
+                <div class="mb-3">
+                    <div class="d-flex justify-content-between mb-1"><small>Overall</small><strong id="pctOverall">0%</strong></div>
+                    <div class="progress" style="height:10px"><div class="progress-bar" id="barOverall" style="width:0%"></div></div>
+                </div>
+                <div class="mb-3">
+                    <div class="d-flex justify-content-between mb-1"><small>Requirements</small><strong id="pctReqs">0%</strong></div>
+                    <div class="progress" style="height:6px"><div class="progress-bar bg-info" id="barReqs" style="width:0%"></div></div>
+                </div>
+                <div class="mb-3">
+                    <div class="d-flex justify-content-between mb-1"><small>BRD</small><strong id="pctBrd">0%</strong></div>
+                    <div class="progress" style="height:6px"><div class="progress-bar bg-success" id="barBrd" style="width:0%"></div></div>
+                </div>
+                <div class="mb-3">
+                    <div class="d-flex justify-content-between mb-1"><small>Code Generation</small><strong id="pctCode">0%</strong></div>
+                    <div class="progress" style="height:6px"><div class="progress-bar bg-primary" id="barCode" style="width:0%"></div></div>
+                </div>
+                <div class="mb-3">
+                    <div class="d-flex justify-content-between mb-1"><small>Testing</small><strong id="pctTest">0%</strong></div>
+                    <div class="progress" style="height:6px"><div class="progress-bar bg-warning" id="barTest" style="width:0%"></div></div>
+                </div>
+                <div>
+                    <div class="d-flex justify-content-between mb-1"><small>Deployment</small><strong id="pctDeploy">0%</strong></div>
+                    <div class="progress" style="height:6px"><div class="progress-bar bg-danger" id="barDeploy" style="width:0%"></div></div>
+                </div>
+            </div></div>
+
+            <!-- Quality Gates -->
+            <div class="card mt-3"><div class="card-header"><h6 class="mb-0">Quality Gates</h6></div>
+            <div class="card-body p-0"><div class="list-group list-group-flush" id="qualityGates"></div></div></div>
+        </div>
+
+        <!-- Delivery Timeline -->
+        <div class="col-md-8">
+            <div class="card"><div class="card-header"><h6 class="mb-0">Delivery Timeline</h6></div>
+            <div class="card-body" id="timeline"></div></div>
+
+            <!-- Release Notes -->
+            <div class="card mt-3"><div class="card-header d-flex justify-content-between"><h6 class="mb-0">Release Notes</h6>
+                <button class="btn btn-sm btn-outline-primary" onclick="generateReleaseNotes()"><i class="bi bi-magic me-1"></i>Auto-Generate</button></div>
+            <div class="card-body">
+                <div id="releaseNotes"></div>
+            </div></div>
+
+            <!-- Deployment Environments -->
+            <div class="card mt-3"><div class="card-header"><h6 class="mb-0">Environments</h6></div>
+            <div class="card-body p-0"><table class="table table-hover mb-0">
+                <thead><tr><th>Environment</th><th>Status</th><th>Version</th><th>Last Deploy</th><th>Health</th></tr></thead>
+                <tbody id="envBody"></tbody>
+            </table></div></div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+<script>
+    const params = new URLSearchParams(window.location.search);
+    const projectId = params.get('projectId');
+    let project = null, stages = [], qualityReports = [], metrics = [];
+
+    async function load() {
+        if (!projectId) { window.location.href = '/Projects'; return; }
+        [project] = await Promise.all([
+            fetch(`/api/projects/${encodeURIComponent(projectId)}`).then(r=>r.json())
+        ]);
+        document.getElementById('bcProj').innerHTML = `<a href="/Projects">${esc(project.name)}</a>`;
+        try {
+            [qualityReports, metrics] = await Promise.all([
+                fetch(`/api/projects/${encodeURIComponent(projectId)}/quality-reports`).then(r=>r.ok?r.json():[]),
+                fetch(`/api/projects/${encodeURIComponent(projectId)}/metrics`).then(r=>r.ok?r.json():[])
+            ]);
+        } catch(e) { qualityReports = []; metrics = []; }
+        renderPipeline();
+        renderProgress();
+        renderQualityGates();
+        renderTimeline();
+        renderReleaseNotes();
+        renderEnvironments();
+    }
+
+    function renderPipeline() {
+        const defaultStages = ['Requirements', 'BRD', 'Architecture', 'Code Generation', 'Testing', 'Review', 'Deployment'];
+        const currentIdx = { created:0, configuring:1, generating:3, reviewing:5, completed:6 }[project.status] || 0;
+        document.getElementById('pipelineStages').innerHTML = defaultStages.map((s, i) => `
+            <div class="text-center flex-shrink-0" style="min-width:120px">
+                <div class="rounded-circle mx-auto d-flex align-items-center justify-content-center ${i < currentIdx ? 'bg-success' : i === currentIdx ? 'bg-primary' : 'bg-secondary'} text-white" style="width:40px;height:40px">
+                    ${i < currentIdx ? '<i class="bi bi-check-lg"></i>' : i === currentIdx ? '<i class="bi bi-arrow-right"></i>' : (i+1)}
+                </div>
+                <small class="${i <= currentIdx ? 'fw-semibold' : 'text-muted'} d-block mt-1">${esc(s)}</small>
+            </div>
+            ${i < defaultStages.length - 1 ? '<div class="flex-shrink-0 align-self-center" style="width:40px;height:2px;background:' + (i < currentIdx ? '#198754' : '#dee2e6') + '"></div>' : ''}
+        `).join('');
+    }
+
+    function renderProgress() {
+        // Calculate from metrics
+        const getMetric = (name) => { const m = metrics.find(x => x.name === name); return m ? parseFloat(m.value) : 0; };
+        const overall = getMetric('overall_progress');
+        ['Overall','Reqs','Brd','Code','Test','Deploy'].forEach(name => {
+            const val = name === 'Overall' ? overall : getMetric(name.toLowerCase() + '_progress');
+            const pct = document.getElementById('pct' + name);
+            const bar = document.getElementById('bar' + name);
+            if (pct) pct.textContent = val + '%';
+            if (bar) bar.style.width = val + '%';
+        });
+    }
+
+    function renderQualityGates() {
+        const gates = [
+            { name: 'Requirements Approved', check: () => project.status !== 'created' },
+            { name: 'BRD Complete', check: () => ['generating','completed'].includes(project.status) },
+            { name: 'Architecture Review', check: () => ['generating','completed'].includes(project.status) },
+            { name: 'Code Quality', check: () => qualityReports.some(r => r.passed) },
+            { name: 'Test Coverage > 80%', check: () => false },
+            { name: 'Security Scan', check: () => false },
+            { name: 'Ready for Deploy', check: () => project.status === 'completed' }
+        ];
+        document.getElementById('qualityGates').innerHTML = gates.map(g => `
+            <div class="list-group-item d-flex justify-content-between align-items-center">
+                <span>${esc(g.name)}</span>
+                <i class="bi bi-${g.check() ? 'check-circle-fill text-success' : 'circle text-muted'}"></i>
+            </div>
+        `).join('');
+    }
+
+    function renderTimeline() {
+        const events = [
+            { time: project.createdAt, title: 'Project Created', icon: 'folder-plus', color: 'primary' },
+            ...qualityReports.map(r => ({ time: r.createdAt, title: `Quality Report: ${r.reportType}`, icon: 'clipboard-check', color: r.passed ? 'success' : 'danger' })),
+            ...metrics.filter(m => m.name === 'milestone').map(m => ({ time: m.createdAt, title: m.value, icon: 'flag', color: 'info' }))
+        ].sort((a, b) => new Date(b.time) - new Date(a.time));
+
+        document.getElementById('timeline').innerHTML = events.length ? events.map(e => `
+            <div class="d-flex mb-3"><div class="me-3"><i class="bi bi-${e.icon} text-${e.color} fs-5"></i></div>
+            <div><strong>${esc(e.title)}</strong><br><small class="text-muted">${e.time ? new Date(e.time).toLocaleString() : ''}</small></div></div>
+        `).join('') : '<div class="text-muted text-center py-3">No events yet</div>';
+    }
+
+    function renderReleaseNotes() {
+        document.getElementById('releaseNotes').innerHTML = '<p class="text-muted">Release notes will be auto-generated from completed stories and agent artifacts.</p>';
+    }
+
+    function renderEnvironments() {
+        const envs = project.environments || [];
+        document.getElementById('envBody').innerHTML = envs.map(e => `
+            <tr><td><i class="bi bi-server me-1"></i>${esc(e.name)}</td>
+            <td><span class="badge bg-${e.isActive?'success':'secondary'}">${e.isActive?'Active':'Inactive'}</span></td>
+            <td><code>${esc(e.version||'—')}</code></td>
+            <td class="small">${e.lastDeployedAt ? new Date(e.lastDeployedAt).toLocaleString() : 'Never'}</td>
+            <td>${e.isActive ? '<i class="bi bi-heart-pulse text-success"></i> Healthy' : '<i class="bi bi-dash-circle text-muted"></i>'}</td></tr>
+        `).join('') || '<tr><td colspan="5" class="text-center text-muted">No environments configured</td></tr>';
+    }
+
+    function triggerPipeline() { alert('Pipeline execution will be triggered via the Orchestrator.'); }
+    function exportDelivery() { alert('Export will generate a delivery report PDF.'); }
+    function generateReleaseNotes() { alert('Release notes generation will be handled by the Documentation Agent.'); }
+    function esc(s) { const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML; }
+
+    load();
+</script>
+}

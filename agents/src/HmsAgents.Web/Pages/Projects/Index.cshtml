@@ -1,0 +1,157 @@
+@page
+@{
+    ViewData["Title"] = "Projects";
+}
+
+<div class="container-fluid px-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2><i class="bi bi-folder2-open me-2"></i>Projects</h2>
+        <a href="/Projects/Create" class="btn btn-primary"><i class="bi bi-plus-lg me-1"></i>New Project</a>
+    </div>
+
+    <div class="row mb-3">
+        <div class="col-md-4"><input class="form-control" id="search" placeholder="Search projects..." oninput="filterProjects()"></div>
+        <div class="col-md-3">
+            <select class="form-select" id="statusFilter" onchange="filterProjects()">
+                <option value="">All Statuses</option>
+                <option value="created">Created</option>
+                <option value="configuring">Configuring</option>
+                <option value="generating">Generating</option>
+                <option value="completed">Completed</option>
+                <option value="archived">Archived</option>
+            </select>
+        </div>
+        <div class="col-md-3">
+            <select class="form-select" id="typeFilter" onchange="filterProjects()">
+                <option value="">All Types</option>
+                <option value="web_app">Web App</option>
+                <option value="api">API</option>
+                <option value="microservices">Microservices</option>
+                <option value="mobile_app">Mobile App</option>
+                <option value="library">Library</option>
+            </select>
+        </div>
+    </div>
+
+    <!-- Stats Row -->
+    <div class="row mb-4" id="statsRow">
+        <div class="col-md-3"><div class="card text-bg-primary"><div class="card-body py-2"><h6 class="mb-0">Total</h6><h3 id="statTotal" class="mb-0">0</h3></div></div></div>
+        <div class="col-md-3"><div class="card text-bg-info"><div class="card-body py-2"><h6 class="mb-0">Active</h6><h3 id="statActive" class="mb-0">0</h3></div></div></div>
+        <div class="col-md-3"><div class="card text-bg-success"><div class="card-body py-2"><h6 class="mb-0">Completed</h6><h3 id="statCompleted" class="mb-0">0</h3></div></div></div>
+        <div class="col-md-3"><div class="card text-bg-warning"><div class="card-body py-2"><h6 class="mb-0">Generating</h6><h3 id="statGenerating" class="mb-0">0</h3></div></div></div>
+    </div>
+
+    <div class="row g-3" id="projectGrid"></div>
+</div>
+
+<!-- Project Detail Modal -->
+<div class="modal fade" id="projectModal" tabindex="-1"><div class="modal-dialog modal-xl"><div class="modal-content">
+    <div class="modal-header"><h5 class="modal-title" id="projModalTitle">Project</h5><button class="btn-close" data-bs-dismiss="modal"></button></div>
+    <div class="modal-body">
+        <ul class="nav nav-tabs" id="projTabs">
+            <li class="nav-item"><a class="nav-link active" data-bs-toggle="tab" href="#tabOverview">Overview</a></li>
+            <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#tabRequirements">Requirements</a></li>
+            <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#tabBacklog">Backlog</a></li>
+            <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#tabAgents">Agents</a></li>
+            <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#tabDelivery">Delivery</a></li>
+        </ul>
+        <div class="tab-content pt-3">
+            <div class="tab-pane active" id="tabOverview">
+                <div class="row" id="overviewContent"></div>
+            </div>
+            <div class="tab-pane" id="tabRequirements">
+                <div class="d-flex justify-content-between mb-2"><h6>Requirements</h6><a class="btn btn-sm btn-primary" id="linkReqs" href="#">Manage Requirements</a></div>
+                <div id="reqsList"></div>
+            </div>
+            <div class="tab-pane" id="tabBacklog">
+                <div class="d-flex justify-content-between mb-2"><h6>Epics &amp; Stories</h6><a class="btn btn-sm btn-primary" id="linkBacklog" href="#">Open Board</a></div>
+                <div id="backlogList"></div>
+            </div>
+            <div class="tab-pane" id="tabAgents">
+                <div id="agentRunsList"></div>
+            </div>
+            <div class="tab-pane" id="tabDelivery">
+                <div id="deliveryContent"></div>
+            </div>
+        </div>
+    </div>
+</div></div></div>
+
+@section Scripts {
+<script>
+    let projects = [];
+
+    async function load() {
+        projects = await fetch('/api/projects').then(r => r.json());
+        renderStats();
+        renderGrid();
+    }
+
+    function renderStats() {
+        document.getElementById('statTotal').textContent = projects.length;
+        document.getElementById('statActive').textContent = projects.filter(p => p.status === 'configuring' || p.status === 'created').length;
+        document.getElementById('statCompleted').textContent = projects.filter(p => p.status === 'completed').length;
+        document.getElementById('statGenerating').textContent = projects.filter(p => p.status === 'generating').length;
+    }
+
+    function filterProjects() {
+        const q = document.getElementById('search').value.toLowerCase();
+        const s = document.getElementById('statusFilter').value;
+        const t = document.getElementById('typeFilter').value;
+        const filtered = projects.filter(p =>
+            (!q || p.name.toLowerCase().includes(q) || (p.description||'').toLowerCase().includes(q)) &&
+            (!s || p.status === s) &&
+            (!t || p.projectType === t)
+        );
+        renderGrid(filtered);
+    }
+
+    function renderGrid(list) {
+        list = list || projects;
+        document.getElementById('projectGrid').innerHTML = list.map(p => `
+            <div class="col-md-4">
+                <div class="card h-100 project-card" style="cursor:pointer" onclick="openProject('${p.id}')">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between"><h5 class="card-title">${esc(p.name)}</h5><span class="badge bg-${statusColor(p.status)}">${esc(p.status)}</span></div>
+                        <p class="card-text text-muted small">${esc(p.description||'No description')}</p>
+                        <div class="d-flex gap-2">
+                            <span class="badge bg-light text-dark"><i class="bi bi-code-slash me-1"></i>${esc(p.projectType)}</span>
+                        </div>
+                    </div>
+                    <div class="card-footer bg-transparent small text-muted">
+                        Created ${new Date(p.createdAt).toLocaleDateString()}
+                    </div>
+                </div>
+            </div>
+        `).join('') || '<div class="col-12 text-center text-muted py-5">No projects found. <a href="/Projects/Create">Create one.</a></div>';
+    }
+
+    async function openProject(id) {
+        const p = await fetch(`/api/projects/${id}`).then(r => r.json());
+        document.getElementById('projModalTitle').textContent = p.name;
+        document.getElementById('linkReqs').href = `/Projects/Requirements/Manage?projectId=${id}`;
+        document.getElementById('linkBacklog').href = `/Projects/Backlog/Board?projectId=${id}`;
+        document.getElementById('overviewContent').innerHTML = `
+            <div class="col-md-6">
+                <table class="table table-sm"><tbody>
+                    <tr><th>Type</th><td>${esc(p.projectType)}</td></tr>
+                    <tr><th>Status</th><td><span class="badge bg-${statusColor(p.status)}">${esc(p.status)}</span></td></tr>
+                    <tr><th>Slug</th><td><code>${esc(p.slug)}</code></td></tr>
+                    <tr><th>Created</th><td>${new Date(p.createdAt).toLocaleString()}</td></tr>
+                </tbody></table>
+            </div>
+            <div class="col-md-6">
+                <h6>Tech Stack</h6>
+                <div>${(p.techStack||[]).map(t=>`<span class="badge bg-info me-1">${esc(t.technologyName)} ${t.version||''}</span>`).join('')||'<span class="text-muted">Not configured</span>'}</div>
+                <h6 class="mt-3">Environments</h6>
+                <div>${(p.environments||[]).map(e=>`<span class="badge bg-secondary me-1">${esc(e.name)}</span>`).join('')||'<span class="text-muted">None</span>'}</div>
+            </div>`;
+        new bootstrap.Modal(document.getElementById('projectModal')).show();
+    }
+
+    function statusColor(s) { return { created:'secondary', configuring:'info', generating:'warning', completed:'success', failed:'danger', archived:'dark' }[s] || 'secondary'; }
+    function esc(s) { const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML; }
+
+    load();
+</script>
+}

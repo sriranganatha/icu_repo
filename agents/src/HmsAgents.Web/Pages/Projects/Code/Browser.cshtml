@@ -1,0 +1,128 @@
+@page
+@{
+    ViewData["Title"] = "Code Browser";
+}
+
+<div class="container-fluid px-4">
+    <nav aria-label="breadcrumb"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="/Projects">Projects</a></li><li class="breadcrumb-item" id="bcProj">Project</li><li class="breadcrumb-item active">Code</li></ol></nav>
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2><i class="bi bi-code-slash me-2"></i>Code Browser</h2>
+        <div>
+            <button class="btn btn-outline-secondary me-1" onclick="toggleAnnotations()"><i class="bi bi-chat-left-text me-1"></i>Annotations</button>
+            <button class="btn btn-outline-info" onclick="toggleReviews()"><i class="bi bi-eye me-1"></i>Reviews</button>
+        </div>
+    </div>
+
+    <div class="row">
+        <!-- File Tree -->
+        <div class="col-md-3">
+            <div class="card"><div class="card-header py-2"><h6 class="mb-0">File Structure</h6></div>
+            <div class="card-body p-0" style="max-height:600px;overflow-y:auto">
+                <div id="fileTree" class="p-2"></div>
+            </div></div>
+
+            <div class="card mt-3"><div class="card-header py-2"><h6 class="mb-0">Coverage Summary</h6></div>
+            <div class="card-body">
+                <div class="d-flex justify-content-between mb-1"><small>Requirement Coverage</small><strong id="reqCoverage">0%</strong></div>
+                <div class="progress mb-2" style="height:6px"><div class="progress-bar bg-success" id="reqBar" style="width:0%"></div></div>
+                <div class="d-flex justify-content-between mb-1"><small>Test Coverage</small><strong id="testCoverage">0%</strong></div>
+                <div class="progress mb-2" style="height:6px"><div class="progress-bar bg-info" id="testBar" style="width:0%"></div></div>
+                <div class="d-flex justify-content-between mb-1"><small>Review Coverage</small><strong id="reviewCoverage">0%</strong></div>
+                <div class="progress" style="height:6px"><div class="progress-bar bg-primary" id="reviewBar" style="width:0%"></div></div>
+            </div></div>
+        </div>
+
+        <!-- Code Viewer -->
+        <div class="col-md-9">
+            <div class="card">
+                <div class="card-header py-2 d-flex justify-content-between align-items-center">
+                    <div><i class="bi bi-file-code me-1"></i><span id="currentFile">Select a file</span></div>
+                    <div>
+                        <span class="badge bg-light text-dark" id="fileLang">-</span>
+                        <span class="badge bg-light text-dark" id="fileLines">-</span>
+                        <span class="badge bg-light text-dark" id="fileAgent">-</span>
+                    </div>
+                </div>
+                <div class="card-body p-0">
+                    <pre class="p-3 mb-0 bg-dark text-light" id="codeContent" style="max-height:500px;overflow:auto;font-size:0.85rem;line-height:1.6;tab-size:4;"><code>// Select a file from the tree to view its contents</code></pre>
+                </div>
+                <div class="card-footer py-2" id="codeAnnotations">
+                    <div class="d-flex gap-3">
+                        <small class="text-muted"><i class="bi bi-bookmark me-1"></i>Requirements: <span id="annotReqs">0</span></small>
+                        <small class="text-muted"><i class="bi bi-chat me-1"></i>Reviews: <span id="annotReviews">0</span></small>
+                        <small class="text-muted"><i class="bi bi-exclamation-triangle me-1"></i>Issues: <span id="annotIssues">0</span></small>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Review Comments -->
+            <div class="card mt-3 d-none" id="reviewPanel">
+                <div class="card-header py-2"><h6 class="mb-0"><i class="bi bi-chat-left-dots me-2"></i>Review Comments</h6></div>
+                <div class="card-body" id="reviewComments"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+<script>
+    const params = new URLSearchParams(window.location.search);
+    const projectId = params.get('projectId');
+    let fileStructure = [], showAnnotations = true, showReviews = false;
+
+    async function load() {
+        if (!projectId) { window.location.href = '/Projects'; return; }
+        const proj = await fetch(`/api/projects/${encodeURIComponent(projectId)}`).then(r=>r.json());
+        document.getElementById('bcProj').innerHTML = `<a href="/Projects">${esc(proj.name)}</a>`;
+        // File structure will be populated from agent-generated artifacts
+        try {
+            const artifacts = await fetch(`/api/projects/${encodeURIComponent(projectId)}/agent-artifacts`).then(r=>r.ok?r.json():[]);
+            fileStructure = artifacts.filter(a=>a.artifactType==='code'||a.artifactType==='file');
+            renderTree();
+        } catch(e) { renderTree(); }
+    }
+
+    function renderTree() {
+        if (fileStructure.length === 0) {
+            document.getElementById('fileTree').innerHTML = '<div class="text-muted small text-center py-3">No generated code yet.<br>Run agents to generate project files.</div>';
+            return;
+        }
+        const tree = {};
+        fileStructure.forEach(f => {
+            const parts = (f.filePath||f.path||'unknown').split('/');
+            let node = tree;
+            parts.forEach((p, i) => {
+                if (i === parts.length - 1) node[p] = f;
+                else { node[p] = node[p] || {}; node = node[p]; }
+            });
+        });
+        document.getElementById('fileTree').innerHTML = renderNode(tree, '');
+    }
+
+    function renderNode(node, prefix) {
+        return Object.entries(node).map(([name, val]) => {
+            if (val.id) return `<div class="small py-1 ps-2 file-item" style="cursor:pointer" onclick="openFile('${val.id}')"><i class="bi bi-file-code me-1 text-muted"></i>${esc(name)}</div>`;
+            return `<div class="small py-1 fw-semibold"><i class="bi bi-folder me-1 text-warning"></i>${esc(name)}</div><div class="ps-3">${renderNode(val, prefix + name + '/')}</div>`;
+        }).join('');
+    }
+
+    function openFile(id) {
+        const f = fileStructure.find(x=>x.id===id);
+        if (!f) return;
+        document.getElementById('currentFile').textContent = f.filePath || f.path || 'File';
+        document.getElementById('fileLang').textContent = (f.language || detectLang(f.filePath || '')).toUpperCase();
+        document.getElementById('codeContent').innerHTML = `<code>${esc(f.content || '// Content not available — file stored externally')}</code>`;
+    }
+
+    function detectLang(path) {
+        const ext = path.split('.').pop();
+        return { cs:'C#', ts:'TypeScript', js:'JavaScript', py:'Python', java:'Java', go:'Go', rs:'Rust', rb:'Ruby', md:'Markdown', json:'JSON', yaml:'YAML', yml:'YAML', xml:'XML', sql:'SQL', html:'HTML', css:'CSS' }[ext] || ext;
+    }
+
+    function toggleAnnotations() { showAnnotations = !showAnnotations; document.getElementById('codeAnnotations').classList.toggle('d-none', !showAnnotations); }
+    function toggleReviews() { showReviews = !showReviews; document.getElementById('reviewPanel').classList.toggle('d-none', !showReviews); }
+    function esc(s) { const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML; }
+
+    load();
+</script>
+}

@@ -1,0 +1,170 @@
+@page
+@{
+    ViewData["Title"] = "Template Library";
+}
+
+<div class="container-fluid px-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2><i class="bi bi-file-earmark-code me-2"></i>Template Library</h2>
+        <button class="btn btn-primary" onclick="showAddTemplate()"><i class="bi bi-plus-lg me-1"></i>Add Template</button>
+    </div>
+
+    <ul class="nav nav-tabs mb-3" id="tmplTabs">
+        <li class="nav-item"><a class="nav-link active" href="#" data-tab="brd">BRD</a></li>
+        <li class="nav-item"><a class="nav-link" href="#" data-tab="architecture">Architecture</a></li>
+        <li class="nav-item"><a class="nav-link" href="#" data-tab="code">Code</a></li>
+        <li class="nav-item"><a class="nav-link" href="#" data-tab="file-structure">File Structure</a></li>
+        <li class="nav-item"><a class="nav-link" href="#" data-tab="cicd">CI/CD</a></li>
+        <li class="nav-item"><a class="nav-link" href="#" data-tab="docker">Docker</a></li>
+        <li class="nav-item"><a class="nav-link" href="#" data-tab="test">Test</a></li>
+        <li class="nav-item"><a class="nav-link" href="#" data-tab="iac">IaC</a></li>
+        <li class="nav-item"><a class="nav-link" href="#" data-tab="documentation">Docs</a></li>
+    </ul>
+
+    <div class="row g-3" id="tmplList">
+        <div class="col-12 text-center text-muted py-5">Loading templates...</div>
+    </div>
+
+    <!-- Add Template Modal -->
+    <div class="modal fade" id="tmplModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header bg-primary text-white">
+                    <h5 class="modal-title" id="tmplModalTitle">Add Template</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body" id="tmplModalBody"></div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button class="btn btn-primary" onclick="saveTemplate()">Save</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+<script>
+    const API = '/api/templates';
+    let activeTab = 'brd';
+    let data = {};
+
+    document.querySelectorAll('#tmplTabs a').forEach(tab => {
+        tab.addEventListener('click', e => {
+            e.preventDefault();
+            document.querySelectorAll('#tmplTabs a').forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+            activeTab = tab.dataset.tab;
+            renderTemplates();
+        });
+    });
+
+    async function loadAll() {
+        const tabs = ['brd','architecture','code','file-structure','cicd','docker','test','iac','documentation'];
+        const results = await Promise.all(tabs.map(t => fetch(`${API}/${t}`).then(r => r.json())));
+        tabs.forEach((t, i) => data[t] = results[i]);
+        renderTemplates();
+    }
+
+    function renderTemplates() {
+        const items = data[activeTab] || [];
+        const container = document.getElementById('tmplList');
+        if (items.length === 0) {
+            container.innerHTML = '<div class="col-12 text-center text-muted py-5">No templates in this category</div>';
+            return;
+        }
+        container.innerHTML = items.map(t => `
+            <div class="col-md-4 col-lg-3">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-start mb-2">
+                            <h6 class="card-title mb-0">${esc(t.name)}</h6>
+                            <button class="btn btn-sm btn-outline-danger" onclick="deleteTemplate('${activeTab}','${t.id}')"><i class="bi bi-trash"></i></button>
+                        </div>
+                        ${t.projectType ? `<span class="badge bg-info mb-1">${esc(t.projectType)}</span>` : ''}
+                        ${t.pattern ? `<span class="badge bg-warning text-dark mb-1">${esc(t.pattern)}</span>` : ''}
+                        ${t.templateType ? `<span class="badge bg-secondary mb-1">${esc(t.templateType)}</span>` : ''}
+                        ${t.provider ? `<span class="badge bg-success mb-1">${esc(t.provider)}</span>` : ''}
+                        ${t.testType ? `<span class="badge bg-primary mb-1">${esc(t.testType)}</span>` : ''}
+                        ${t.tool ? `<span class="badge bg-dark mb-1">${esc(t.tool)}</span>` : ''}
+                        ${t.docType ? `<span class="badge bg-info mb-1">${esc(t.docType)}</span>` : ''}
+                        <div class="small text-muted mt-2">${fmtDate(t.createdAt)}</div>
+                    </div>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    function showAddTemplate() {
+        const title = document.getElementById('tmplModalTitle');
+        const body = document.getElementById('tmplModalBody');
+        title.textContent = `Add ${activeTab.replace('-',' ')} Template`;
+        let html = `<div class="mb-3"><label class="form-label">Name</label><input class="form-control" id="fName"></div>`;
+
+        switch(activeTab) {
+            case 'brd':
+                html += `<div class="mb-3"><label class="form-label">Project Type</label><input class="form-control" id="fProjectType" value="web_app"></div>
+                    <div class="mb-3"><label class="form-label">Sections JSON</label><textarea class="form-control" id="fContent" rows="4">[]</textarea></div>
+                    <div class="form-check mb-3"><input class="form-check-input" type="checkbox" id="fIsDefault"><label class="form-check-label" for="fIsDefault">Default</label></div>`;
+                break;
+            case 'architecture':
+                html += `<div class="mb-3"><label class="form-label">Pattern</label><select class="form-select" id="fPattern"><option>monolith</option><option>microservices</option><option>serverless</option><option>modular_monolith</option></select></div>
+                    <div class="mb-3"><label class="form-label">Diagram Template (Mermaid)</label><textarea class="form-control" id="fContent" rows="4"></textarea></div>`;
+                break;
+            case 'code':
+                html += `<div class="mb-3"><label class="form-label">Template Type</label><select class="form-select" id="fType"><option>scaffold</option><option>component</option><option>module</option></select></div>
+                    <div class="mb-3"><label class="form-label">Content</label><textarea class="form-control" id="fContent" rows="6"></textarea></div>
+                    <div class="mb-3"><label class="form-label">Variables JSON</label><textarea class="form-control" id="fVars" rows="2">[]</textarea></div>`;
+                break;
+            default:
+                html += `<div class="mb-3"><label class="form-label">Content</label><textarea class="form-control" id="fContent" rows="8"></textarea></div>`;
+                break;
+        }
+        body.innerHTML = html;
+        new bootstrap.Modal(document.getElementById('tmplModal')).show();
+    }
+
+    async function saveTemplate() {
+        const name = document.getElementById('fName')?.value;
+        let payload = { name }, url = `${API}/${activeTab}`;
+
+        switch(activeTab) {
+            case 'brd':
+                payload.projectType = document.getElementById('fProjectType').value;
+                payload.sectionsJson = document.getElementById('fContent').value;
+                payload.isDefault = document.getElementById('fIsDefault').checked;
+                break;
+            case 'architecture':
+                payload.pattern = document.getElementById('fPattern').value;
+                payload.diagramTemplate = document.getElementById('fContent').value;
+                break;
+            case 'code':
+                payload.templateType = document.getElementById('fType').value;
+                payload.content = document.getElementById('fContent').value;
+                payload.variablesJson = document.getElementById('fVars').value;
+                break;
+            case 'documentation':
+                payload.docType = 'readme';
+                payload.templateContent = document.getElementById('fContent').value;
+                break;
+            default:
+                payload.templateContent = document.getElementById('fContent')?.value || '';
+                break;
+        }
+        await fetch(url, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+        bootstrap.Modal.getInstance(document.getElementById('tmplModal')).hide();
+        loadAll();
+    }
+
+    async function deleteTemplate(tab, id) {
+        if (!confirm('Delete this template?')) return;
+        await fetch(`${API}/${tab}/${id}`, { method: 'DELETE' });
+        loadAll();
+    }
+
+    function esc(s) { const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML; }
+    function fmtDate(d) { return d ? new Date(d).toLocaleDateString() : '-'; }
+
+    loadAll();
+</script>
+}

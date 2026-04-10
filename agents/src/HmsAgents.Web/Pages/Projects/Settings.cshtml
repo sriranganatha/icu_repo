@@ -1,0 +1,157 @@
+@page
+@{
+    ViewData["Title"] = "Project Settings";
+}
+
+<div class="container px-4" style="max-width: 900px;">
+    <nav aria-label="breadcrumb"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="/Projects">Projects</a></li><li class="breadcrumb-item active" id="bcName">Settings</li></ol></nav>
+    <h2 class="mb-4"><i class="bi bi-gear me-2"></i>Project Settings</h2>
+
+    <ul class="nav nav-tabs mb-3">
+        <li class="nav-item"><a class="nav-link active" data-bs-toggle="tab" href="#tabGeneral">General</a></li>
+        <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#tabTechStack">Tech Stack</a></li>
+        <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#tabEnvs">Environments</a></li>
+        <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#tabAgents">Agent Config</a></li>
+        <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#tabDanger">Danger Zone</a></li>
+    </ul>
+
+    <div class="tab-content">
+        <!-- General -->
+        <div class="tab-pane active" id="tabGeneral">
+            <div class="card"><div class="card-body">
+                <div class="mb-3"><label class="form-label">Project Name</label><input class="form-control" id="fName"></div>
+                <div class="mb-3"><label class="form-label">Description</label><textarea class="form-control" id="fDesc" rows="3"></textarea></div>
+                <div class="row">
+                    <div class="col-md-6 mb-3"><label class="form-label">Repository URL</label><input class="form-control" id="fRepo"></div>
+                    <div class="col-md-6 mb-3"><label class="form-label">Status</label><select class="form-select" id="fStatus"><option>created</option><option>configuring</option><option>generating</option><option>completed</option><option>archived</option></select></div>
+                </div>
+                <button class="btn btn-primary" onclick="saveGeneral()"><i class="bi bi-check-lg me-1"></i>Save Changes</button>
+            </div></div>
+        </div>
+
+        <!-- Tech Stack -->
+        <div class="tab-pane" id="tabTechStack">
+            <div class="card"><div class="card-body">
+                <div class="d-flex justify-content-between mb-3"><h6>Technology Stack</h6><button class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#addTechModal"><i class="bi bi-plus-lg me-1"></i>Add Technology</button></div>
+                <div class="table-responsive"><table class="table"><thead><tr><th>Category</th><th>Technology</th><th>Version</th><th>Primary</th><th></th></tr></thead><tbody id="techBody"></tbody></table></div>
+            </div></div>
+        </div>
+
+        <!-- Environments -->
+        <div class="tab-pane" id="tabEnvs">
+            <div class="card"><div class="card-body">
+                <div class="d-flex justify-content-between mb-3"><h6>Environments</h6><button class="btn btn-sm btn-primary" onclick="addEnv()"><i class="bi bi-plus-lg me-1"></i>Add Environment</button></div>
+                <div id="envList"></div>
+            </div></div>
+        </div>
+
+        <!-- Agent Config -->
+        <div class="tab-pane" id="tabAgents">
+            <div class="card"><div class="card-body">
+                <h6>Agent Assignment Overrides</h6>
+                <p class="text-muted small">Override default agent settings for this project</p>
+                <div id="agentOverrides" class="list-group"></div>
+            </div></div>
+        </div>
+
+        <!-- Danger Zone -->
+        <div class="tab-pane" id="tabDanger">
+            <div class="card border-danger"><div class="card-body">
+                <h6 class="text-danger">Danger Zone</h6>
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <div><strong>Archive Project</strong><br><small class="text-muted">Marks the project as archived. Can be restored.</small></div>
+                    <button class="btn btn-outline-warning" onclick="archiveProject()">Archive</button>
+                </div>
+                <hr>
+                <div class="d-flex justify-content-between align-items-center">
+                    <div><strong>Delete Project</strong><br><small class="text-muted">Permanently deletes the project and all associated data.</small></div>
+                    <button class="btn btn-outline-danger" onclick="deleteProject()">Delete</button>
+                </div>
+            </div></div>
+        </div>
+    </div>
+</div>
+
+<!-- Add Tech Modal -->
+<div class="modal fade" id="addTechModal" tabindex="-1"><div class="modal-dialog"><div class="modal-content">
+    <div class="modal-header"><h5>Add Technology</h5><button class="btn-close" data-bs-dismiss="modal"></button></div>
+    <div class="modal-body">
+        <div class="mb-3"><label class="form-label">Category</label>
+            <select class="form-select" id="techCat" onchange="loadTechOptions()"><option value="language">Language</option><option value="framework">Framework</option><option value="database">Database</option><option value="cloud">Cloud Provider</option><option value="devops">DevOps Tool</option></select></div>
+        <div class="mb-3"><label class="form-label">Technology</label><select class="form-select" id="techSelect"></select></div>
+        <div class="mb-3"><label class="form-label">Version Override (optional)</label><input class="form-control" id="techVer"></div>
+        <div class="form-check mb-3"><input class="form-check-input" type="checkbox" id="techPrimary"><label class="form-check-label">Primary</label></div>
+    </div>
+    <div class="modal-footer"><button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button><button class="btn btn-primary" onclick="addTech()">Add</button></div>
+</div></div></div>
+
+@section Scripts {
+<script>
+    const params = new URLSearchParams(window.location.search);
+    const projectId = params.get('projectId');
+    let project = null;
+
+    async function load() {
+        if (!projectId) { window.location.href = '/Projects'; return; }
+        project = await fetch(`/api/projects/${encodeURIComponent(projectId)}`).then(r=>r.json());
+        document.getElementById('bcName').textContent = project.name + ' Settings';
+        document.getElementById('fName').value = project.name;
+        document.getElementById('fDesc').value = project.description || '';
+        document.getElementById('fRepo').value = project.repositoryUrl || '';
+        document.getElementById('fStatus').value = project.status;
+        renderTech();
+        renderEnvs();
+    }
+
+    function renderTech() {
+        document.getElementById('techBody').innerHTML = (project.techStack||[]).map(t => `
+            <tr><td>${esc(t.category)}</td><td>${esc(t.technologyName)}</td><td>${esc(t.version||'-')}</td>
+            <td>${t.isPrimary ? '<i class="bi bi-check-circle-fill text-success"></i>' : ''}</td>
+            <td><button class="btn btn-sm btn-outline-danger" onclick="removeTech('${t.id}')"><i class="bi bi-trash"></i></button></td></tr>
+        `).join('') || '<tr><td colspan="5" class="text-muted text-center">No technologies added</td></tr>';
+    }
+
+    function renderEnvs() {
+        document.getElementById('envList').innerHTML = (project.environments||[]).map(e => `
+            <div class="card mb-2"><div class="card-body py-2 d-flex justify-content-between align-items-center">
+                <div><strong>${esc(e.name)}</strong> <span class="badge bg-${e.isActive?'success':'secondary'}">${e.isActive?'Active':'Inactive'}</span></div>
+                <code class="small text-muted">${esc(e.connectionString||'Not configured')}</code>
+            </div></div>
+        `).join('') || '<p class="text-muted">No environments configured</p>';
+    }
+
+    async function saveGeneral() {
+        const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}`, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ name: document.getElementById('fName').value, description: document.getElementById('fDesc').value }) });
+        if (res.ok) { alert('Saved'); load(); } else alert('Failed');
+    }
+
+    async function archiveProject() {
+        if (!confirm('Archive this project?')) return;
+        await fetch(`/api/projects/${encodeURIComponent(projectId)}`, { method: 'DELETE' });
+        window.location.href = '/Projects';
+    }
+
+    function deleteProject() { alert('Permanent deletion requires admin confirmation — not yet implemented.'); }
+
+    async function loadTechOptions() {
+        const cat = document.getElementById('techCat').value;
+        const map = { language:'languages', framework:'frameworks', database:'databases', cloud:'cloud-providers', devops:'devops-tools' };
+        const items = await fetch(`/api/technologies/${map[cat]}`).then(r=>r.json());
+        document.getElementById('techSelect').innerHTML = items.map(i=>`<option value="${i.id}">${esc(i.name)}</option>`).join('');
+    }
+
+    async function addTech() {
+        const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/tech-stack`, {
+            method: 'POST', headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({ category: document.getElementById('techCat').value, technologyId: document.getElementById('techSelect').value, version: document.getElementById('techVer').value || null, isPrimary: document.getElementById('techPrimary').checked })
+        });
+        if (res.ok) { bootstrap.Modal.getInstance(document.getElementById('addTechModal')).hide(); load(); }
+    }
+
+    function addEnv() { alert('Use the API to add environments (POST /api/projects/{id}/environments)'); }
+    function removeTech(id) { alert('Tech removal via API'); }
+    function esc(s) { const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML; }
+
+    load(); loadTechOptions();
+</script>
+}

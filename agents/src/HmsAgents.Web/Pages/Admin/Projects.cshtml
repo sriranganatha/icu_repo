@@ -1,0 +1,193 @@
+@page
+@{
+    ViewData["Title"] = "Projects";
+}
+
+<div class="container-fluid px-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2><i class="bi bi-folder me-2"></i>Projects</h2>
+        <button class="btn btn-primary" onclick="showCreateProject()"><i class="bi bi-plus-lg me-1"></i>New Project</button>
+    </div>
+
+    <div class="row mb-3">
+        <div class="col-md-4">
+            <input type="search" class="form-control" id="searchProject" placeholder="Search projects..." oninput="renderProjects()">
+        </div>
+        <div class="col-md-3">
+            <select class="form-select" id="filterStatus" onchange="renderProjects()">
+                <option value="">All Statuses</option>
+                <option value="Created">Created</option>
+                <option value="InProgress">In Progress</option>
+                <option value="Completed">Completed</option>
+                <option value="Archived">Archived</option>
+            </select>
+        </div>
+    </div>
+
+    <div class="row g-3" id="projectList">
+        <div class="col-12 text-center text-muted py-5">Loading projects...</div>
+    </div>
+
+    <!-- Create Project Modal -->
+    <div class="modal fade" id="createModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header bg-primary text-white">
+                    <h5 class="modal-title">Create Project</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row">
+                        <div class="col-md-6 mb-3"><label class="form-label">Name</label><input class="form-control" id="fName"></div>
+                        <div class="col-md-6 mb-3"><label class="form-label">Project Type</label>
+                            <select class="form-select" id="fType"><option>web_app</option><option>api</option><option>mobile_app</option><option>microservices</option><option>library</option></select></div>
+                    </div>
+                    <div class="mb-3"><label class="form-label">Description</label><textarea class="form-control" id="fDesc" rows="3"></textarea></div>
+                    <div class="mb-3"><label class="form-label">Repository URL (optional)</label><input class="form-control" id="fRepo"></div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button class="btn btn-primary" onclick="createProject()">Create</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Project Detail Modal -->
+    <div class="modal fade" id="detailModal" tabindex="-1">
+        <div class="modal-dialog modal-xl modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header bg-primary text-white">
+                    <h5 class="modal-title" id="detailTitle">Project Detail</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body" id="detailBody"></div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+<script>
+    const API = '/api/projects';
+    let projects = [];
+
+    async function loadProjects() {
+        projects = await fetch(API).then(r => r.json());
+        renderProjects();
+    }
+
+    function renderProjects() {
+        const search = (document.getElementById('searchProject').value || '').toLowerCase();
+        const status = document.getElementById('filterStatus').value;
+        const filtered = projects.filter(p =>
+            (p.name.toLowerCase().includes(search) || (p.description||'').toLowerCase().includes(search)) &&
+            (!status || p.status === status));
+        const container = document.getElementById('projectList');
+
+        if (filtered.length === 0) {
+            container.innerHTML = '<div class="col-12 text-center text-muted py-5">No projects found</div>';
+            return;
+        }
+
+        container.innerHTML = filtered.map(p => `
+            <div class="col-md-6 col-lg-4">
+                <div class="card h-100" style="cursor:pointer;" onclick="showDetail('${p.id}')">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-start mb-2">
+                            <div>
+                                <h5 class="card-title mb-0">${esc(p.name)}</h5>
+                                <small class="text-muted">${esc(p.slug)}</small>
+                            </div>
+                            <span class="badge bg-${statusColor(p.status)}">${esc(p.status)}</span>
+                        </div>
+                        <p class="text-muted small mb-2">${esc(p.description || 'No description')}</p>
+                        <div class="d-flex gap-2">
+                            <span class="badge bg-info">${esc(p.projectType)}</span>
+                        </div>
+                        <div class="small text-muted mt-2">Created ${fmtDate(p.createdAt)}</div>
+                    </div>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    async function showDetail(id) {
+        const p = await fetch(`${API}/${id}`).then(r => r.json());
+        document.getElementById('detailTitle').textContent = p.name;
+        document.getElementById('detailBody').innerHTML = `
+            <div class="row mb-3">
+                <div class="col-md-4"><strong>Status:</strong> <span class="badge bg-${statusColor(p.status)}">${esc(p.status)}</span></div>
+                <div class="col-md-4"><strong>Type:</strong> ${esc(p.projectType)}</div>
+                <div class="col-md-4"><strong>Slug:</strong> <code>${esc(p.slug)}</code></div>
+            </div>
+            <div class="mb-3"><strong>Description:</strong> ${esc(p.description || '-')}</div>
+            ${p.repositoryUrl ? `<div class="mb-3"><strong>Repository:</strong> <a href="${esc(p.repositoryUrl)}" target="_blank">${esc(p.repositoryUrl)}</a></div>` : ''}
+            
+            <h6 class="mt-4">Tech Stack</h6>
+            <div class="row g-2 mb-3" id="techStackList">
+                ${(p.techStack||[]).length === 0 ? '<div class="col text-muted">No tech stack configured</div>' :
+                    (p.techStack||[]).map(t => `<div class="col-auto"><span class="badge bg-secondary">${esc(t.category)}: ${esc(t.technologyId?.substring(0,8))}</span></div>`).join('')}
+            </div>
+
+            <h6>Environments</h6>
+            <div class="row g-2 mb-3">
+                ${(p.environments||[]).map(e => `<div class="col-auto"><span class="badge bg-${e.name==='production'?'danger':e.name==='staging'?'warning text-dark':'info'}">${esc(e.name)}</span></div>`).join('')}
+            </div>
+
+            <h6>Epics</h6>
+            <div class="list-group mb-3">
+                ${(p.epics||[]).length === 0 ? '<div class="list-group-item text-muted">No epics</div>' :
+                    (p.epics||[]).map(e => `<div class="list-group-item d-flex justify-content-between"><span>${esc(e.title)}</span><span class="badge bg-${statusColor(e.status)}">${esc(e.status)}</span></div>`).join('')}
+            </div>
+
+            <div class="d-flex gap-2">
+                <button class="btn btn-outline-danger btn-sm" onclick="deleteProject('${p.id}')"><i class="bi bi-trash me-1"></i>Delete</button>
+            </div>`;
+        new bootstrap.Modal(document.getElementById('detailModal')).show();
+    }
+
+    function showCreateProject() {
+        new bootstrap.Modal(document.getElementById('createModal')).show();
+    }
+
+    async function createProject() {
+        await fetch(API, {
+            method: 'POST',
+            headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({
+                name: document.getElementById('fName').value,
+                description: document.getElementById('fDesc').value,
+                projectType: document.getElementById('fType').value,
+                repositoryUrl: document.getElementById('fRepo').value || null
+            })
+        });
+        bootstrap.Modal.getInstance(document.getElementById('createModal')).hide();
+        loadProjects();
+    }
+
+    async function deleteProject(id) {
+        if (!confirm('Delete this project?')) return;
+        await fetch(`${API}/${id}`, { method: 'DELETE' });
+        bootstrap.Modal.getInstance(document.getElementById('detailModal')).hide();
+        loadProjects();
+    }
+
+    function statusColor(s) {
+        switch(s) {
+            case 'Created': return 'secondary';
+            case 'InProgress': return 'primary';
+            case 'Completed': return 'success';
+            case 'Archived': return 'dark';
+            default: return 'info';
+        }
+    }
+    function esc(s) { const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML; }
+    function fmtDate(d) { return d ? new Date(d).toLocaleDateString() : '-'; }
+
+    loadProjects();
+</script>
+}
