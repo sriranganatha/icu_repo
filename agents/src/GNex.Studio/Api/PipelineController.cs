@@ -362,12 +362,15 @@ public sealed class PipelineController : ControllerBase
     }
 
     [HttpGet("artifacts")]
-    public IActionResult GetArtifacts()
+    public IActionResult GetArtifacts([FromQuery] int skip = 0, [FromQuery] int take = 200)
     {
         var ctx = _orchestrator.GetCurrentContext();
         if (ctx is null) return Ok(Array.Empty<object>());
 
-        return Ok(ctx.Artifacts.Select(a => new
+        // Cap take to prevent massive payloads
+        take = Math.Clamp(take, 1, 500);
+
+        return Ok(ctx.Artifacts.Skip(skip).Take(take).Select(a => new
         {
             a.Id,
             layer = a.Layer.ToString(),
@@ -395,12 +398,14 @@ public sealed class PipelineController : ControllerBase
     }
 
     [HttpGet("findings")]
-    public IActionResult GetFindings()
+    public IActionResult GetFindings([FromQuery] int skip = 0, [FromQuery] int take = 200)
     {
         var ctx = _orchestrator.GetCurrentContext();
         if (ctx is null) return Ok(Array.Empty<object>());
 
-        return Ok(ctx.Findings.Select(f => new
+        take = Math.Clamp(take, 1, 500);
+
+        return Ok(ctx.Findings.Skip(skip).Take(take).Select(f => new
         {
             f.Id,
             f.Category,

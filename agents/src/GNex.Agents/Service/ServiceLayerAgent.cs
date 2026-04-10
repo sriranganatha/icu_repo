@@ -15,6 +15,7 @@ namespace GNex.Agents.Service;
 public sealed class ServiceLayerAgent : IAgent
 {
     private readonly ILogger<ServiceLayerAgent> _logger;
+    private readonly HashSet<string> _generatedPaths = new(StringComparer.OrdinalIgnoreCase);
 
     public AgentType Type => AgentType.ServiceLayer;
     public string Name => "Service Layer Agent";
@@ -29,8 +30,27 @@ public sealed class ServiceLayerAgent : IAgent
         _logger.LogInformation("ServiceLayerAgent starting — domain-model-driven generation");
 
         var artifacts = new List<CodeArtifact>();
-        var scopedServices = ResolveTargetServices(context);
+        var scopedServices = ResolveTargetServicesFromClaimed(context);
         var guidance = GetGuidanceSummary(context);
+
+        // Filter out services already generated
+        var newServices = scopedServices
+            .Where(svc => !_generatedPaths.Contains($"{svc.ProjectName}/Services"))
+            .ToList();
+
+        if (newServices.Count == 0)
+        {
+            _logger.LogInformation("ServiceLayerAgent skipping — all {Count} services already generated", scopedServices.Count);
+            foreach (var item in context.CurrentClaimedItems)
+                context.CompleteWorkItem?.Invoke(item);
+            context.AgentStatuses[Type] = AgentStatus.Completed;
+            return new AgentResult
+            {
+                Agent = Type, Success = true,
+                Summary = $"Service layer up-to-date — {scopedServices.Count} services already generated. Nothing to do.",
+                Duration = sw.Elapsed
+            };
+        }
 
         try
         {
@@ -47,8 +67,9 @@ public sealed class ServiceLayerAgent : IAgent
             if (context.ReportProgress is not null && !string.IsNullOrWhiteSpace(guidance))
                 await context.ReportProgress(Type, $"Applying architecture/platform guidance: {guidance}");
 
-            foreach (var svc in scopedServices)
+            foreach (var svc in newServices)
             {
+                _generatedPaths.Add($"{svc.ProjectName}/Services");
                 _logger.LogInformation("Generating service layer for {Service}", svc.Name);
                 if (context.ReportProgress is not null)
                     await context.ReportProgress(Type, $"Generating DTOs, interfaces & implementations for {svc.Name} — entities: {string.Join(", ", svc.Entities)}");
@@ -72,8 +93,12 @@ public sealed class ServiceLayerAgent : IAgent
                     await context.ReportProgress(Type, $"{svc.Name}: {svc.Entities.Length} DTOs, {svc.Entities.Length} service interfaces, {svc.Entities.Length} implementations, Kafka events & producer");
             }
 
-            artifacts.Add(GenerateKafkaConsumerBase());
-            artifacts.Add(GenerateKafkaTopicCatalog());
+            // Shared Kafka base (only on first run)
+            if (_generatedPaths.Add("SharedKafkaBase"))
+            {
+                artifacts.Add(GenerateKafkaConsumerBase());
+                artifacts.Add(GenerateKafkaTopicCatalog());
+            }
 
             context.Artifacts.AddRange(artifacts);
             context.AgentStatuses[Type] = AgentStatus.Completed;
@@ -102,31 +127,28 @@ public sealed class ServiceLayerAgent : IAgent
         }
     }
 
-    private static List<MicroserviceDefinition> ResolveTargetServices(AgentContext context)
+    private static List<MicroserviceDefinition> ResolveTargetServicesFromClaimed(AgentContext context)
     {
-        var archInstruction = context.OrchestratorInstructions
-            .FirstOrDefault(i => i.StartsWith("[ARCH]", StringComparison.OrdinalIgnoreCase));
+        if (context.CurrentClaimedItems.Count > 0)
+        {
+            var matched = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var item in context.CurrentClaimedItems)
+            {
+                var text = $"{item.Title} {item.Description} {item.Module} {string.Join(" ", item.Tags)}";
+                foreach (var svc in MicroserviceCatalog.All)
+                {
+                    if (matched.Contains(svc.Name)) continue;
+                    if (text.Contains(svc.ShortName, StringComparison.OrdinalIgnoreCase)
+                        || text.Contains(svc.Name, StringComparison.OrdinalIgnoreCase)
+                        || svc.Entities.Any(e => text.Contains(e, StringComparison.OrdinalIgnoreCase)))
+                        matched.Add(svc.Name);
+                }
+            }
+            if (matched.Count > 0)
+                return MicroserviceCatalog.All.Where(s => matched.Contains(s.Name)).ToList();
+        }
 
-        if (string.IsNullOrWhiteSpace(archInstruction))
-            return MicroserviceCatalog.All.ToList();
-
-        var marker = "TARGET_SERVICES=";
-        var start = archInstruction.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
-        if (start < 0)
-            return MicroserviceCatalog.All.ToList();
-
-        start += marker.Length;
-        var end = archInstruction.IndexOf(';', start);
-        var csv = end >= 0 ? archInstruction[start..end] : archInstruction[start..];
-
-        var services = csv
-            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Select(MicroserviceCatalog.ByName)
-            .Where(s => s is not null)
-            .Cast<MicroserviceDefinition>()
-            .ToList();
-
-        return services.Count > 0 ? services : MicroserviceCatalog.All.ToList();
+        return MicroserviceCatalog.All.ToList();
     }
 
     private static string GetGuidanceSummary(AgentContext context)

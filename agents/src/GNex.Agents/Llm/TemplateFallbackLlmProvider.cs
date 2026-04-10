@@ -48,6 +48,10 @@ public sealed class TemplateFallbackLlmProvider : ILlmProvider
         if (prompt.RequestingAgent == "BrdUploadService" && user.Contains("sectiontype:"))
             return GenerateBrdSectionContent(prompt.UserPrompt, user);
 
+        // Requirements Expander — produce pipe-delimited work items
+        if (prompt.RequestingAgent == "Requirements Expander" && user.Contains("=== high-level requirements ==="))
+            return GenerateRequirementsExpansion(prompt.UserPrompt);
+
         // HIPAA compliance
         if (user.Contains("hipaa") || user.Contains("phi"))
         {
@@ -162,6 +166,189 @@ public sealed class TemplateFallbackLlmProvider : ILlmProvider
             // Context snippets provided: {prompt.ContextSnippets.Count}
             // Prompt length: {prompt.UserPrompt.Length} chars
             """;
+    }
+
+    /// <summary>
+    /// Generates pipe-delimited EPIC/STORY/USECASE/TASK lines by parsing the requirement
+    /// summaries from the user prompt and producing a rich vertical-slice decomposition.
+    /// </summary>
+    private static string GenerateRequirementsExpansion(string rawPrompt)
+    {
+        var sb = new System.Text.StringBuilder();
+
+        // Extract module name
+        var module = "GEN";
+        var moduleIdx = rawPrompt.IndexOf("Module:", StringComparison.OrdinalIgnoreCase);
+        if (moduleIdx >= 0)
+        {
+            var afterModule = rawPrompt[(moduleIdx + 7)..];
+            var eol = afterModule.IndexOfAny(['\r', '\n']);
+            if (eol > 0) module = afterModule[..eol].Trim();
+            if (module.Length > 10) module = module[..10];
+            module = System.Text.RegularExpressions.Regex.Replace(module, @"[^a-zA-Z0-9]", "").ToUpperInvariant();
+            if (string.IsNullOrEmpty(module)) module = "GEN";
+        }
+
+        // Extract requirement IDs and titles from the structured prompt
+        var reqSection = rawPrompt;
+        var reqStart = rawPrompt.IndexOf("=== HIGH-LEVEL REQUIREMENTS", StringComparison.OrdinalIgnoreCase);
+        var reqEnd = rawPrompt.IndexOf("=== ALREADY BUILT", StringComparison.OrdinalIgnoreCase);
+        if (reqStart >= 0 && reqEnd > reqStart)
+            reqSection = rawPrompt[reqStart..reqEnd];
+        else if (reqStart >= 0)
+            reqSection = rawPrompt[reqStart..];
+
+        var reqLines = reqSection.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var requirements = new List<(string Id, string Title, string Description, string Services, List<string> Ac)>();
+
+        string curId = "", curTitle = "", curDesc = "", curServices = "";
+        var curAc = new List<string>();
+
+        foreach (var line in reqLines)
+        {
+            if (line.StartsWith("- ") && line.Contains(':'))
+            {
+                // Save previous if exists
+                if (!string.IsNullOrEmpty(curId))
+                    requirements.Add((curId, curTitle, curDesc, curServices, new List<string>(curAc)));
+
+                var colonIdx = line.IndexOf(':');
+                curId = line[2..colonIdx].Trim();
+                curTitle = line[(colonIdx + 1)..].Trim();
+                curDesc = "";
+                curServices = "";
+                curAc = [];
+            }
+            else if (line.StartsWith("Description:", StringComparison.OrdinalIgnoreCase))
+                curDesc = line["Description:".Length..].Trim();
+            else if (line.StartsWith("Acceptance Criteria:", StringComparison.OrdinalIgnoreCase))
+            {
+                var acText = line["Acceptance Criteria:".Length..].Trim();
+                if (!string.IsNullOrEmpty(acText))
+                    curAc.AddRange(acText.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+            }
+            else if (line.StartsWith("Affected Services:", StringComparison.OrdinalIgnoreCase))
+                curServices = line["Affected Services:".Length..].Trim();
+        }
+        if (!string.IsNullOrEmpty(curId))
+            requirements.Add((curId, curTitle, curDesc, curServices, new List<string>(curAc)));
+
+        if (requirements.Count == 0)
+        {
+            // If we couldn't parse, create 1 synthetic requirement
+            requirements.Add(($"REQ-{module}-001", $"{module} Core Functionality",
+                "Core module functionality for the healthcare platform",
+                "PatientService", ["Feature delivered and validated"]));
+        }
+
+        // Healthcare personas for vertical slicing
+        var personas = new[] { "nurse", "doctor", "admin", "lab technician", "billing clerk" };
+
+        var epicSeq = 0;
+        foreach (var (reqId, reqTitle, reqDesc, reqSvcs, reqAc) in requirements)
+        {
+            epicSeq++;
+            var epicId = $"E-{module}-{epicSeq:D3}";
+            var services = string.IsNullOrEmpty(reqSvcs) || reqSvcs == "Unknown" ? "PatientService" : reqSvcs;
+            var titleClean = reqTitle.Length > 80 ? reqTitle[..80] : reqTitle;
+            var descClean = string.IsNullOrEmpty(reqDesc) ? titleClean : (reqDesc.Length > 200 ? reqDesc[..200] : reqDesc);
+
+            // ── EPIC ──
+            sb.AppendLine($"EPIC|{epicId}|{titleClean}|{descClean}|Improves clinical workflow efficiency and patient safety|" +
+                $"Feature fully operational;All acceptance criteria verified;HIPAA compliance validated;Audit trail complete|" +
+                $"Includes all CRUD operations, validation, and audit for this feature; excludes unrelated module refactors|" +
+                $"2|{services}|");
+
+            // ── USE CASE ──
+            var ucId = $"UC-{module}-{epicSeq:D3}-01";
+            sb.AppendLine($"USECASE|{ucId}|{epicId}|Execute {titleClean} Workflow|Nurse|" +
+                $"User is authenticated and has appropriate role permissions|" +
+                $"1. User navigates to the {titleClean} screen;2. System displays the relevant data list with search/filter;3. User selects or creates a record;4. System validates input against business rules;5. User confirms the action;6. System persists changes and creates audit log entry;7. System displays confirmation with updated data|" +
+                $"Invalid input shows validation errors; Unauthorized user sees access denied; Network failure shows retry option|" +
+                $"Data is persisted in database; Audit trail entry created; User sees confirmation|{services}");
+
+            // ── USER STORIES (3-5 per epic, sliced by persona + operation) ──
+            var storyOps = new[]
+            {
+                (Persona: "nurse", Action: $"search and view {titleClean.ToLowerInvariant()} records", Value: "I can quickly find patient information during care delivery", Pts: 3, Labels: "Frontend,API,Database"),
+                (Persona: "doctor", Action: $"create and update {titleClean.ToLowerInvariant()} records", Value: "clinical documentation is accurate and up-to-date", Pts: 5, Labels: "Frontend,API,Database,Validation"),
+                (Persona: "admin", Action: $"manage {titleClean.ToLowerInvariant()} configuration and permissions", Value: "the system meets our facility's operational policies", Pts: 3, Labels: "Frontend,API,Security"),
+                (Persona: "system", Action: $"validate {titleClean.ToLowerInvariant()} data integrity and generate audit trails", Value: "regulatory compliance (HIPAA) is maintained automatically", Pts: 2, Labels: "API,Database,Security"),
+                (Persona: "billing clerk", Action: $"export and report on {titleClean.ToLowerInvariant()} data", Value: "revenue cycle operations run accurately and on time", Pts: 3, Labels: "Frontend,API,Reporting")
+            };
+
+            var storySeq = 0;
+            foreach (var op in storyOps)
+            {
+                storySeq++;
+                var storyId = $"US-{module}-{epicSeq:D3}-{storySeq:D2}";
+                var acList = $"Given the {op.Persona} is authenticated, when they {op.Action}, then the system processes the request and displays results within 2 seconds;" +
+                    $"Given invalid input is submitted, when the system validates, then clear error messages guide the user to correct the issue;" +
+                    $"Given the operation completes, when the audit service records the action, then a complete audit trail entry exists with who/what/when";
+
+                sb.AppendLine($"STORY|{storyId}|{epicId}|As a {op.Persona}, I want to {op.Action} so that {op.Value}|" +
+                    $"{acList}|{op.Pts}|{op.Labels}|2|{services}||" +
+                    $"Implement end-to-end {op.Action} with validation, error handling, and audit trail support");
+
+                // ── TASKS (6 per story) ──
+                var contractTaskId = $"T-{module}-{epicSeq:D3}-{storySeq:D2}-CONTRACT";
+                var dbTaskId = $"T-{module}-{epicSeq:D3}-{storySeq:D2}-DB";
+                var svcTaskId = $"T-{module}-{epicSeq:D3}-{storySeq:D2}-SVC";
+                var apiTaskId = $"T-{module}-{epicSeq:D3}-{storySeq:D2}-API";
+                var intTestId = $"T-{module}-{epicSeq:D3}-{storySeq:D2}-ITEST";
+                var e2eTestId = $"T-{module}-{epicSeq:D3}-{storySeq:D2}-E2E";
+
+                // Task 1: API Contract
+                sb.AppendLine($"TASK|{contractTaskId}|{storyId}|[{contractTaskId}] Define API contract for {op.Action}|" +
+                    $"Define OpenAPI specification with request/response DTOs, routes, status codes, and validation schemas|" +
+                    $"Use OpenAPI 3.1 spec; Include X-Tenant-Id header; Define 200, 400, 401, 403, 404, 422 responses|" +
+                    $"OpenAPI spec reviewed and approved;DTO classes generated;Contract tests written|" +
+                    $"api,contract|2|{services}|" +
+                    $"Define DTOs: request with required fields and validation attributes, response with pagination support. Routes follow REST conventions.");
+
+                // Task 2: Database
+                sb.AppendLine($"TASK|{dbTaskId}|{storyId}|[{dbTaskId}] Implement database entities and migrations|" +
+                    $"Create EF Core entities, DbContext configuration, indexes, and migration for the data model|" +
+                    $"Use PostgreSQL-friendly types; Add tenant isolation (TenantId FK); Index lookup columns; Add soft-delete support|" +
+                    $"Migration runs without errors;Indexes verified;Seed data present;Rollback tested|" +
+                    $"database|2|{services}|" +
+                    $"Entity with Id (text PK), TenantId, CreatedAt, UpdatedAt, IsActive, plus domain-specific fields. Indexes on TenantId and lookup columns.");
+
+                // Task 3: Service layer
+                sb.AppendLine($"TASK|{svcTaskId}|{storyId}|[{svcTaskId}] Implement service layer with validation and business logic|" +
+                    $"Build service class with CRUD operations, FluentValidation rules, domain events, and multi-tenant filtering|" +
+                    $"Inject IRepository; Use FluentValidation; Emit domain events for audit; All queries filtered by TenantId|" +
+                    $"Unit tests passing (>80% coverage);Validation rules tested;Domain events emitted;Exception handling complete|" +
+                    $"service|2|{services}|" +
+                    $"Service implements I{module}Service interface. Methods: GetByIdAsync, ListAsync (paginated), CreateAsync, UpdateAsync, SoftDeleteAsync. All operations log to audit trail.");
+
+                // Task 4: API endpoint
+                sb.AppendLine($"TASK|{apiTaskId}|{storyId}|[{apiTaskId}] Build API endpoint wiring service to HTTP|" +
+                    $"Create ASP.NET Core controller with route mapping, model binding, authorization attributes, and error responses|" +
+                    $"Use [Authorize] with role policy; Map service exceptions to HTTP status codes; Add response caching for reads|" +
+                    $"All routes return correct status codes;Authorization tested;Swagger documentation complete;Rate limiting configured|" +
+                    $"api|2|{services}|" +
+                    $"Controller with GET (list+detail), POST, PUT, DELETE endpoints. Use ProblemDetails for errors. Add [ProducesResponseType] for Swagger.");
+
+                // Task 5: Integration tests
+                sb.AppendLine($"TASK|{intTestId}|{storyId}|[{intTestId}] Write integration tests for API endpoints|" +
+                    $"Create integration tests covering happy path, validation errors, auth failures, not-found scenarios, and concurrent access|" +
+                    $"Use WebApplicationFactory; Test with real DB (in-memory or TestContainers); Cover auth bypass and tenant isolation|" +
+                    $"Happy path tested;Validation error responses tested;401/403 tested;404 tested;Concurrent writes tested|" +
+                    $"testing|2|{services}|" +
+                    $"Test scenarios: create+read round-trip, duplicate prevention, invalid input (422), unauthorized (401), forbidden (403), not found (404), optimistic concurrency.");
+
+                // Task 6: E2E test
+                sb.AppendLine($"TASK|{e2eTestId}|{storyId}|[{e2eTestId}] Write E2E test for full {op.Persona} flow|" +
+                    $"Create end-to-end test simulating the complete user journey from login through {op.Action} to verification|" +
+                    $"Use Playwright or similar; Test against staging-like environment; Verify database state after operations|" +
+                    $"Complete user journey tested;Data persistence verified;Audit log entries verified;Performance within SLA|" +
+                    $"testing,e2e|3|{services}|" +
+                    $"E2E flow: authenticate as {op.Persona} -> navigate to feature -> perform {op.Action} -> verify UI feedback -> verify DB records -> verify audit log entry.");
+            }
+        }
+
+        return sb.ToString();
     }
 
     private static string GenerateBrdSectionContent(string rawPrompt, string lowerPrompt)

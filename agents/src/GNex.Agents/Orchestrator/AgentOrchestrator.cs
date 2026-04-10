@@ -157,7 +157,7 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
     private static readonly HashSet<AgentType> s_feedbackAgents =
         [AgentType.Review, AgentType.Build, AgentType.Deploy, AgentType.Monitor, AgentType.BugFix];
 
-    private const int MaxBuildFixCycles = 3; // Max build→fix→rebuild iterations
+    private const int MaxBuildFixCycles = 3; // Legacy — build-fix now loops until green (stall-detection stops it if no progress)
 
     // Queue for mid-pipeline requirement injection
     private readonly ConcurrentQueue<List<Requirement>> _pendingRequirements = new();
@@ -558,6 +558,9 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
         // Track whether BacklogAgent has run at least once — code-gen agents wait for this
         // before their first dispatch so they have InQueue items to claim.
         var backlogRanAtLeastOnce = false;
+        // Cooldown: minimum interval between BacklogAgent re-queues to avoid spinning
+        var lastBacklogCompletedAt = DateTimeOffset.MinValue;
+        var backlogCooldown = TimeSpan.FromSeconds(10);
 
         // ── Daemon loop: runs 24/7 until cancellation ──
         // Accepts new requirements from users/monitoring agents at any time via _pendingRequirements.
@@ -624,7 +627,10 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
 
                     // Once BacklogAgent has run at least once, code-gen agents may dispatch
                     if (agentType == AgentType.Backlog)
+                    {
                         backlogRanAtLeastOnce = true;
+                        lastBacklogCompletedAt = DateTimeOffset.UtcNow;
+                    }
                 }, ct);
                 runningAgents[agentType] = task;
             }
@@ -677,10 +683,13 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
             }
 
             // Re-queue BacklogAgent when New items need promotion (independent of code-gen block)
+            // Cooldown prevents tight-loop re-queuing when WIP limits block promotion.
             {
+                var backlogCooldownElapsed = DateTimeOffset.UtcNow - lastBacklogCompletedAt >= backlogCooldown;
                 var newItemCount = context.ExpandedRequirements.Count(i =>
                     IsActionableWorkItem(i) && i.Status == WorkItemStatus.New);
                 if (newItemCount > 0
+                    && backlogCooldownElapsed
                     && completedAgents.ContainsKey(AgentType.Backlog)
                     && !pendingAgents.Contains(AgentType.Backlog)
                     && !runningAgents.ContainsKey(AgentType.Backlog))
@@ -807,9 +816,12 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
             }
             else
             {
-                // No pending or running agents — only re-queue Backlog when actionable items remain.
-                var hasActionable = context.ExpandedRequirements.Any(IsActionableWorkItem);
-                if (hasActionable && !pendingAgents.Contains(AgentType.Backlog) && !runningAgents.ContainsKey(AgentType.Backlog))
+                // No pending or running agents — only re-queue Backlog when actionable items remain
+                // and cooldown has elapsed.
+                var hasActionable = context.ExpandedRequirements.Any(i =>
+                    IsActionableWorkItem(i) && i.Status is not WorkItemStatus.Completed);
+                var cooldownOk = DateTimeOffset.UtcNow - lastBacklogCompletedAt >= backlogCooldown;
+                if (hasActionable && cooldownOk && !pendingAgents.Contains(AgentType.Backlog) && !runningAgents.ContainsKey(AgentType.Backlog))
                 {
                     completedAgents.TryRemove(AgentType.Backlog, out _);
                     pendingAgents.Add(AgentType.Backlog);
@@ -842,6 +854,17 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
 
                 try { await Task.Delay(DaemonPollInterval, ct); }
                 catch (OperationCanceledException) { break; }
+            }
+
+            // ── Incremental artifact flush: write new artifacts to disk as soon as agents produce them ──
+            if (context.Artifacts.Count > lastArtifactWriteCount && !string.IsNullOrEmpty(config.OutputPath))
+            {
+                var newArtifacts = context.Artifacts.Skip(lastArtifactWriteCount).ToList();
+                foreach (var artifact in newArtifacts)
+                    await _writer.WriteAsync(artifact, config.OutputPath, ct);
+                _logger.LogInformation("[Daemon] Incremental flush: wrote {New} new artifact(s) to {Path} (total: {Total})",
+                    newArtifacts.Count, config.OutputPath, context.Artifacts.Count);
+                lastArtifactWriteCount = context.Artifacts.Count;
             }
 
             // ── Inside-loop: when all actionable backlog items complete, run Build/Deploy/Monitor/Supervisor ──
@@ -882,7 +905,7 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                 }
                 else if (deployAgent is not null && !buildPassed)
                 {
-                    _logger.LogWarning("[Daemon] Skipping deployment — build failed after {Max} cycles", MaxBuildFixCycles);
+                    _logger.LogWarning("[Daemon] Skipping deployment — build-fix cycle stalled");
                     await PublishEvent(context, AgentType.Deploy, AgentStatus.Failed,
                         "Deployment SKIPPED — build has unresolved errors.", ct: ct);
                 }
@@ -1260,6 +1283,11 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                 await PrimeAgentWithLlmAsync(context, agent, ct);
                 result = await agent.ExecuteAsync(context, ct);
                 context.StampProjectScope();
+
+                // Deduplicate artifacts and findings after each agent run to prevent
+                // unbounded growth when agents are re-queued by the daemon loop.
+                context.DeduplicateArtifacts();
+                context.DeduplicateFindings();
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
@@ -1480,13 +1508,18 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
 
     private async Task<bool> RunBuildFixCycleAsync(AgentContext context, IAgent buildAgent, CancellationToken ct)
     {
-        for (var cycle = 0; cycle < MaxBuildFixCycles; cycle++)
+        var cycle = 0;
+        var lastErrorCount = int.MaxValue;
+        var stalledRounds = 0;
+        const int maxStalledRounds = 3; // stop only if BugFix makes zero progress for N consecutive rounds
+
+        while (!ct.IsCancellationRequested)
         {
-            ct.ThrowIfCancellationRequested();
-            _logger.LogInformation("[Build-Fix] Cycle {Cycle}/{Max}", cycle + 1, MaxBuildFixCycles);
+            cycle++;
+            _logger.LogInformation("[Build-Fix] Cycle {Cycle} (no cap — runs until green)", cycle);
 
             await PublishEvent(context, AgentType.Build, AgentStatus.Running,
-                $"Build cycle {cycle + 1}/{MaxBuildFixCycles} — compiling generated solution...", ct: ct);
+                $"Build cycle {cycle} — compiling generated solution...", ct: ct);
 
             await PrimeAgentWithLlmAsync(context, buildAgent, ct);
             var buildResult = await buildAgent.ExecuteAsync(context, ct);
@@ -1498,59 +1531,113 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
 
             if (buildResult.Success)
             {
-                _logger.LogInformation("[Build-Fix] Build succeeded on cycle {Cycle}", cycle + 1);
+                _logger.LogInformation("[Build-Fix] Build succeeded on cycle {Cycle}", cycle);
                 await PublishEvent(context, AgentType.Orchestrator, AgentStatus.Running,
-                    $"Build passed on cycle {cycle + 1} — proceeding to deployment", ct: ct);
+                    $"Build passed on cycle {cycle} — proceeding to deployment", ct: ct);
 
                 await _audit.LogAsync(AgentType.Build, context.RunId, AuditAction.AgentCompleted,
-                    $"Build succeeded on cycle {cycle + 1}/{MaxBuildFixCycles}",
+                    $"Build succeeded on cycle {cycle}",
                     $"Errors: 0, Findings: {buildResult.Findings.Count}",
                     severity: AuditSeverity.Info, ct: ct);
                 return true;
             }
 
-            // Build failed — collect error findings and dispatch to BugFix
+            // Build failed — collect error findings and create backlog bugs
             var buildErrors = buildResult.Findings
                 .Where(f => f.Category == "Build" && f.Severity >= ReviewSeverity.Error)
                 .ToList();
 
-            _logger.LogWarning("[Build-Fix] Build failed with {Count} errors — dispatching to BugFix", buildErrors.Count);
+            _logger.LogWarning("[Build-Fix] Build failed with {Count} errors — dispatching to BugFix (cycle {Cycle})", buildErrors.Count, cycle);
             await PublishEvent(context, AgentType.Orchestrator, AgentStatus.Running,
-                $"Build failed with {buildErrors.Count} errors — dispatching BugFix agent (cycle {cycle + 1})...", ct: ct);
+                $"Build failed with {buildErrors.Count} errors — dispatching BugFix agent (cycle {cycle})...", ct: ct);
 
             await _audit.LogAsync(AgentType.Build, context.RunId, AuditAction.AgentFailed,
-                $"Build failed on cycle {cycle + 1}: {buildErrors.Count} errors",
+                $"Build failed on cycle {cycle}: {buildErrors.Count} errors",
                 $"Errors: {string.Join("; ", buildErrors.Take(5).Select(e => Truncate(e.Message, 80)))}",
                 severity: AuditSeverity.Warning, ct: ct);
+
+            // Create Bug backlog items from build errors so they appear on the dashboard
+            var bugsCreated = 0;
+            var existingBuildBugIds = context.ExpandedRequirements
+                .Where(e => e.ItemType == WorkItemType.Bug && e.Tags.Contains("build"))
+                .Select(e => e.SourceRequirementId)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            foreach (var err in buildErrors)
+            {
+                var sourceRef = $"BUILD:{err.Id}";
+                if (existingBuildBugIds.Contains(sourceRef)) continue;
+                context.ExpandedRequirements.Add(new ExpandedRequirement
+                {
+                    Id = $"BUG-BLD-{err.Id[..Math.Min(8, err.Id.Length)].ToUpperInvariant()}",
+                    SourceRequirementId = sourceRef,
+                    ItemType = WorkItemType.Bug,
+                    Title = $"[Build] {Truncate(err.Message, 80)}",
+                    Description = $"Build error in {err.FilePath}:\n{err.Message}",
+                    Module = ExtractModuleFromPath(err.FilePath),
+                    Priority = 1, // build errors are blockers
+                    Iteration = context.DevIteration,
+                    Tags = ["bugfix", "build"],
+                    Status = WorkItemStatus.InQueue,
+                    ProducedBy = "Build",
+                });
+                existingBuildBugIds.Add(sourceRef);
+                bugsCreated++;
+            }
+            if (bugsCreated > 0)
+                _logger.LogInformation("[Build-Fix] Created {Count} Bug backlog items from build errors", bugsCreated);
+
+            // Stall detection: if error count hasn't decreased, BugFix isn't making progress
+            if (buildErrors.Count >= lastErrorCount)
+            {
+                stalledRounds++;
+                if (stalledRounds >= maxStalledRounds)
+                {
+                    _logger.LogWarning("[Build-Fix] No progress for {Rounds} consecutive rounds ({Errors} errors remain) — stopping build-fix loop",
+                        stalledRounds, buildErrors.Count);
+                    await PublishEvent(context, AgentType.Orchestrator, AgentStatus.Failed,
+                        $"Build-Fix stalled after {cycle} cycles — {buildErrors.Count} errors remain, BugFix made no progress for {stalledRounds} rounds. DEPLOYMENT BLOCKED", ct: ct);
+                    await _audit.LogAsync(AgentType.Build, context.RunId, AuditAction.AgentFailed,
+                        $"Build stalled after {cycle} cycles — deployment blocked (no progress)",
+                        severity: AuditSeverity.Critical, ct: ct);
+                    return false;
+                }
+            }
+            else
+            {
+                stalledRounds = 0; // progress made — reset counter
+            }
+            lastErrorCount = buildErrors.Count;
 
             // Run BugFix to attempt code repairs
             var bugFix = _agents.FirstOrDefault(a => a.Type == AgentType.BugFix);
             if (bugFix is not null)
             {
                 await PublishEvent(context, AgentType.BugFix, AgentStatus.Running,
-                    $"BugFix repairing {buildErrors.Count} build errors (cycle {cycle + 1})...", ct: ct);
+                    $"BugFix repairing {buildErrors.Count} build errors (cycle {cycle})...", ct: ct);
                 await RunSingleHealAgent(context, bugFix,
-                    $"BugFix repairing {buildErrors.Count} build errors from build cycle {cycle + 1}", ct);
+                    $"BugFix repairing {buildErrors.Count} build errors from build cycle {cycle}", ct);
             }
             else
             {
                 _logger.LogWarning("[Build-Fix] BugFix agent not available — cannot auto-repair");
-                break;
-            }
-
-            if (cycle + 1 >= MaxBuildFixCycles)
-            {
-                _logger.LogWarning("[Build-Fix] Exhausted {Max} build-fix cycles — build still failing — BLOCKING deployment", MaxBuildFixCycles);
-                await PublishEvent(context, AgentType.Orchestrator, AgentStatus.Failed,
-                    $"Build-Fix cycle exhausted ({MaxBuildFixCycles} attempts) — build errors remain, DEPLOYMENT BLOCKED", ct: ct);
-
-                await _audit.LogAsync(AgentType.Build, context.RunId, AuditAction.AgentFailed,
-                    $"Build exhausted {MaxBuildFixCycles} cycles — deployment blocked for safety",
-                    severity: AuditSeverity.Critical, ct: ct);
                 return false;
             }
         }
         return false;
+    }
+
+    /// <summary>Extract a module name from a file path for bug items.</summary>
+    private static string ExtractModuleFromPath(string? filePath)
+    {
+        if (string.IsNullOrWhiteSpace(filePath)) return "General";
+        if (filePath.Contains("Database", StringComparison.OrdinalIgnoreCase)) return "Database";
+        if (filePath.Contains("Test", StringComparison.OrdinalIgnoreCase)) return "Testing";
+        if (filePath.Contains("Integration", StringComparison.OrdinalIgnoreCase)) return "Integration";
+        // Try to extract service name from path like .../PatientService/...
+        var parts = filePath.Replace('\\', '/').Split('/');
+        var svcPart = parts.FirstOrDefault(p => p.EndsWith("Service", StringComparison.OrdinalIgnoreCase));
+        if (svcPart is not null) return svcPart;
+        return "General";
     }
 
     // ─── Monitor → Fix → Redeploy Cycle ────────────────────────────
@@ -1961,7 +2048,9 @@ Return exactly 3 sections in markdown:
         ["service"]        = AgentType.ServiceLayer,
         ["api"]            = AgentType.Application,
         ["application"]    = AgentType.Application,
+        ["contract"]       = AgentType.Application,
         ["testing"]        = AgentType.Testing,
+        ["e2e"]            = AgentType.Testing,
         ["bugfix"]         = AgentType.BugFix,
         ["integration"]    = AgentType.Integration,
         ["security"]       = AgentType.Security,
@@ -2209,11 +2298,27 @@ Return exactly 3 sections in markdown:
     {
         var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        // ── 1. Explicit tags ──
+        // ── 1. Explicit tags — these are authoritative ──
         foreach (var tag in item.Tags)
         {
             if (s_tagToAgent.TryGetValue(tag, out var mapped))
                 result.Add(mapped.ToString());
+        }
+
+        // For tasks whose tags map to a SINGLE primary agent (e.g. "database" → Database,
+        // "contract" → Application), return ONLY that agent. This prevents text-matching
+        // from dragging in every agent and blocking completion via the task tracker.
+        // Multi-agent ownership is only needed when tags themselves map to multiple agents.
+        if (result.Count > 0 && item.Tags.Count > 0)
+        {
+            // If all tags resolve to the same agent, that's the sole owner
+            var distinctAgents = item.Tags
+                .Where(t => s_tagToAgent.ContainsKey(t))
+                .Select(t => s_tagToAgent[t].ToString())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (distinctAgents.Count == 1)
+                return distinctAgents;
         }
 
         // ── 2. Combined text from task description + technical notes ──

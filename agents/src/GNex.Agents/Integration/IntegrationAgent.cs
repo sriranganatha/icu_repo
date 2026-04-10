@@ -13,6 +13,7 @@ namespace GNex.Agents.Integration;
 public sealed class IntegrationAgent : IAgent
 {
     private readonly ILogger<IntegrationAgent> _logger;
+    private readonly HashSet<string> _generatedPaths = new(StringComparer.OrdinalIgnoreCase);
 
     public AgentType Type => AgentType.Integration;
     public string Name => "Integration Agent";
@@ -27,24 +28,47 @@ public sealed class IntegrationAgent : IAgent
         _logger.LogInformation("IntegrationAgent starting — Kafka event bus + FHIR/HL7");
 
         var artifacts = new List<CodeArtifact>();
-        var scopedServices = ResolveTargetServices(context);
+        var scopedServices = ResolveTargetServicesFromClaimed(context);
         var guidance = GetGuidanceSummary(context);
+
+        // Filter out services already integrated
+        var newServices = scopedServices
+            .Where(svc => !_generatedPaths.Contains($"Integration/{svc.Name}"))
+            .ToList();
+
+        if (newServices.Count == 0 && _generatedPaths.Contains("IntegrationInfra"))
+        {
+            _logger.LogInformation("IntegrationAgent skipping — all {Count} services already integrated", scopedServices.Count);
+            foreach (var item in context.CurrentClaimedItems)
+                context.CompleteWorkItem?.Invoke(item);
+            context.AgentStatuses[Type] = AgentStatus.Completed;
+            return new AgentResult
+            {
+                Agent = Type, Success = true,
+                Summary = $"Integration layer up-to-date — {scopedServices.Count} services already integrated. Nothing to do.",
+                Duration = sw.Elapsed
+            };
+        }
 
         try
         {
-            // Kafka infrastructure
-            if (context.ReportProgress is not null)
-                await context.ReportProgress(Type, "Generating Kafka infrastructure — consumer hosted service, outbox pattern, dead-letter handler");
-            if (context.ReportProgress is not null && !string.IsNullOrWhiteSpace(guidance))
-                await context.ReportProgress(Type, $"Applying architecture/platform guidance: {guidance}");
-            artifacts.Add(GenerateKafkaConsumerHostedService());
-            artifacts.Add(GenerateOutboxEntity());
-            artifacts.Add(GenerateOutboxProcessor());
-            artifacts.Add(GenerateDeadLetterHandler());
-
-            // Per-service consumer registrations
-            foreach (var svc in scopedServices)
+            // Kafka infrastructure (only on first run)
+            if (_generatedPaths.Add("IntegrationInfra"))
             {
+                if (context.ReportProgress is not null)
+                    await context.ReportProgress(Type, "Generating Kafka infrastructure — consumer hosted service, outbox pattern, dead-letter handler");
+                if (context.ReportProgress is not null && !string.IsNullOrWhiteSpace(guidance))
+                    await context.ReportProgress(Type, $"Applying architecture/platform guidance: {guidance}");
+                artifacts.Add(GenerateKafkaConsumerHostedService());
+                artifacts.Add(GenerateOutboxEntity());
+                artifacts.Add(GenerateOutboxProcessor());
+                artifacts.Add(GenerateDeadLetterHandler());
+            }
+
+            // Per-service consumer registrations — only new services
+            foreach (var svc in newServices)
+            {
+                _generatedPaths.Add($"Integration/{svc.Name}");
                 if (svc.DependsOn.Length > 0)
                 {
                     if (context.ReportProgress is not null)
@@ -53,21 +77,24 @@ public sealed class IntegrationAgent : IAgent
                 }
             }
 
-            // Kafka topic provisioner (admin client)
-            if (context.ReportProgress is not null)
-                await context.ReportProgress(Type, "Generating Kafka topic provisioner, FHIR R4 adapter, HL7v2 processor");
-            artifacts.Add(GenerateTopicProvisioner());
+            // Kafka topic provisioner, FHIR/HL7 (only on first run)
+            if (_generatedPaths.Add("IntegrationAdapters"))
+            {
+                if (context.ReportProgress is not null)
+                    await context.ReportProgress(Type, "Generating Kafka topic provisioner, FHIR R4 adapter, HL7v2 processor");
+                artifacts.Add(GenerateTopicProvisioner());
 
-            // FHIR adapter
-            artifacts.Add(GenerateFhirAdapter());
+                // FHIR adapter
+                artifacts.Add(GenerateFhirAdapter());
 
-            // HL7v2 processor
-            artifacts.Add(GenerateHl7Processor());
+                // HL7v2 processor
+                artifacts.Add(GenerateHl7Processor());
 
-            // Integration event contracts
-            if (context.ReportProgress is not null)
-                await context.ReportProgress(Type, "Generating integration event catalog — cross-service event contracts");
-            artifacts.Add(GenerateIntegrationEventCatalog());
+                // Integration event contracts
+                if (context.ReportProgress is not null)
+                    await context.ReportProgress(Type, "Generating integration event catalog — cross-service event contracts");
+                artifacts.Add(GenerateIntegrationEventCatalog());
+            }
 
             context.Artifacts.AddRange(artifacts);
             context.AgentStatuses[Type] = AgentStatus.Completed;
@@ -96,31 +123,28 @@ public sealed class IntegrationAgent : IAgent
         }
     }
 
-    private static List<MicroserviceDefinition> ResolveTargetServices(AgentContext context)
+    private static List<MicroserviceDefinition> ResolveTargetServicesFromClaimed(AgentContext context)
     {
-        var archInstruction = context.OrchestratorInstructions
-            .FirstOrDefault(i => i.StartsWith("[ARCH]", StringComparison.OrdinalIgnoreCase));
+        if (context.CurrentClaimedItems.Count > 0)
+        {
+            var matched = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var item in context.CurrentClaimedItems)
+            {
+                var text = $"{item.Title} {item.Description} {item.Module} {string.Join(" ", item.Tags)}";
+                foreach (var svc in MicroserviceCatalog.All)
+                {
+                    if (matched.Contains(svc.Name)) continue;
+                    if (text.Contains(svc.ShortName, StringComparison.OrdinalIgnoreCase)
+                        || text.Contains(svc.Name, StringComparison.OrdinalIgnoreCase)
+                        || svc.Entities.Any(e => text.Contains(e, StringComparison.OrdinalIgnoreCase)))
+                        matched.Add(svc.Name);
+                }
+            }
+            if (matched.Count > 0)
+                return MicroserviceCatalog.All.Where(s => matched.Contains(s.Name)).ToList();
+        }
 
-        if (string.IsNullOrWhiteSpace(archInstruction))
-            return MicroserviceCatalog.All.ToList();
-
-        var marker = "TARGET_SERVICES=";
-        var start = archInstruction.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
-        if (start < 0)
-            return MicroserviceCatalog.All.ToList();
-
-        start += marker.Length;
-        var end = archInstruction.IndexOf(';', start);
-        var csv = end >= 0 ? archInstruction[start..end] : archInstruction[start..];
-
-        var services = csv
-            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Select(MicroserviceCatalog.ByName)
-            .Where(s => s is not null)
-            .Cast<MicroserviceDefinition>()
-            .ToList();
-
-        return services.Count > 0 ? services : MicroserviceCatalog.All.ToList();
+        return MicroserviceCatalog.All.ToList();
     }
 
     private static string GetGuidanceSummary(AgentContext context)

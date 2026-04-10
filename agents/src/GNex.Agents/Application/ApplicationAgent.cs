@@ -13,6 +13,7 @@ namespace GNex.Agents.Application;
 public sealed class ApplicationAgent : IAgent
 {
     private readonly ILogger<ApplicationAgent> _logger;
+    private readonly HashSet<string> _generatedPaths = new(StringComparer.OrdinalIgnoreCase);
 
     public AgentType Type => AgentType.Application;
     public string Name => "Application Agent";
@@ -27,25 +28,48 @@ public sealed class ApplicationAgent : IAgent
         _logger.LogInformation("ApplicationAgent starting — API Gateway + per-service APIs");
 
         var artifacts = new List<CodeArtifact>();
-        var scopedServices = ResolveTargetServices(context);
+        var scopedServices = ResolveTargetServicesFromClaimed(context);
         var guidance = GetGuidanceSummary(context);
+
+        // If all services were already generated, skip and just complete items
+        var newServices = scopedServices
+            .Where(svc => !_generatedPaths.Contains($"{svc.ProjectName}/Program.cs"))
+            .ToList();
+
+        if (newServices.Count == 0)
+        {
+            _logger.LogInformation("ApplicationAgent skipping — all {Count} services already generated", scopedServices.Count);
+            foreach (var item in context.CurrentClaimedItems)
+                context.CompleteWorkItem?.Invoke(item);
+            context.AgentStatuses[Type] = AgentStatus.Completed;
+            return new AgentResult
+            {
+                Agent = Type, Success = true,
+                Summary = $"Application layer up-to-date — {scopedServices.Count} services already generated. Nothing to do.",
+                Duration = sw.Elapsed
+            };
+        }
 
         try
         {
-            // API Gateway
-            if (context.ReportProgress is not null)
-                await context.ReportProgress(Type, "Generating YARP API Gateway — Program.cs, routes, Dockerfile, csproj");
-            if (context.ReportProgress is not null && !string.IsNullOrWhiteSpace(guidance))
-                await context.ReportProgress(Type, $"Applying architecture/platform guidance: {guidance}");
-            artifacts.Add(GenerateGatewayProgram());
-            artifacts.Add(GenerateGatewayAppSettingsRoutes(scopedServices));
-            artifacts.Add(GenerateGatewayDockerfile());
-            artifacts.Add(GenerateGatewayCsproj());
+            // API Gateway (only on first run)
+            if (_generatedPaths.Add("GNex.ApiGateway/Program.cs"))
+            {
+                if (context.ReportProgress is not null)
+                    await context.ReportProgress(Type, "Generating YARP API Gateway — Program.cs, routes, Dockerfile, csproj");
+                if (context.ReportProgress is not null && !string.IsNullOrWhiteSpace(guidance))
+                    await context.ReportProgress(Type, $"Applying architecture/platform guidance: {guidance}");
+                artifacts.Add(GenerateGatewayProgram());
+                artifacts.Add(GenerateGatewayAppSettingsRoutes(scopedServices));
+                artifacts.Add(GenerateGatewayDockerfile());
+                artifacts.Add(GenerateGatewayCsproj());
+            }
 
-            // Per-microservice API
-            foreach (var svc in scopedServices)
+            // Per-microservice API — only new services
+            foreach (var svc in newServices)
             {
                 _logger.LogInformation("Generating minimal API for {Service} (port {Port})", svc.Name, svc.ApiPort);
+                _generatedPaths.Add($"{svc.ProjectName}/Program.cs");
                 if (context.ReportProgress is not null)
                     await context.ReportProgress(Type, $"Generating minimal API for {svc.Name} (port {svc.ApiPort}) — {svc.Entities.Length} entity endpoints, health check, Dockerfile");
                 artifacts.Add(GenerateServiceProgram(svc));
@@ -61,12 +85,15 @@ public sealed class ApplicationAgent : IAgent
                 }
             }
 
-            // Shared middleware
-            if (context.ReportProgress is not null)
-                await context.ReportProgress(Type, "Generating shared middleware — TenantMiddleware, CorrelationId, GlobalException handler");
-            artifacts.Add(GenerateTenantMiddleware());
-            artifacts.Add(GenerateCorrelationMiddleware());
-            artifacts.Add(GenerateExceptionMiddleware());
+            // Shared middleware (only on first run)
+            if (_generatedPaths.Add("SharedMiddleware"))
+            {
+                if (context.ReportProgress is not null)
+                    await context.ReportProgress(Type, "Generating shared middleware — TenantMiddleware, CorrelationId, GlobalException handler");
+                artifacts.Add(GenerateTenantMiddleware());
+                artifacts.Add(GenerateCorrelationMiddleware());
+                artifacts.Add(GenerateExceptionMiddleware());
+            }
 
             context.Artifacts.AddRange(artifacts);
             context.AgentStatuses[Type] = AgentStatus.Completed;
@@ -128,31 +155,30 @@ public sealed class ApplicationAgent : IAgent
             """
     };
 
-    private static List<MicroserviceDefinition> ResolveTargetServices(AgentContext context)
+    private static List<MicroserviceDefinition> ResolveTargetServicesFromClaimed(AgentContext context)
     {
-        var archInstruction = context.OrchestratorInstructions
-            .FirstOrDefault(i => i.StartsWith("[ARCH]", StringComparison.OrdinalIgnoreCase));
+        // Scope to services referenced by the current claimed backlog items
+        if (context.CurrentClaimedItems.Count > 0)
+        {
+            var matched = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var item in context.CurrentClaimedItems)
+            {
+                var text = $"{item.Title} {item.Description} {item.Module} {string.Join(" ", item.Tags)}";
+                foreach (var svc in MicroserviceCatalog.All)
+                {
+                    if (matched.Contains(svc.Name)) continue;
+                    if (text.Contains(svc.ShortName, StringComparison.OrdinalIgnoreCase)
+                        || text.Contains(svc.Name, StringComparison.OrdinalIgnoreCase)
+                        || svc.Entities.Any(e => text.Contains(e, StringComparison.OrdinalIgnoreCase)))
+                        matched.Add(svc.Name);
+                }
+            }
+            if (matched.Count > 0)
+                return MicroserviceCatalog.All.Where(s => matched.Contains(s.Name)).ToList();
+        }
 
-        if (string.IsNullOrWhiteSpace(archInstruction))
-            return MicroserviceCatalog.All.ToList();
-
-        var marker = "TARGET_SERVICES=";
-        var start = archInstruction.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
-        if (start < 0)
-            return MicroserviceCatalog.All.ToList();
-
-        start += marker.Length;
-        var end = archInstruction.IndexOf(';', start);
-        var csv = end >= 0 ? archInstruction[start..end] : archInstruction[start..];
-
-        var services = csv
-            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Select(MicroserviceCatalog.ByName)
-            .Where(s => s is not null)
-            .Cast<MicroserviceDefinition>()
-            .ToList();
-
-        return services.Count > 0 ? services : MicroserviceCatalog.All.ToList();
+        // Fallback: all services (first run before backlog items are assigned)
+        return MicroserviceCatalog.All.ToList();
     }
 
     private static string GetGuidanceSummary(AgentContext context)

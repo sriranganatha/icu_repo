@@ -112,4 +112,42 @@ public sealed class AgentContext
         foreach (var er in ExpandedRequirements)
             er.ProjectId ??= pid;
     }
+
+    // ── Deduplication ──────────────────────────────────────────
+    // Agents append to ConcurrentBag collections without checking for duplicates.
+    // When agents are re-queued by the daemon loop, artifacts/findings accumulate
+    // unboundedly. Call these after each agent run to cap growth.
+
+    /// <summary>
+    /// Removes duplicate artifacts by <c>RelativePath</c>, keeping the most recent version.
+    /// Thread-safe: replaces the bag atomically after building the deduplicated set.
+    /// </summary>
+    public void DeduplicateArtifacts()
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var unique = new ConcurrentBag<CodeArtifact>();
+        foreach (var a in Artifacts)
+        {
+            var key = string.IsNullOrWhiteSpace(a.RelativePath) ? a.Id : a.RelativePath;
+            if (seen.Add(key))
+                unique.Add(a);
+        }
+        Artifacts = unique;
+    }
+
+    /// <summary>
+    /// Removes duplicate findings by (Category + FilePath + Message) fingerprint.
+    /// </summary>
+    public void DeduplicateFindings()
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var unique = new ConcurrentBag<ReviewFinding>();
+        foreach (var f in Findings)
+        {
+            var key = $"{f.Category}|{f.FilePath}|{f.Message}";
+            if (seen.Add(key))
+                unique.Add(f);
+        }
+        Findings = unique;
+    }
 }

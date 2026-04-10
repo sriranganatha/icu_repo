@@ -342,12 +342,28 @@ public sealed class BacklogAgent : IAgent
 
     private void UpdateBacklogStatuses(AgentContext context)
     {
-        var artifactPaths = context.Artifacts.Select(a => a.RelativePath).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var artifactModules = context.Artifacts.Select(a => ExtractModule(a.Namespace)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        // Pre-build per-layer module sets to avoid scanning all artifacts per requirement (O(n*m) → O(n+m))
+        var dbModules = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var svcModules = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var testModules = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var a in context.Artifacts)
+        {
+            var mod = a.Namespace; // full namespace for ModuleMatch
+            switch (a.Layer)
+            {
+                case ArtifactLayer.Database: dbModules.Add(mod); break;
+                case ArtifactLayer.Service: svcModules.Add(mod); break;
+                case ArtifactLayer.Test: testModules.Add(mod); break;
+            }
+        }
 
         // Read WIP limits from pipeline config
         var maxInDev = context.PipelineConfig?.MaxInDevItems ?? 50;
-        var maxQueue = context.PipelineConfig?.MaxQueueItems ?? 50;
+
+        // Cache InDev count — recount only when we promote an item
+        var currentInDev = context.ExpandedRequirements.Count(e => e.Status == WorkItemStatus.UnderDev);
 
         foreach (var item in context.ExpandedRequirements)
         {
@@ -355,24 +371,28 @@ public sealed class BacklogAgent : IAgent
 
             var hasArtifact = false;
 
-            // Check by tag mapping
+            // Check by tag mapping using pre-built per-layer sets
             if (item.Tags.Contains("database"))
-                hasArtifact = context.Artifacts.Any(a => a.Layer == ArtifactLayer.Database && ModuleMatch(a.Namespace, item.Module));
+                hasArtifact = dbModules.Any(ns => ModuleMatch(ns, item.Module));
             else if (item.Tags.Contains("service"))
-                hasArtifact = context.Artifacts.Any(a => a.Layer == ArtifactLayer.Service && ModuleMatch(a.Namespace, item.Module));
-            else if (item.Tags.Contains("testing"))
-                hasArtifact = context.Artifacts.Any(a => a.Layer == ArtifactLayer.Test && ModuleMatch(a.Namespace, item.Module));
+                hasArtifact = svcModules.Any(ns => ModuleMatch(ns, item.Module));
+            else if (item.Tags.Contains("testing") || item.Tags.Contains("e2e"))
+                hasArtifact = testModules.Any(ns => ModuleMatch(ns, item.Module));
+            else if (item.Tags.Contains("api") || item.Tags.Contains("contract"))
+                hasArtifact = svcModules.Any(ns => ModuleMatch(ns, item.Module))
+                           || artifactModules.Contains(item.Module);
+            else if (item.Tags.Contains("bugfix") || item.ItemType == WorkItemType.Bug)
+                hasArtifact = true; // Bugs target existing code — always promotable
             else if (item.ItemType == WorkItemType.Epic || item.ItemType == WorkItemType.UserStory)
                 hasArtifact = artifactModules.Contains(item.Module);
 
             if (hasArtifact && item.Status is WorkItemStatus.InQueue or WorkItemStatus.New)
             {
-                // Enforce WIP limit: only move to UnderDev if below cap
-                var currentInDev = context.ExpandedRequirements.Count(e => e.Status == WorkItemStatus.UnderDev);
                 if (currentInDev < maxInDev)
                 {
                     item.Status = WorkItemStatus.UnderDev;
                     item.StartedAt = DateTimeOffset.UtcNow;
+                    currentInDev++;
                 }
             }
 
@@ -389,11 +409,11 @@ public sealed class BacklogAgent : IAgent
                 {
                     if (item.Status is WorkItemStatus.New or WorkItemStatus.InQueue)
                     {
-                        var currentInDev = context.ExpandedRequirements.Count(e => e.Status == WorkItemStatus.UnderDev);
                         if (currentInDev < maxInDev)
                         {
                             item.Status = WorkItemStatus.UnderDev;
                             item.StartedAt ??= DateTimeOffset.UtcNow;
+                            currentInDev++;
                         }
                     }
                 }
@@ -407,6 +427,20 @@ public sealed class BacklogAgent : IAgent
                     (f.FilePath?.Contains(item.Module, StringComparison.OrdinalIgnoreCase) ?? false));
 
                 if (!hasOpenFindings && hasArtifact)
+                {
+                    item.Status = WorkItemStatus.Completed;
+                    item.CompletedAt = DateTimeOffset.UtcNow;
+                }
+            }
+
+            // Mark bugs as completed when findings for their module are resolved
+            if (item.ItemType == WorkItemType.Bug && item.Status == WorkItemStatus.UnderDev)
+            {
+                var hasOpenFindings = context.Findings.Any(f =>
+                    f.Severity >= ReviewSeverity.Error &&
+                    (f.FilePath?.Contains(item.Module, StringComparison.OrdinalIgnoreCase) ?? false));
+
+                if (!hasOpenFindings)
                 {
                     item.Status = WorkItemStatus.Completed;
                     item.CompletedAt = DateTimeOffset.UtcNow;

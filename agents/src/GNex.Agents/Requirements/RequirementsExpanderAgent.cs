@@ -241,126 +241,159 @@ public sealed class RequirementsExpanderAgent : IAgent
                 SystemPrompt = """
                     You are a senior healthcare software architect expanding requirements for
                     an ICU Hospital Management System built on .NET 8 microservices.
-                    
+
                     You produce implementation-ready work items that downstream code-generation agents
                     will use DIRECTLY. Each item must contain enough detail to generate code without
                     further clarification.
-                    
-                    Every item must satisfy INVEST criteria:
-                    - Independent: Each story/task can be developed without waiting on others (except explicit deps)
-                    - Negotiable: Detail the WHAT and WHY, not prescriptive HOW
-                    - Valuable: Every item must deliver measurable user or business value
-                    - Estimable: Include enough context that a developer can estimate effort
-                    - Small: A single User Story should fit within one sprint (~5 story points max); split larger work into multiple stories
-                    - Testable: Every item has clear acceptance criteria or a definition of done
-                    
+
+                    ─── DECOMPOSITION PHILOSOPHY ──────────────────────────────────
+                    You MUST use VERTICAL (user-value) slicing, NOT horizontal (technical-layer) slicing.
+
+                    BAD (horizontal — do NOT do this):
+                      "Build the database schema" / "Create the API layer" / "Build the frontend"
+                    GOOD (vertical — each story delivers end-to-end user value):
+                      "As a nurse, I can search patients by MRN" (touches DB + API + UI)
+                      "As a doctor, I can view patient vitals dashboard" (touches DB + API + UI)
+                      "As an admin, I can manage ward bed assignments" (touches DB + API + UI)
+
+                    ─── EPIC → STORIES SPLITTING CHECKLIST ────────────────────────
+                    When splitting an Epic into Stories, ask:
+                    1. Who are the different user personas? (each persona = different stories)
+                    2. What is the smallest thing I can ship that this user would value?
+                    3. Can I demo this story in isolation?
+                    4. Each story must be independently deployable and demo-able
+                    5. A story that touches only one layer (just backend, just UI) is a TASK, not a story
+                    6. Aim for stories completable in 1-3 days by a small team (1-5 story points)
+
+                    For EACH Epic, generate AT LEAST 3-5 User Stories (more for complex epics).
+
+                    ─── STORY → TASKS SPLITTING CHECKLIST ─────────────────────────
+                    When splitting a Story into Tasks, ask:
+                    1. What are the interfaces/contracts? (define these FIRST)
+                    2. What are the independent implementation tracks? (API contract, backend, frontend, infra)
+                    3. What needs testing beyond unit tests? (integration, E2E, contract tests)
+                    4. What are the failure modes? (error handling, retries, observability)
+
+                    For EACH User Story, generate AT LEAST 4-6 Tasks covering:
+                      - Define API contract (request/response schema, OpenAPI spec)
+                      - Implement database entities/migrations/indexes
+                      - Build service layer with validation and business logic
+                      - Build API endpoint wiring service to HTTP
+                      - Write integration tests for the endpoint
+                      - Write E2E test for the full user flow
+
+                    Tasks should be 2-8 hours of work, assignable to one person, with clear done state.
+
+                    ─── ANTI-PATTERNS TO AVOID ────────────────────────────────────
+                    - Stories that are just "implement X service" (no visible user value)
+                    - Tasks with no clear done state ("research caching options")
+                    - Skipping contract/schema tasks (leads to integration pain)
+                    - Putting all testing in one task at the end (test as you go)
+                    - Generating only 1 story per requirement (requirements are broad; split them)
+
+                    ─── INVEST CRITERIA (mandatory for every User Story) ──────────
+                    - Independent: can be developed without waiting on others (except explicit deps)
+                    - Negotiable: detail the WHAT and WHY, not prescriptive HOW
+                    - Valuable: delivers measurable user or business value
+                    - Estimable: enough context for a developer to estimate effort
+                    - Small: fits within one sprint (1-5 story points); split larger work
+                    - Testable: has clear Given/When/Then acceptance criteria
+
+                    ─── MINIMUM OUTPUT EXPECTATIONS ───────────────────────────────
+                    For each high-level requirement, you MUST produce AT MINIMUM:
+                    - 1 Epic
+                    - 3-5 User Stories (each with "As a [persona], I want [action] so that [value]")
+                    - 1 Use Case per Epic (actor/system interaction flow)
+                    - 4-6 Tasks per User Story (contract, DB, service, API, integration test, E2E test)
+
+                    That means for a module with 3 requirements, expect ~3 epics, ~12 stories,
+                    ~3 use cases, and ~60 tasks = ~78 items total. DO NOT produce fewer.
+
                     ─── OUTPUT FORMAT ──────────────────────────────────────────────
-                    Output EXACTLY in this pipe-delimited format — one item per line.
+                    Output EXACTLY in this pipe-delimited format — one item per line. NO markdown,
+                    NO explanatory text, NO blank lines. ONLY pipe-delimited lines.
                     Use semicolons to separate list items within a field. Use numbered
                     prefixes (1. 2. 3.) for ordered steps.
-                    
-                    1. EPIC TEMPLATE
+
                     EPIC|<id>|<title>|<summary>|<business_value>|<success_criteria_semicolon_sep>|<scope>|<priority 1-3>|<services_csv>|<depends_on_ids_csv>
-                    
-                    Fields:
-                    - id: e.g. E-PAT-001
-                    - title: [E-NNN] Short descriptive title
-                    - summary: Elevator pitch of what this epic achieves
-                    - business_value: Why are we doing this? (e.g., increase retention, security compliance)
-                    - success_criteria: Measurable outcomes separated by semicolons
-                    - scope: What is included AND what is NOT included
-                    - priority: 1 (critical), 2 (high), 3 (medium)
-                    
-                    2. USER STORY TEMPLATE
-                    STORY|<id>|<parent_id>|<title>|<acceptance_criteria_semicolon_sep>|<story_points>|<labels_csv>|<priority 1-3>|<services_csv>|<depends_on_ids_csv>|<detailed_spec>
-                    
-                    Fields:
-                    - title: MUST follow "As a [Type of User], I want to [Action] so that [Value/Benefit]"
-                    - acceptance_criteria: Each in Given/When/Then format separated by semicolons
-                      e.g. "Given a user enters the wrong password, when they click submit, then an error message appears"
-                    - story_points: 1, 2, 3, 5, or 8
-                    - labels: e.g. Frontend, API, Database, Design, Security
-                    
-                    3. USE CASE TEMPLATE
-                    USECASE|<id>|<parent_id>|<title>|<actor>|<preconditions>|<main_flow_steps_semicolon_sep>|<alt_flows>|<postconditions>|<services_csv>
-                    
-                    Fields:
-                    - title: Verb-noun form (e.g. "Reset Forgotten Password")
-                    - actor: Who initiates (e.g. "Registered User", "Nurse", "Admin")
-                    - preconditions: What must be true before this use case starts
-                    - main_flow_steps: Numbered steps separated by semicolons
-                      e.g. "1. User clicks Forgot Password;2. System prompts for email;3. User enters valid email"
-                    - alt_flows: Exception/alternative paths
-                    - postconditions: System state after successful completion
-                    
-                    4. TASK TEMPLATE
-                    TASK|<id>|<parent_id>|<title>|<description>|<technical_notes>|<definition_of_done_semicolon_sep>|<tags_csv>|<priority 1-3>|<services_csv>|<detailed_spec>
-                    
-                    Fields:
-                    - title: [T-NNN] Verb-noun technical action (e.g. "Create POST /auth/reset endpoint")
-                    - description: What to implement (developer-facing)
-                    - technical_notes: Implementation hints (e.g. "Use Redis for token storage, 15-min TTL")
-                    - definition_of_done: Checklist items separated by semicolons
-                      e.g. "Unit tests passed;Documentation updated in Swagger;Code reviewed by peer"
-                    
-                    5. BUG REPORT TEMPLATE
+                    STORY|<id>|<parent_epic_id>|<title>|<acceptance_criteria_semicolon_sep>|<story_points>|<labels_csv>|<priority 1-3>|<services_csv>|<depends_on_ids_csv>|<detailed_spec>
+                    USECASE|<id>|<parent_epic_id>|<title>|<actor>|<preconditions>|<main_flow_steps_semicolon_sep>|<alt_flows>|<postconditions>|<services_csv>
+                    TASK|<id>|<parent_story_id>|<title>|<description>|<technical_notes>|<definition_of_done_semicolon_sep>|<tags_csv>|<priority 1-3>|<services_csv>|<detailed_spec>
                     BUG|<id>|<parent_id>|<title>|<severity>|<environment>|<steps_to_reproduce_semicolon_sep>|<expected_result>|<actual_result>|<services_csv>
-                    
-                    Fields:
-                    - title: [BUG] Short description of failure
-                    - severity: Blocker, Critical, Major, or Minor
-                    - environment: Where the bug occurs (e.g. ".NET 8, PostgreSQL 16, Docker")
-                    - steps_to_reproduce: Numbered steps separated by semicolons
-                    - expected_result: What should happen
-                    - actual_result: What actually happens
-                    
+
+                    Field rules:
+                    - STORY title: MUST be "As a [Persona], I want to [Action] so that [Value/Benefit]"
+                    - STORY acceptance_criteria: Each in Given/When/Then format, semicolon-separated
+                    - STORY story_points: 1, 2, 3, 5, or 8
+                    - USECASE main_flow: Numbered steps "1. step;2. step;3. step"
+                    - TASK title: "[T-ID] Verb-noun action" e.g. "[T-PAT-001-01-API] Define POST /patients contract"
+                    - TASK definition_of_done: Checklist items, semicolon-separated
+
                     ─── ID RULES ──────────────────────────────────────────────────
                     Use module prefixes: E-PAT-001, US-PAT-001-01, UC-PAT-001-01, T-PAT-001-01-DB, BUG-PAT-001.
-                    
+                    Stories reference their parent Epic. Tasks reference their parent Story.
+
                     ─── DETAILED SPEC RULES ───────────────────────────────────────
-                    - For database tasks: entity names, fields with types, indexes, constraints, FK relationships
-                    - For service tasks: method signatures, validation rules, business logic, error handling
-                    - For API tasks: HTTP method, route, request/response DTO shapes, status codes
-                    - For test tasks: test scenarios, setup data, expected outcomes, edge cases
-                    - For all: HIPAA implications, multi-tenant isolation, audit requirements
-                    
+                    - Database tasks: entity names, fields with types, indexes, constraints, FK relationships
+                    - Service tasks: method signatures, validation rules, business logic, error handling
+                    - API tasks: HTTP method, route, request/response DTO shapes, status codes
+                    - Test tasks: test scenarios, setup data, expected outcomes, edge cases
+                    - All items: HIPAA implications, multi-tenant isolation, audit trail requirements
+
                     ─── DEPENDENCY RULES ──────────────────────────────────────────
-                    - Database tasks before service tasks, service before API, API before UI
-                    - Cross-service: PatientService before EncounterService, etc.
-                    - Reference specific task IDs when ordering is required
+                    Within a story: Contract → DB → Service → API → Integration Test → E2E Test
+                    Cross-service: PatientService before EncounterService, etc.
+                    Reference specific task IDs in depends_on_ids when ordering matters.
                     """,
                 UserPrompt = $"""
                     Module: {module}
                     Iteration: {iteration}
-                    
+
                     === DOMAIN MODEL ===
                     {domainCtx}
-                    
-                    === HIGH-LEVEL REQUIREMENTS ===
+
+                    === HIGH-LEVEL REQUIREMENTS ({reqs.Count} requirements) ===
                     {string.Join("\n", reqSummaries)}
-                    
+
                     === ALREADY BUILT ({existingArtifacts.Count} artifacts) ===
                     {string.Join("\n", existingArtifacts)}
-                    
+
                     === OPEN FINDINGS ({existingFindings.Count}) ===
                     {string.Join("\n", existingFindings)}
-                    
-                    Generate work items following ALL five templates where appropriate:
-                    1. Epics — high-level strategic goals with business value and success criteria
-                    2. User Stories — "As a [user], I want..." with Given/When/Then acceptance criteria and story points
-                    3. Use Cases — step-by-step actor/system interactions with pre/post conditions
-                    4. Tasks — developer-facing to-do items with technical notes and Definition of Done
-                    5. Bug Reports — ONLY if open findings indicate reproducible failures
-                    
-                    Every User Story MUST satisfy INVEST criteria. Each item must include:
-                    1. Which microservice(s) it affects
-                    2. Dependencies on other items
-                    3. Enough detail for direct code generation
-                    
+
+                    ─── YOUR TASK ─────────────────────────────────────────────────
+                    Expand the {reqs.Count} requirements above into a COMPREHENSIVE work breakdown.
+
+                    Step 1 — IDENTIFY PERSONAS: List every distinct user type (Nurse, Doctor, Admin,
+                    Lab Technician, Pharmacist, Billing Clerk, System/Integration, etc.)
+
+                    Step 2 — CREATE EPICS: One Epic per high-level requirement.
+
+                    Step 3 — SPLIT EPICS INTO STORIES using vertical slicing:
+                    For each Epic, ask "What are the different things different users need?"
+                    Generate 3-5 User Stories per Epic. Each story should be independently
+                    deployable and demo-able. Use "As a [persona], I want to [action] so that [benefit]".
+
+                    Step 4 — CREATE USE CASES: One Use Case per Epic showing the primary
+                    actor/system interaction flow with numbered steps.
+
+                    Step 5 — DECOMPOSE STORIES INTO TASKS:
+                    For each Story, generate 4-6 Tasks:
+                      1. Define API contract/schema (OpenAPI spec, request/response DTOs)
+                      2. Database entity/migration/index
+                      3. Service layer (validation, business logic, domain events)
+                      4. API endpoint (controller, routing, error responses)
+                      5. Integration tests (happy path, validation errors, auth failures)
+                      6. E2E test (full user flow from request to database verification)
+
+                    Step 6 — BUG REPORTS: Only if open findings indicate reproducible failures.
+
+                    CRITICAL: Generate ALL items as pipe-delimited lines. No markdown. No explanations.
+                    Expect to generate 50-100+ lines for a typical module with 3+ requirements.
                     Focus on gaps — don't repeat work for existing artifacts.
                     """,
                 Temperature = 0.3,
-                MaxTokens = 8192,
+                MaxTokens = 16384,
                 RequestingAgent = Name
             };
 
@@ -518,10 +551,12 @@ public sealed class RequirementsExpanderAgent : IAgent
         {
             var depIds = new List<string>();
 
-            // Explicit DependsOn from the requirement parsing
+            // Explicit DependsOn from the requirement parsing (these are intentional)
             depIds.AddRange(req.DependsOn);
 
-            // Implicit dependencies from service catalog
+            // Implicit dependencies from service catalog — only add where there's
+            // a clear directional dependency (service A depends on service B) AND
+            // the dependency isn't mutual (preventing circular blocking).
             if (serviceMap.TryGetValue(req.Id, out var services))
             {
                 foreach (var svcName in services)
@@ -529,7 +564,6 @@ public sealed class RequirementsExpanderAgent : IAgent
                     var svc = MicroserviceCatalog.ByName(svcName);
                     if (svc is null) continue;
 
-                    // Find requirements that own the dependent services
                     foreach (var depSvc in svc.DependsOn)
                     {
                         var depReqs = requirements
@@ -545,53 +579,70 @@ public sealed class RequirementsExpanderAgent : IAgent
             deps[req.Id] = depIds.Distinct().ToList();
         }
 
+        // Break mutual/circular dependencies — only keep the edge from the
+        // lower-ID requirement to the higher-ID one (deterministic ordering).
+        foreach (var (reqId, depList) in deps)
+        {
+            depList.RemoveAll(depId =>
+                deps.TryGetValue(depId, out var reverseList) &&
+                reverseList.Contains(reqId));
+        }
+
         return deps;
     }
 
     // ─── Resolve dependencies across expanded items ────────────────────
     private static void ResolveExpandedDependencies(List<ExpandedRequirement> items, ParsedDomainModel? domainModel)
     {
-        var byId = items.ToDictionary(i => i.Id);
+        var byId = items.ToDictionary(i => i.Id, StringComparer.OrdinalIgnoreCase);
 
         foreach (var item in items)
         {
-            // Auto-dependencies: DB → Service → API → Test ordering
-            if (item.Tags.Contains("service") || item.Tags.Contains("api"))
+            // Auto-dependencies: within the SAME story — DB → Service → API → Test ordering
+            // Only add if the item doesn't already have the correct sequential deps set
+            // (CreateFallbackItems already sets CONTRACT → DB → SVC → API → ITEST → E2E)
+            // Skip "contract" items — they are chain heads with no upstream deps.
+            if (item.ItemType == WorkItemType.Task && item.DependsOn.Count == 0
+                && !item.Tags.Contains("contract"))
             {
-                var dbSibling = items.FirstOrDefault(i =>
-                    i.ParentId == item.ParentId && i.Tags.Contains("database"));
-                if (dbSibling is not null && !item.DependsOn.Contains(dbSibling.Id))
-                    item.DependsOn.Add(dbSibling.Id);
-            }
-            if (item.Tags.Contains("testing"))
-            {
-                var svcSibling = items.FirstOrDefault(i =>
-                    i.ParentId == item.ParentId && i.Tags.Contains("service"));
-                if (svcSibling is not null && !item.DependsOn.Contains(svcSibling.Id))
-                    item.DependsOn.Add(svcSibling.Id);
-            }
-
-            // Cross-service dependencies from MicroserviceCatalog
-            foreach (var svcName in item.AffectedServices)
-            {
-                var svc = MicroserviceCatalog.ByName(svcName);
-                if (svc is null) continue;
-
-                foreach (var dep in svc.DependsOn)
+                if (item.Tags.Contains("service") || item.Tags.Contains("api"))
                 {
-                    var depItems = items.Where(i =>
-                        i.Id != item.Id &&
-                        i.AffectedServices.Any(s => s.Equals(dep, StringComparison.OrdinalIgnoreCase)) &&
-                        i.ItemType == item.ItemType);
-                    foreach (var di in depItems)
+                    var dbSibling = items.FirstOrDefault(i =>
+                        i.ParentId == item.ParentId && i.Tags.Contains("database"));
+                    if (dbSibling is not null && !item.DependsOn.Contains(dbSibling.Id))
+                        item.DependsOn.Add(dbSibling.Id);
+                }
+                if (item.Tags.Contains("testing"))
+                {
+                    var svcSibling = items.FirstOrDefault(i =>
+                        i.ParentId == item.ParentId && i.Tags.Contains("service"));
+                    if (svcSibling is not null && !item.DependsOn.Contains(svcSibling.Id))
+                        item.DependsOn.Add(svcSibling.Id);
+                }
+            }
+
+            // Cross-service dependencies: apply ONLY at Epic level to avoid
+            // creating O(n^2) task-to-task dependency webs that deadlock the pipeline.
+            if (item.ItemType == WorkItemType.Epic)
+            {
+                foreach (var svcName in item.AffectedServices)
+                {
+                    var svc = MicroserviceCatalog.ByName(svcName);
+                    if (svc is null) continue;
+
+                    foreach (var dep in svc.DependsOn)
                     {
-                        if (!item.DependsOn.Contains(di.Id))
-                            item.DependsOn.Add(di.Id);
+                        var depEpic = items.FirstOrDefault(i =>
+                            i.Id != item.Id &&
+                            i.ItemType == WorkItemType.Epic &&
+                            i.AffectedServices.Any(s => s.Equals(dep, StringComparison.OrdinalIgnoreCase)));
+                        if (depEpic is not null && !item.DependsOn.Contains(depEpic.Id))
+                            item.DependsOn.Add(depEpic.Id);
                     }
                 }
             }
 
-            // Build resolved chain (flattened transitive deps)
+            // Build resolved chain (flattened transitive deps) — capped depth
             var chain = new List<string>();
             ResolveChain(item, byId, chain, 0);
             item.ResolvedDependencyChain = chain;
@@ -829,13 +880,25 @@ public sealed class RequirementsExpanderAgent : IAgent
         var items = new List<ExpandedRequirement>();
         var seq = 0;
 
+        // Persona-based vertical slices for healthcare ICU context
+        var slices = new[]
+        {
+            (Persona: "nurse", Action: "search and view", Value: "I can quickly find information during care delivery", Pts: 3, Labels: new List<string> { "Frontend", "API", "Database" }),
+            (Persona: "doctor", Action: "create and update", Value: "clinical documentation is accurate and up-to-date", Pts: 5, Labels: new List<string> { "Frontend", "API", "Database", "Validation" }),
+            (Persona: "admin", Action: "manage configuration and permissions for", Value: "the system meets facility operational policies", Pts: 3, Labels: new List<string> { "Frontend", "API", "Security" }),
+            (Persona: "system", Action: "validate data integrity and generate audit trails for", Value: "HIPAA regulatory compliance is maintained", Pts: 2, Labels: new List<string> { "API", "Database", "Security" }),
+            (Persona: "billing clerk", Action: "export and report on", Value: "revenue cycle operations run accurately", Pts: 3, Labels: new List<string> { "Frontend", "API", "Reporting" })
+        };
+
         foreach (var req in reqs)
         {
             seq++;
             var epicId = $"EPIC-{module}-{seq:D3}";
             var services = serviceMap.TryGetValue(req.Id, out var sl) ? sl : [];
             var deps = depMap.TryGetValue(req.Id, out var dl) ? dl : [];
+            var reqTitleLower = req.Title.ToLowerInvariant();
 
+            // ── Epic ──
             items.Add(new ExpandedRequirement
             {
                 Id = epicId, ItemType = WorkItemType.Epic,
@@ -843,85 +906,183 @@ public sealed class RequirementsExpanderAgent : IAgent
                 Description = req.Description, Module = module,
                 Priority = 2, Iteration = iteration,
                 Summary = req.Description,
-                BusinessValue = "Improves delivery of core business capability for this module.",
+                BusinessValue = "Improves clinical workflow efficiency and patient safety for this module.",
                 SuccessCriteria = req.AcceptanceCriteria.Count > 0
                     ? [.. req.AcceptanceCriteria.Take(5)]
-                    : ["Feature delivered and validated against acceptance criteria"],
-                Scope = "Includes implementation of the described requirement within this module; excludes unrelated module refactors.",
+                    : ["Feature fully operational", "All acceptance criteria verified", "HIPAA compliance validated", "Audit trail complete"],
+                Scope = "Includes all CRUD operations, validation, and audit for this feature; excludes unrelated module refactors.",
                 AffectedServices = [.. services],
                 DependsOn = [.. deps],
                 Status = WorkItemStatus.New,
                 ProducedBy = "RequirementsExpander"
             });
 
-            var storyId = $"US-{module}-{seq:D3}-01";
+            // ── Use Case ──
             items.Add(new ExpandedRequirement
             {
-                Id = storyId, ParentId = epicId,
-                ItemType = WorkItemType.UserStory,
-                SourceRequirementId = req.Id,
-                Title = $"As a clinical user, I want {req.Title.ToLowerInvariant()} so that patient workflows remain safe and efficient",
-                AcceptanceCriteria = [.. req.AcceptanceCriteria],
-                StoryPoints = req.AcceptanceCriteria.Count switch { <= 2 => 2, <= 4 => 3, <= 6 => 5, _ => 8 },
-                Labels = ["Backend", "API", "Healthcare"],
-                Description = req.Description,
+                Id = $"UC-{module}-{seq:D3}-01",
+                ParentId = epicId,
+                ItemType = WorkItemType.UseCase,
+                Title = $"Execute {req.Title} Workflow",
+                Actor = "Nurse",
+                Preconditions = "User is authenticated and has appropriate role permissions",
+                MainFlow =
+                [
+                    $"1. User navigates to the {req.Title} screen",
+                    "2. System displays the relevant data list with search/filter",
+                    "3. User selects or creates a record",
+                    "4. System validates input against business rules",
+                    "5. User confirms the action",
+                    "6. System persists changes and creates audit log entry",
+                    "7. System displays confirmation with updated data"
+                ],
+                AlternativeFlows = "Invalid input shows validation errors; Unauthorized user sees access denied; Network failure shows retry option",
+                Postconditions = "Data is persisted in database; Audit trail entry created; User sees confirmation",
+                Description = $"End-to-end workflow for {req.Title} covering primary and alternative flows",
                 Module = module, Priority = 2, Iteration = iteration,
                 AffectedServices = [.. services],
                 Status = WorkItemStatus.New,
                 ProducedBy = "RequirementsExpander"
             });
 
-            // Generate DB + Service + Test tasks per story
-            var dbTaskId = $"TASK-{module}-{seq:D3}-01-DB";
-            items.Add(new ExpandedRequirement
+            // ── User Stories (one per persona slice) ──
+            var storySeq = 0;
+            foreach (var slice in slices)
             {
-                Id = dbTaskId, ParentId = storyId,
-                ItemType = WorkItemType.Task,
-                Title = $"[T-{seq:D3}-DB] Create database schema for {req.Title}",
-                Description = $"Implement the backend schema and persistence model for {req.Title}.",
-                Module = module, Priority = 3, Iteration = iteration,
-                Tags = ["database"],
-                AffectedServices = [.. services],
-                TechnicalNotes = "Use normalized schema, indexes on lookup keys, and tenant-safe constraints.",
-                DefinitionOfDone = ["[ ] Unit tests passed.", "[ ] Documentation updated in Swagger.", "[ ] Code reviewed by peer."],
-                DetailedSpec = $"Create entities and migrations for: {Truncate(req.Description, 200)}",
-                Status = WorkItemStatus.New,
-                ProducedBy = "RequirementsExpander"
-            });
+                storySeq++;
+                var storyId = $"US-{module}-{seq:D3}-{storySeq:D2}";
+                var storyAction = $"{slice.Action} {reqTitleLower} records";
 
-            items.Add(new ExpandedRequirement
-            {
-                Id = $"TASK-{module}-{seq:D3}-01-SVC", ParentId = storyId,
-                ItemType = WorkItemType.Task,
-                Title = $"[T-{seq:D3}-SVC] Implement service layer for {req.Title}",
-                Description = $"Implement service logic, validation, and integration for {req.Title}.",
-                Module = module, Priority = 3, Iteration = iteration,
-                Tags = ["service"],
-                AffectedServices = [.. services],
-                DependsOn = [dbTaskId],
-                TechnicalNotes = "Follow clean architecture boundaries and emit domain events where relevant.",
-                DefinitionOfDone = ["[ ] Unit tests passed.", "[ ] Documentation updated in Swagger.", "[ ] Code reviewed by peer."],
-                DetailedSpec = $"Implement service with CRUD, validation, domain events for: {Truncate(req.Description, 200)}",
-                Status = WorkItemStatus.New,
-                ProducedBy = "RequirementsExpander"
-            });
+                items.Add(new ExpandedRequirement
+                {
+                    Id = storyId, ParentId = epicId,
+                    ItemType = WorkItemType.UserStory,
+                    SourceRequirementId = req.Id,
+                    Title = $"As a {slice.Persona}, I want to {storyAction} so that {slice.Value}",
+                    AcceptanceCriteria =
+                    [
+                        $"Given the {slice.Persona} is authenticated, when they {storyAction}, then the system processes the request and displays results within 2 seconds",
+                        "Given invalid input is submitted, when the system validates, then clear error messages guide the user to correct the issue",
+                        "Given the operation completes, when the audit service records the action, then a complete audit trail entry exists"
+                    ],
+                    StoryPoints = slice.Pts,
+                    Labels = [.. slice.Labels],
+                    Description = $"End-to-end capability for a {slice.Persona} to {storyAction}",
+                    Module = module, Priority = 2, Iteration = iteration,
+                    AffectedServices = [.. services],
+                    Status = WorkItemStatus.New,
+                    ProducedBy = "RequirementsExpander"
+                });
 
-            items.Add(new ExpandedRequirement
-            {
-                Id = $"TASK-{module}-{seq:D3}-01-TEST", ParentId = storyId,
-                ItemType = WorkItemType.Task,
-                Title = $"[T-{seq:D3}-TEST] Add automated tests for {req.Title}",
-                Description = $"Add unit/integration tests for {req.Title} behavior and edge cases.",
-                Module = module, Priority = 3, Iteration = iteration,
-                Tags = ["testing"],
-                AffectedServices = [.. services],
-                DependsOn = [$"TASK-{module}-{seq:D3}-01-SVC"],
-                TechnicalNotes = "Cover happy path, validation errors, auth failures, and boundary cases.",
-                DefinitionOfDone = ["[ ] Unit tests passed.", "[ ] Documentation updated in Swagger.", "[ ] Code reviewed by peer."],
-                DetailedSpec = $"Test scenarios: happy path, validation errors, edge cases for: {Truncate(req.Description, 200)}",
-                Status = WorkItemStatus.New,
-                ProducedBy = "RequirementsExpander"
-            });
+                // ── 6 Tasks per story (vertical-slice decomposition) ──
+                var contractId = $"TASK-{module}-{seq:D3}-{storySeq:D2}-CONTRACT";
+                var dbTaskId = $"TASK-{module}-{seq:D3}-{storySeq:D2}-DB";
+                var svcTaskId = $"TASK-{module}-{seq:D3}-{storySeq:D2}-SVC";
+                var apiTaskId = $"TASK-{module}-{seq:D3}-{storySeq:D2}-API";
+                var intTestId = $"TASK-{module}-{seq:D3}-{storySeq:D2}-ITEST";
+                var e2eTestId = $"TASK-{module}-{seq:D3}-{storySeq:D2}-E2E";
+
+                items.Add(new ExpandedRequirement
+                {
+                    Id = contractId, ParentId = storyId,
+                    ItemType = WorkItemType.Task,
+                    Title = $"[{contractId}] Define API contract for {storyAction}",
+                    Description = $"Define OpenAPI specification with request/response DTOs, routes, status codes, and validation schemas for {storyAction}.",
+                    Module = module, Priority = 2, Iteration = iteration,
+                    Tags = ["api", "contract"],
+                    AffectedServices = [.. services],
+                    TechnicalNotes = "Use OpenAPI 3.1 spec; Include X-Tenant-Id header; Define 200, 400, 401, 403, 404, 422 responses.",
+                    DefinitionOfDone = ["OpenAPI spec reviewed and approved", "DTO classes generated", "Contract tests written"],
+                    DetailedSpec = $"Define request DTO with required fields and validation attributes, response DTO with pagination. REST conventions for routes.",
+                    Status = WorkItemStatus.New,
+                    ProducedBy = "RequirementsExpander"
+                });
+
+                items.Add(new ExpandedRequirement
+                {
+                    Id = dbTaskId, ParentId = storyId,
+                    ItemType = WorkItemType.Task,
+                    Title = $"[{dbTaskId}] Implement database entities and migrations for {req.Title}",
+                    Description = $"Create EF Core entities, DbContext configuration, indexes, and migration for {req.Title}.",
+                    Module = module, Priority = 2, Iteration = iteration,
+                    Tags = ["database"],
+                    AffectedServices = [.. services],
+                    DependsOn = [contractId],
+                    TechnicalNotes = "PostgreSQL-friendly types; tenant isolation (TenantId FK); index lookup columns; soft-delete support.",
+                    DefinitionOfDone = ["Migration runs without errors", "Indexes verified", "Seed data present", "Rollback tested"],
+                    DetailedSpec = $"Entity with Id (text PK), TenantId, CreatedAt, UpdatedAt, IsActive, plus domain fields. Indexes on TenantId and lookups.",
+                    Status = WorkItemStatus.New,
+                    ProducedBy = "RequirementsExpander"
+                });
+
+                items.Add(new ExpandedRequirement
+                {
+                    Id = svcTaskId, ParentId = storyId,
+                    ItemType = WorkItemType.Task,
+                    Title = $"[{svcTaskId}] Implement service layer with validation for {storyAction}",
+                    Description = $"Build service class with CRUD operations, FluentValidation rules, domain events, and multi-tenant filtering for {storyAction}.",
+                    Module = module, Priority = 2, Iteration = iteration,
+                    Tags = ["service"],
+                    AffectedServices = [.. services],
+                    DependsOn = [dbTaskId],
+                    TechnicalNotes = "Inject IRepository; Use FluentValidation; Emit domain events for audit; All queries filtered by TenantId.",
+                    DefinitionOfDone = ["Unit tests passing (>80% coverage)", "Validation rules tested", "Domain events emitted", "Exception handling complete"],
+                    DetailedSpec = $"Service implements interface. Methods: GetByIdAsync, ListAsync (paginated), CreateAsync, UpdateAsync, SoftDeleteAsync. All operations log to audit trail.",
+                    Status = WorkItemStatus.New,
+                    ProducedBy = "RequirementsExpander"
+                });
+
+                items.Add(new ExpandedRequirement
+                {
+                    Id = apiTaskId, ParentId = storyId,
+                    ItemType = WorkItemType.Task,
+                    Title = $"[{apiTaskId}] Build API endpoint for {storyAction}",
+                    Description = $"Create ASP.NET Core controller with route mapping, model binding, authorization attributes, and error responses for {storyAction}.",
+                    Module = module, Priority = 2, Iteration = iteration,
+                    Tags = ["api"],
+                    AffectedServices = [.. services],
+                    DependsOn = [svcTaskId],
+                    TechnicalNotes = "Use [Authorize] with role policy; Map service exceptions to HTTP status codes; Add response caching for reads.",
+                    DefinitionOfDone = ["All routes return correct status codes", "Authorization tested", "Swagger documentation complete", "Rate limiting configured"],
+                    DetailedSpec = $"Controller with GET (list+detail), POST, PUT, DELETE endpoints. Use ProblemDetails for errors. Add [ProducesResponseType] for Swagger.",
+                    Status = WorkItemStatus.New,
+                    ProducedBy = "RequirementsExpander"
+                });
+
+                items.Add(new ExpandedRequirement
+                {
+                    Id = intTestId, ParentId = storyId,
+                    ItemType = WorkItemType.Task,
+                    Title = $"[{intTestId}] Write integration tests for {storyAction}",
+                    Description = $"Create integration tests covering happy path, validation errors, auth failures, not-found, and concurrent access for {storyAction}.",
+                    Module = module, Priority = 3, Iteration = iteration,
+                    Tags = ["testing"],
+                    AffectedServices = [.. services],
+                    DependsOn = [apiTaskId],
+                    TechnicalNotes = "Use WebApplicationFactory; Test with real DB (in-memory or TestContainers); Cover auth bypass and tenant isolation.",
+                    DefinitionOfDone = ["Happy path tested", "Validation error responses tested", "401/403 tested", "404 tested", "Concurrent writes tested"],
+                    DetailedSpec = $"Test scenarios: create+read round-trip, duplicate prevention, invalid input (422), unauthorized (401), forbidden (403), not found (404), optimistic concurrency.",
+                    Status = WorkItemStatus.New,
+                    ProducedBy = "RequirementsExpander"
+                });
+
+                items.Add(new ExpandedRequirement
+                {
+                    Id = e2eTestId, ParentId = storyId,
+                    ItemType = WorkItemType.Task,
+                    Title = $"[{e2eTestId}] Write E2E test for {slice.Persona} {storyAction} flow",
+                    Description = $"Create end-to-end test simulating the complete {slice.Persona} journey from login through {storyAction} to verification.",
+                    Module = module, Priority = 3, Iteration = iteration,
+                    Tags = ["testing", "e2e"],
+                    AffectedServices = [.. services],
+                    DependsOn = [intTestId],
+                    TechnicalNotes = "Use Playwright or similar; Test against staging-like environment; Verify database state after operations.",
+                    DefinitionOfDone = ["Complete user journey tested", "Data persistence verified", "Audit log entries verified", "Performance within SLA"],
+                    DetailedSpec = $"E2E flow: authenticate as {slice.Persona} -> navigate to feature -> perform {storyAction} -> verify UI feedback -> verify DB records -> verify audit log entry.",
+                    Status = WorkItemStatus.New,
+                    ProducedBy = "RequirementsExpander"
+                });
+            }
         }
 
         return items;
