@@ -8,6 +8,23 @@ public sealed class AgentContext
     public string RunId { get; init; } = Guid.NewGuid().ToString("N");
     public string RequirementsBasePath { get; init; } = string.Empty;
     public string OutputBasePath { get; init; } = string.Empty;
+
+    // ── Project-scoped context (Phase 9 — multi-project support) ──
+
+    /// <summary>The ID of the project this pipeline is running for. Null for legacy/global runs.</summary>
+    public string? ProjectId { get; set; }
+
+    /// <summary>Resolved technology stack entries for the project (language, framework, DB, etc.).</summary>
+    public List<ResolvedTechStackEntry> ResolvedTechStack { get; set; } = [];
+
+    /// <summary>Per-agent configuration overrides for this project (LLM model, system prompt, constraints).</summary>
+    public Dictionary<AgentType, ProjectAgentConfig> AgentConfigOverrides { get; set; } = [];
+
+    /// <summary>The SDLC workflow ID loaded from the DB for this project.</summary>
+    public string? WorkflowId { get; set; }
+
+    /// <summary>Resolved workflow stages ordered by execution sequence.</summary>
+    public List<ResolvedStage> ResolvedStages { get; set; } = [];
     public List<Requirement> Requirements { get; set; } = [];
     public SynchronizedList<ExpandedRequirement> ExpandedRequirements { get; set; } = new();
     public ConcurrentBag<CodeArtifact> Artifacts { get; set; } = [];

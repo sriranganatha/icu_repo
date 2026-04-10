@@ -20,6 +20,9 @@ public class HmsDbContext : DbContext
 {
     private readonly string _tenantId;
 
+    /// <summary>Exposes the tenant ID for repositories that need to auto-stamp entities.</summary>
+    public string CurrentTenantId => _tenantId;
+
     public HmsDbContext(DbContextOptions<HmsDbContext> options, ITenantProvider tenantProvider)
         : base(options)
     {
@@ -93,6 +96,13 @@ public class HmsDbContext : DbContext
     public DbSet<LlmModelConfig> LlmModelConfigs => Set<LlmModelConfig>();
     public DbSet<LlmRoutingRule> LlmRoutingRules => Set<LlmRoutingRule>();
     public DbSet<TokenBudget> TokenBudgets => Set<TokenBudget>();
+
+    // ── Platform: Configuration ───────────────────────────────
+    public DbSet<ConfigSnapshot> ConfigSnapshots => Set<ConfigSnapshot>();
+    public DbSet<CompatibilityRule> CompatibilityRules => Set<CompatibilityRule>();
+    public DbSet<StarterKit> StarterKits => Set<StarterKit>();
+    public DbSet<TemplateVariable> TemplateVariables => Set<TemplateVariable>();
+    public DbSet<AgentPluginManifest> AgentPluginManifests => Set<AgentPluginManifest>();
 
     // ── Platform: Workflows ───────────────────────────────────
     public DbSet<SdlcWorkflow> SdlcWorkflows => Set<SdlcWorkflow>();
@@ -189,6 +199,13 @@ public class HmsDbContext : DbContext
         modelBuilder.Entity<LlmRoutingRule>().ToTable("llm_routing_rule", "plt_meta");
         modelBuilder.Entity<TokenBudget>().ToTable("token_budget", "plt_meta");
 
+        // ── Platform: Configuration → plt_meta ────────────────
+        modelBuilder.Entity<ConfigSnapshot>().ToTable("config_snapshot", "plt_meta");
+        modelBuilder.Entity<CompatibilityRule>().ToTable("compatibility_rule", "plt_meta");
+        modelBuilder.Entity<StarterKit>().ToTable("starter_kit", "plt_meta");
+        modelBuilder.Entity<TemplateVariable>().ToTable("template_variable", "plt_meta");
+        modelBuilder.Entity<AgentPluginManifest>().ToTable("agent_plugin_manifest", "plt_meta");
+
         // ── Platform: Workflows → plt_meta ────────────────────
         modelBuilder.Entity<SdlcWorkflow>().ToTable("sdlc_workflow", "plt_meta");
         modelBuilder.Entity<StageDefinition>().ToTable("stage_definition", "plt_meta");
@@ -283,6 +300,16 @@ public class HmsDbContext : DbContext
             .HasIndex(e => new { e.TenantId, e.EnterprisePersonKey }).IsUnique();
         modelBuilder.Entity<PatientIdentifier>()
             .HasIndex(e => new { e.TenantId, e.IdentifierType, e.IdentifierValueHash }).IsUnique();
+    }
+
+    public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
+    {
+        foreach (var entry in ChangeTracker.Entries<PlatformEntityBase>())
+        {
+            if (entry.State == EntityState.Added && string.IsNullOrEmpty(entry.Entity.TenantId))
+                entry.Entity.TenantId = _tenantId;
+        }
+        return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
     }
 }
 

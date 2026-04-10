@@ -1,0 +1,200 @@
+@page
+@model HmsAgents.Web.Pages.Projects.RecipeModel
+@{ ViewData["Title"] = "Project Recipes"; }
+
+<div class="container-fluid py-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h2><i class="bi bi-journal-code me-2"></i>Project Recipes</h2>
+            <p class="text-muted mb-0">Export and import project configurations as portable recipes</p>
+        </div>
+    </div>
+
+    <div class="row g-4">
+        <!-- Export -->
+        <div class="col-md-6">
+            <div class="card h-100">
+                <div class="card-header bg-success text-white">
+                    <i class="bi bi-box-arrow-up me-2"></i>Export Recipe
+                </div>
+                <div class="card-body">
+                    <p class="text-muted">Export a project's entire configuration as a portable JSON bundle including tech stack, architecture, templates, standards, and workflow.</p>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Select Project</label>
+                        <select class="form-select" id="exportProject">
+                            <option value="">Choose a project...</option>
+                        </select>
+                    </div>
+
+                    <div id="exportPreview" style="display:none;">
+                        <label class="form-label fw-semibold">Recipe Preview</label>
+                        <div class="border rounded p-3 bg-light mb-3">
+                            <div class="row g-2 small">
+                                <div class="col-6"><strong>Tech Stack:</strong> <span id="previewTech">-</span></div>
+                                <div class="col-6"><strong>Architecture:</strong> <span id="previewArch">-</span></div>
+                                <div class="col-6"><strong>Workflow:</strong> <span id="previewWorkflow">-</span></div>
+                                <div class="col-6"><strong>Standards:</strong> <span id="previewStandards">-</span></div>
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label">Include in Export</label>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="incTech" checked disabled>
+                                <label class="form-check-label" for="incTech">Tech Stack (always included)</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="incArch" checked>
+                                <label class="form-check-label" for="incArch">Architecture Pattern</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="incWorkflow" checked>
+                                <label class="form-check-label" for="incWorkflow">Workflow Configuration</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="incStandards" checked>
+                                <label class="form-check-label" for="incStandards">Coding Standards</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="incTemplates">
+                                <label class="form-check-label" for="incTemplates">Custom Templates</label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <button class="btn btn-success w-100" id="btnExport" disabled>
+                        <i class="bi bi-download me-1"></i>Export as JSON
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Import -->
+        <div class="col-md-6">
+            <div class="card h-100">
+                <div class="card-header bg-primary text-white">
+                    <i class="bi bi-box-arrow-in-down me-2"></i>Import Recipe
+                </div>
+                <div class="card-body">
+                    <p class="text-muted">Import a recipe JSON file to create a new project with all configuration pre-filled.</p>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Upload Recipe File</label>
+                        <div class="border-2 border-dashed rounded p-4 text-center" id="dropZone"
+                             style="border-style:dashed !important; cursor:pointer;">
+                            <i class="bi bi-cloud-arrow-up" style="font-size:2rem;"></i>
+                            <p class="mb-1 mt-2">Drag and drop a recipe JSON file here</p>
+                            <small class="text-muted">or click to browse</small>
+                            <input type="file" id="recipeFile" accept=".json" class="d-none" />
+                        </div>
+                    </div>
+
+                    <div id="importPreview" style="display:none;">
+                        <label class="form-label fw-semibold">Recipe Contents</label>
+                        <div class="border rounded p-3 bg-light mb-3">
+                            <h6 id="importName" class="mb-2"></h6>
+                            <p id="importDesc" class="text-muted small mb-2"></p>
+                            <div class="row g-2 small">
+                                <div class="col-6"><strong>Tech items:</strong> <span id="importTechCount">-</span></div>
+                                <div class="col-6"><strong>Architecture:</strong> <span id="importArch">-</span></div>
+                                <div class="col-12"><strong>Exported from:</strong> <span id="importFrom">-</span></div>
+                                <div class="col-12"><strong>Exported at:</strong> <span id="importDate">-</span></div>
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label">New Project Name</label>
+                            <input type="text" class="form-control" id="importProjectName" />
+                        </div>
+                    </div>
+
+                    <button class="btn btn-primary w-100" id="btnImport" disabled>
+                        <i class="bi bi-upload me-1"></i>Import & Create Project
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Shared Recipes -->
+    <div class="card mt-4">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <span><i class="bi bi-people me-2"></i>Shared Recipes</span>
+            <span class="badge bg-secondary">Coming Soon</span>
+        </div>
+        <div class="card-body text-center text-muted py-5">
+            <i class="bi bi-share" style="font-size:2rem;"></i>
+            <p class="mt-2">A marketplace of shared recipes from your team and organization will be available here.</p>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+<script>
+    const exportProjectSelect = document.getElementById('exportProject');
+    const btnExport = document.getElementById('btnExport');
+    const btnImport = document.getElementById('btnImport');
+    const dropZone = document.getElementById('dropZone');
+    const recipeFileInput = document.getElementById('recipeFile');
+
+    exportProjectSelect.addEventListener('change', function() {
+        const hasProject = !!this.value;
+        btnExport.disabled = !hasProject;
+        document.getElementById('exportPreview').style.display = hasProject ? '' : 'none';
+    });
+
+    dropZone.addEventListener('click', () => recipeFileInput.click());
+    dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('bg-light'); });
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('bg-light'));
+    dropZone.addEventListener('drop', e => {
+        e.preventDefault();
+        dropZone.classList.remove('bg-light');
+        if (e.dataTransfer.files.length) handleRecipeFile(e.dataTransfer.files[0]);
+    });
+    recipeFileInput.addEventListener('change', function() {
+        if (this.files.length) handleRecipeFile(this.files[0]);
+    });
+
+    function handleRecipeFile(file) {
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            try {
+                const recipe = JSON.parse(e.target.result);
+                document.getElementById('importName').textContent = recipe.Name || 'Unnamed';
+                document.getElementById('importDesc').textContent = recipe.Description || '';
+                document.getElementById('importTechCount').textContent = (recipe.TechStack || []).length;
+                document.getElementById('importArch').textContent = recipe.ArchitecturePattern || '-';
+                document.getElementById('importFrom').textContent = recipe.ExportedFrom || '-';
+                document.getElementById('importDate').textContent = recipe.ExportedAt || '-';
+                document.getElementById('importProjectName').value = recipe.Name || '';
+                document.getElementById('importPreview').style.display = '';
+                btnImport.disabled = false;
+            } catch {
+                alert('Invalid recipe file format');
+            }
+        };
+        reader.readAsText(file);
+    }
+
+    btnExport.addEventListener('click', async function() {
+        const projectId = exportProjectSelect.value;
+        if (!projectId) return;
+        try {
+            const resp = await fetch(`/api/projects/${projectId}/recipe`);
+            const recipe = await resp.json();
+            const blob = new Blob([JSON.stringify(recipe, null, 2)], { type: 'application/json' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = `recipe-${recipe.Name || 'project'}.json`;
+            a.click();
+        } catch (err) {
+            alert('Export failed: ' + err.message);
+        }
+    });
+
+    btnImport.addEventListener('click', async function() {
+        // Placeholder — POST to /api/projects/import-recipe
+    });
+</script>
+}

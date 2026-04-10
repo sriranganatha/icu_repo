@@ -13,3 +13,4 @@ global using Hms.Database.Entities.Platform.Standards;
 global using Hms.Database.Entities.Platform.LlmConfig;
 global using Hms.Database.Entities.Platform.Workflows;
 global using Hms.Database.Entities.Platform.Projects;
+global using Hms.Database.Entities.Platform.Configuration;

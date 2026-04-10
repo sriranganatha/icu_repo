@@ -14,6 +14,7 @@ public class OrchestratorTests
     private readonly Mock<IPipelineEventSink> _sinkMock = new();
     private readonly Mock<IAuditLogger> _auditMock = new();
     private readonly Mock<IHumanGate> _humanGateMock = new();
+    private readonly Mock<IServiceProvider> _serviceProviderMock = new();
     private readonly Mock<ILogger<AgentOrchestrator>> _loggerMock = new();
 
     private PipelineConfig CreateConfig() => new()
@@ -73,7 +74,7 @@ public class OrchestratorTests
             CreateAgentMock(AgentType.Supervisor, "Supervisor").Object,
         };
 
-        var orchestrator = new AgentOrchestrator(agents, _writerMock.Object, _sinkMock.Object, _auditMock.Object, _humanGateMock.Object, _loggerMock.Object);
+        var orchestrator = new AgentOrchestrator(agents, _writerMock.Object, _sinkMock.Object, _auditMock.Object, _humanGateMock.Object, _serviceProviderMock.Object, _loggerMock.Object);
 
         // Act
         var result = await orchestrator.RunPipelineAsync(CreateConfig());
@@ -147,7 +148,7 @@ public class OrchestratorTests
             CreateAgentMock(AgentType.Supervisor, "Supervisor").Object,
         };
 
-        var orchestrator = new AgentOrchestrator(agents, _writerMock.Object, _sinkMock.Object, _auditMock.Object, _humanGateMock.Object, _loggerMock.Object);
+        var orchestrator = new AgentOrchestrator(agents, _writerMock.Object, _sinkMock.Object, _auditMock.Object, _humanGateMock.Object, _serviceProviderMock.Object, _loggerMock.Object);
 
         // Act
         var result = await orchestrator.RunPipelineAsync(CreateConfig());
@@ -194,7 +195,7 @@ public class OrchestratorTests
             supervisorMock.Object
         };
 
-        var orchestrator = new AgentOrchestrator(agents, _writerMock.Object, _sinkMock.Object, _auditMock.Object, _humanGateMock.Object, _loggerMock.Object);
+        var orchestrator = new AgentOrchestrator(agents, _writerMock.Object, _sinkMock.Object, _auditMock.Object, _humanGateMock.Object, _serviceProviderMock.Object, _loggerMock.Object);
 
         // Act
         await orchestrator.RunPipelineAsync(CreateConfig());
@@ -219,7 +220,7 @@ public class OrchestratorTests
             CreateAgentMock(AgentType.Supervisor, "Supervisor").Object,
         };
 
-        var orchestrator = new AgentOrchestrator(agents, _writerMock.Object, _sinkMock.Object, _auditMock.Object, _humanGateMock.Object, _loggerMock.Object);
+        var orchestrator = new AgentOrchestrator(agents, _writerMock.Object, _sinkMock.Object, _auditMock.Object, _humanGateMock.Object, _serviceProviderMock.Object, _loggerMock.Object);
 
         // Act
         await orchestrator.RunPipelineAsync(CreateConfig());
@@ -239,7 +240,7 @@ public class OrchestratorTests
             CreateAgentMock(AgentType.Supervisor, "Supervisor").Object,
         };
 
-        var orchestrator = new AgentOrchestrator(agents, _writerMock.Object, _sinkMock.Object, _auditMock.Object, _humanGateMock.Object, _loggerMock.Object);
+        var orchestrator = new AgentOrchestrator(agents, _writerMock.Object, _sinkMock.Object, _auditMock.Object, _humanGateMock.Object, _serviceProviderMock.Object, _loggerMock.Object);
         var config = CreateConfig();
 
         // Act
@@ -256,7 +257,7 @@ public class OrchestratorTests
     public void GetCurrentContext_ReturnsNull_BeforePipelineRun()
     {
         var agents = new List<IAgent>();
-        var orchestrator = new AgentOrchestrator(agents, _writerMock.Object, _sinkMock.Object, _auditMock.Object, _humanGateMock.Object, _loggerMock.Object);
+        var orchestrator = new AgentOrchestrator(agents, _writerMock.Object, _sinkMock.Object, _auditMock.Object, _humanGateMock.Object, _serviceProviderMock.Object, _loggerMock.Object);
         orchestrator.GetCurrentContext().Should().BeNull();
     }
 

@@ -3,6 +3,7 @@ using HmsAgents.Agents.Architecture;
 using HmsAgents.Agents.Backlog;
 using HmsAgents.Agents.Brd;
 using HmsAgents.Agents.Build;
+using Microsoft.EntityFrameworkCore;
 using HmsAgents.Agents.BugFix;
 using HmsAgents.Agents.CodeQuality;
 using HmsAgents.Agents.CodeReasoning;
@@ -49,6 +50,12 @@ builder.Services.AddRazorPages();
 builder.Services.AddControllers();
 builder.Services.AddSignalR();
 
+// ── Database ──
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<Hms.Database.ITenantProvider, HmsAgents.Web.Services.HttpTenantProvider>();
+builder.Services.AddDbContext<Hms.Database.HmsDbContext>(options =>
+    options.UseNpgsql(builder.Configuration.GetConnectionString("MasterDb")));
+
 // ── LLM provider (AI backbone — Google Gemini) ──
 builder.Services.AddSingleton<GeminiLlmProvider>();
 builder.Services.AddSingleton<TemplateFallbackLlmProvider>();
@@ -79,6 +86,15 @@ builder.Services.AddScoped<IWorkflowService, WorkflowService>();
 builder.Services.AddScoped<ILlmConfigService, LlmConfigService>();
 builder.Services.AddScoped<IStandardsService, StandardsService>();
 builder.Services.AddScoped<ITemplateService, TemplateService>();
+builder.Services.AddScoped<IConfigResolverService, ConfigResolverService>();
+builder.Services.AddScoped<ITemplateEngineService, TemplateEngineService>();
+builder.Services.AddScoped<ICompatibilityService, CompatibilityService>();
+builder.Services.AddScoped<IStarterKitService, StarterKitService>();
+builder.Services.AddScoped<IProjectRecipeService, ProjectRecipeService>();
+
+// Workflow engine & agent resolver (Phase 9 — multi-project orchestration)
+builder.Services.AddScoped<IWorkflowExecutionEngine, WorkflowExecutionEngine>();
+builder.Services.AddScoped<IAgentResolver, AgentResolver>();
 
 // Core pipeline agents
 builder.Services.AddSingleton<IAgent, RequirementsReaderAgent>();
@@ -164,4 +180,20 @@ app.MapRazorPages();
 app.MapControllers();
 app.MapHub<PipelineHub>("/hubs/pipeline");
 
-app.Run();
+// ── Seed platform data on startup ──
+using (var scope = app.Services.CreateScope())
+{
+    try
+    {
+        var seeder = new Hms.Services.Platform.PlatformDataSeeder(
+            scope.ServiceProvider.GetRequiredService<Hms.Database.HmsDbContext>(),
+            scope.ServiceProvider.GetRequiredService<ILogger<Hms.Services.Platform.PlatformDataSeeder>>());
+        await seeder.SeedAsync();
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogWarning(ex, "Platform data seeding skipped (database may not be available)");
+    }
+}
+
+await app.RunAsync();

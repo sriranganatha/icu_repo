@@ -46,6 +46,8 @@ public class PlatformRepository<T> : IPlatformRepository<T> where T : PlatformEn
     public async Task<T> CreateAsync(T entity, CancellationToken ct = default)
     {
         entity.CreatedAt = DateTimeOffset.UtcNow;
+        if (string.IsNullOrEmpty(entity.TenantId))
+            entity.TenantId = Db.CurrentTenantId;
         Set.Add(entity);
         await Db.SaveChangesAsync(ct);
         return entity;

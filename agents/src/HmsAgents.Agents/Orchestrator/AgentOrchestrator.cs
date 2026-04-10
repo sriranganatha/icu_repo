@@ -3,6 +3,7 @@ using System.Diagnostics;
 using HmsAgents.Core.Enums;
 using HmsAgents.Core.Interfaces;
 using HmsAgents.Core.Models;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace HmsAgents.Agents.Orchestrator;
@@ -20,8 +21,12 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
     private readonly IPipelineEventSink _eventSink;
     private readonly IAuditLogger _audit;
     private readonly IHumanGate _humanGate;
+    private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<AgentOrchestrator> _logger;
     private AgentContext? _current;
+
+    // ── Concurrent project pipelines ──
+    private readonly ConcurrentDictionary<string, AgentContext> _activeContexts = new();
 
     private const int MaxAgentRetries = 2;
     private const int MaxClaimBatchSize = 50;
@@ -168,6 +173,7 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
         IPipelineEventSink eventSink,
         IAuditLogger audit,
         IHumanGate humanGate,
+        IServiceProvider serviceProvider,
         ILogger<AgentOrchestrator> logger)
     {
         _agents = agents;
@@ -175,6 +181,7 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
         _eventSink = eventSink;
         _audit = audit;
         _humanGate = humanGate;
+        _serviceProvider = serviceProvider;
         _logger = logger;
         _lifecycle = new WorkItemLifecyclePolicy(msg => _logger.LogInformation("{Message}", msg))
         {
@@ -185,6 +192,12 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
 
     public AgentContext? GetCurrentContext() => _current;
 
+    public AgentContext? GetProjectContext(string projectId)
+        => _activeContexts.TryGetValue(projectId, out var ctx) ? ctx : null;
+
+    public IReadOnlyDictionary<string, AgentContext> GetActiveContexts()
+        => _activeContexts;
+
     public void ResetContext()
     {
         _current = null;
@@ -192,6 +205,203 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
         _taskTracker.Clear();
         // Drain mid-pipeline requirement injection queue
         while (_pendingRequirements.TryDequeue(out _)) { }
+    }
+
+    // ─── Project-Scoped Pipeline (Phase 9) ─────────────────────────
+    /// <summary>
+    /// Runs a project-scoped pipeline: resolves the project's tech stack, workflow,
+    /// and agent assignments from DB, then delegates to the main daemon loop with
+    /// an isolated <see cref="AgentContext"/>.
+    /// </summary>
+    public async Task<AgentContext> RunProjectPipelineAsync(string projectId, PipelineConfig config, CancellationToken ct = default)
+    {
+        _logger.LogInformation("Starting project-scoped pipeline for project {ProjectId}", projectId);
+
+        // Create isolated context for this project
+        var context = new AgentContext
+        {
+            RequirementsBasePath = config.RequirementsPath,
+            OutputBasePath = config.OutputPath,
+            PipelineConfig = config,
+            ProjectId = projectId
+        };
+
+        // Register in active contexts (supports concurrent pipelines)
+        _activeContexts[projectId] = context;
+
+        try
+        {
+            // Resolve scoped services (workflow engine + agent resolver need DB access)
+            using var scope = _serviceProvider.CreateScope();
+            var workflowEngine = scope.ServiceProvider.GetRequiredService<IWorkflowExecutionEngine>();
+            var agentResolver = scope.ServiceProvider.GetRequiredService<IAgentResolver>();
+
+            // Load workflow from DB (or default)
+            await workflowEngine.LoadWorkflowAsync(context, context.WorkflowId, ct);
+
+            // Resolve agents for this project
+            var projectAgents = await agentResolver.ResolveAllForProjectAsync(context, ct);
+            _logger.LogInformation("Resolved {Count} agents for project {ProjectId}", projectAgents.Count, projectId);
+
+            // If DB-backed workflow stages were loaded, use stage-driven execution
+            if (context.ResolvedStages.Count > 0)
+            {
+                return await RunStageDrivenPipelineAsync(context, config, projectAgents, workflowEngine, ct);
+            }
+
+            // Otherwise fall back to the standard daemon loop
+            // Set _current so the existing RunPipelineAsync plumbing works
+            _current = context;
+            _taskCompletedBy.Clear();
+            return await RunDaemonLoopCoreAsync(context, config, ct);
+        }
+        finally
+        {
+            _activeContexts.TryRemove(projectId, out _);
+        }
+    }
+
+    /// <summary>
+    /// Executes a project pipeline driven by DB-backed workflow stages.
+    /// Stages are processed in order; each stage dispatches its agents in parallel.
+    /// Approval gates pause execution until approved.
+    /// </summary>
+    private async Task<AgentContext> RunStageDrivenPipelineAsync(
+        AgentContext context,
+        PipelineConfig config,
+        IReadOnlyList<IAgent> projectAgents,
+        IWorkflowExecutionEngine workflowEngine,
+        CancellationToken ct)
+    {
+        _current = context;
+        _taskCompletedBy.Clear();
+
+        _lifecycle.MaxQueueItems = config.MaxQueueItems > 0 ? config.MaxQueueItems : 10;
+        _lifecycle.MaxInDevItems = config.MaxInDevItems > 0 ? config.MaxInDevItems : 10;
+
+        if (!string.IsNullOrWhiteSpace(config.OrchestratorInstructions))
+            context.OrchestratorInstructions.Add(config.OrchestratorInstructions);
+
+        foreach (var agentType in Enum.GetValues<AgentType>())
+            context.AgentStatuses[agentType] = AgentStatus.Idle;
+
+        context.ReportProgress = async (agentType, msg) =>
+            await PublishEvent(context, agentType, AgentStatus.Running, msg, 0, ct: ct);
+
+        _logger.LogInformation("Pipeline {RunId} starting (stage-driven mode, {StageCount} stages)",
+            context.RunId, context.ResolvedStages.Count);
+
+        await PublishEvent(context, AgentType.Orchestrator, AgentStatus.Running,
+            $"Pipeline starting — stage-driven mode, {context.ResolvedStages.Count} stages", ct: ct);
+
+        await _audit.LogAsync(AgentType.Orchestrator, context.RunId, AuditAction.PipelineStarted,
+            $"Project pipeline {context.RunId} starting — project {context.ProjectId}, {context.ResolvedStages.Count} stages",
+            $"RequirementsPath: {config.RequirementsPath}, OutputPath: {config.OutputPath}",
+            severity: AuditSeverity.Info, ct: ct);
+
+        var completedAgents = new HashSet<AgentType>();
+
+        foreach (var stage in context.ResolvedStages.OrderBy(s => s.Order))
+        {
+            if (ct.IsCancellationRequested) break;
+
+            _logger.LogInformation("[Stage {Order}] {Name} — {Count} agents",
+                stage.Order, stage.Name, stage.AgentsInvolved.Count);
+
+            await PublishEvent(context, AgentType.Orchestrator, AgentStatus.Running,
+                $"Entering stage: {stage.Name}", ct: ct);
+
+            // Check approval gate
+            if (await workflowEngine.IsApprovalRequiredAsync(context, stage, ct))
+            {
+                _logger.LogInformation("[Stage {Order}] Approval gate — waiting for human approval", stage.Order);
+                await PublishEvent(context, AgentType.Orchestrator, AgentStatus.Running,
+                    $"Stage '{stage.Name}' requires approval — pausing pipeline", ct: ct);
+
+                // Wait for approval via HITL gate
+                var decision = await _humanGate.RequestApprovalAsync(new HumanApprovalRequest
+                {
+                    RunId = context.RunId,
+                    RequestingAgent = AgentType.Orchestrator,
+                    Title = $"Approval required: {stage.Name}",
+                    Description = $"Pipeline stage '{stage.Name}' requires approval to proceed.",
+                    Category = HumanGateCategory.ConfigurationChange
+                }, ct);
+
+                if (decision != HumanDecision.Approved && decision != HumanDecision.AutoApproved)
+                {
+                    _logger.LogWarning("[Stage {Order}] Approval denied — stopping pipeline", stage.Order);
+                    break;
+                }
+
+                await workflowEngine.ApproveGateAsync(context, stage.StageId, "human", ct);
+            }
+
+            // Dispatch agents for this stage in parallel
+            var stageTasks = new List<Task<bool>>();
+            foreach (var agentType in stage.AgentsInvolved)
+            {
+                var agent = projectAgents.FirstOrDefault(a => a.Type == agentType)
+                            ?? _agents.FirstOrDefault(a => a.Type == agentType);
+                if (agent is null)
+                {
+                    _logger.LogWarning("[Stage {Order}] Agent {AgentType} not found — skipping", stage.Order, agentType);
+                    completedAgents.Add(agentType);
+                    continue;
+                }
+
+                stageTasks.Add(Task.Run(async () =>
+                {
+                    var success = await RunAgentWithHealingAsync(context, agent, ct);
+                    completedAgents.Add(agentType);
+                    return success;
+                }, ct));
+            }
+
+            await Task.WhenAll(stageTasks);
+
+            // Check exit criteria
+            var readonlyCompleted = (IReadOnlySet<AgentType>)completedAgents;
+            if (!workflowEngine.IsStageComplete(context, stage, readonlyCompleted))
+            {
+                _logger.LogWarning("[Stage {Order}] Exit criteria not met for stage '{Name}'", stage.Order, stage.Name);
+                await PublishEvent(context, AgentType.Orchestrator, AgentStatus.Running,
+                    $"Stage '{stage.Name}' exit criteria not fully met — continuing", ct: ct);
+            }
+        }
+
+        // Write artifacts
+        if (context.Artifacts.Count > 0 && !string.IsNullOrEmpty(config.OutputPath))
+        {
+            await _writer.WriteAllAsync(context.Artifacts, config.OutputPath, ct);
+            _logger.LogInformation("Wrote {Count} artifacts to {Path}", context.Artifacts.Count, config.OutputPath);
+        }
+
+        context.CompletedAt = DateTimeOffset.UtcNow;
+        context.AgentStatuses[AgentType.Orchestrator] = AgentStatus.Completed;
+
+        _logger.LogInformation(
+            "Project pipeline {RunId} completed — {Artifacts} artifacts, {Findings} findings",
+            context.RunId, context.Artifacts.Count, context.Findings.Count);
+
+        await PublishEvent(context, AgentType.Orchestrator, AgentStatus.Completed,
+            $"Project pipeline completed — {context.Artifacts.Count} artifacts, {context.Findings.Count} findings",
+            artifactCount: context.Artifacts.Count, findingCount: context.Findings.Count, ct: CancellationToken.None);
+
+        await ExecutePostPipelineInstructions(context, config, CancellationToken.None);
+
+        return context;
+    }
+
+    /// <summary>
+    /// Core daemon loop extracted for reuse by both <see cref="RunPipelineAsync"/>
+    /// and <see cref="RunProjectPipelineAsync"/> (legacy fallback).
+    /// </summary>
+    private Task<AgentContext> RunDaemonLoopCoreAsync(AgentContext context, PipelineConfig config, CancellationToken ct)
+    {
+        // Delegate to the existing RunPipelineAsync logic.
+        // The context is already set on _current, so RunPipelineAsync will use it.
+        return RunPipelineAsync(config, ct);
     }
 
     // ─── Mid-Pipeline Requirement Injection ────────────────────────
