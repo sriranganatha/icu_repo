@@ -1,8 +1,8 @@
 using System.Linq.Expressions;
 using Microsoft.EntityFrameworkCore;
-using Hms.Database.Entities.Platform;
+using GNex.Database.Entities.Platform;
 
-namespace Hms.Database.Repositories;
+namespace GNex.Database.Repositories;
 
 public interface IPlatformRepository<T> where T : PlatformEntityBase
 {
@@ -18,10 +18,10 @@ public interface IPlatformRepository<T> where T : PlatformEntityBase
 
 public class PlatformRepository<T> : IPlatformRepository<T> where T : PlatformEntityBase
 {
-    protected readonly HmsDbContext Db;
+    protected readonly GNexDbContext Db;
     protected DbSet<T> Set => Db.Set<T>();
 
-    public PlatformRepository(HmsDbContext db) => Db = db;
+    public PlatformRepository(GNexDbContext db) => Db = db;
 
     public async Task<T?> GetByIdAsync(string id, CancellationToken ct = default)
         => await Set.FindAsync([id], ct);

@@ -1,7 +1,7 @@
 using Microsoft.AspNetCore.Mvc.RazorPages;
-using Hms.Web.ViewModels.Governance;
+using GNex.Studio.ViewModels.Governance;
 
-namespace Hms.Web.Pages.Governance;
+namespace GNex.Studio.Pages.Governance;
 
 public class AuditLogModel : PageModel
 {

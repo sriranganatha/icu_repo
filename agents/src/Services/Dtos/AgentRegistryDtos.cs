@@ -1,4 +1,4 @@
-namespace Hms.Services.Dtos.Platform;
+namespace GNex.Services.Dtos.Platform;
 
 // ── Agent Registry DTOs ───────────────────────────────────
 public sealed record AgentTypeDefinitionDto

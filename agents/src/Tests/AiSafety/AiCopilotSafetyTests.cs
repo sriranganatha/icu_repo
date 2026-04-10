@@ -1,6 +1,6 @@
 using Xunit;
 
-namespace Hms.Tests.AiSafety;
+namespace GNex.Tests.AiSafety;
 
 public class AiCopilotSafetyTests
 {

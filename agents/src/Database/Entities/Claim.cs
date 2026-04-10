@@ -1,6 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 
-namespace Hms.Database.Entities.Revenue;
+namespace GNex.Database.Entities.Revenue;
 
 public class Claim
 {

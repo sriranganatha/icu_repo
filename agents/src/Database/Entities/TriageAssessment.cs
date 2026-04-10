@@ -1,6 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 
-namespace Hms.Database.Entities.Emergency;
+namespace GNex.Database.Entities.Emergency;
 
 public class TriageAssessment
 {

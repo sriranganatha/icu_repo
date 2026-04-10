@@ -1,6 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 
-namespace Hms.Database.Entities.Ai;
+namespace GNex.Database.Entities.Ai;
 
 public class AiInteraction
 {

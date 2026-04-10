@@ -1,19 +1,19 @@
-using Hms.Database;
-using Hms.Database.Entities.Platform.AgentRegistry;
-using Hms.Database.Repositories;
-using Hms.Services.Dtos.Platform;
+using GNex.Database;
+using GNex.Database.Entities.Platform.AgentRegistry;
+using GNex.Database.Repositories;
+using GNex.Services.Dtos.Platform;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
-namespace Hms.Services.Platform;
+namespace GNex.Services.Platform;
 
 public sealed class AgentRegistryService : IAgentRegistryService
 {
     private readonly IAgentRegistryRepository _repo;
-    private readonly HmsDbContext _db;
+    private readonly GNexDbContext _db;
     private readonly ILogger<AgentRegistryService> _logger;
 
-    public AgentRegistryService(IAgentRegistryRepository repo, HmsDbContext db, ILogger<AgentRegistryService> logger)
+    public AgentRegistryService(IAgentRegistryRepository repo, GNexDbContext db, ILogger<AgentRegistryService> logger)
     {
         _repo = repo;
         _db = db;

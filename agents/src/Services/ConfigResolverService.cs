@@ -1,13 +1,13 @@
-using Hms.Database;
-using Hms.Database.Entities.Platform.Configuration;
-using Hms.Database.Entities.Platform.Projects;
-using Hms.Database.Repositories;
+using GNex.Database;
+using GNex.Database.Entities.Platform.Configuration;
+using GNex.Database.Entities.Platform.Projects;
+using GNex.Database.Repositories;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
-namespace Hms.Services.Platform;
+namespace GNex.Services.Platform;
 
 /// <summary>3-tier configuration resolver: Master Default → Organization Override → Project Override.</summary>
 public interface IConfigResolverService
@@ -19,7 +19,7 @@ public interface IConfigResolverService
 }
 
 public class ConfigResolverService(
-    HmsDbContext db,
+    GNexDbContext db,
     IPlatformRepository<ConfigSnapshot> snapshotRepo,
     ILogger<ConfigResolverService> logger) : IConfigResolverService
 {

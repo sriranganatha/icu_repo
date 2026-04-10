@@ -1,11 +1,11 @@
-using Hms.Database;
-using Hms.Database.Entities.Platform.Configuration;
-using Hms.Database.Repositories;
+using GNex.Database;
+using GNex.Database.Entities.Platform.Configuration;
+using GNex.Database.Repositories;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using System.Text.RegularExpressions;
 
-namespace Hms.Services.Platform;
+namespace GNex.Services.Platform;
 
 /// <summary>Resolves template variables like {{project.name}}, {{project.tech_stack.backend.framework}}.</summary>
 public interface ITemplateEngineService
@@ -17,7 +17,7 @@ public interface ITemplateEngineService
 }
 
 public partial class TemplateEngineService(
-    HmsDbContext db,
+    GNexDbContext db,
     IPlatformRepository<TemplateVariable> varRepo,
     ILogger<TemplateEngineService> logger) : ITemplateEngineService
 {

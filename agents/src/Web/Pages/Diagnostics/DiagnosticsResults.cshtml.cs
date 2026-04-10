@@ -1,7 +1,7 @@
 using Microsoft.AspNetCore.Mvc.RazorPages;
-using Hms.Web.ViewModels.Diagnostics;
+using GNex.Studio.ViewModels.Diagnostics;
 
-namespace Hms.Web.Pages.Diagnostics;
+namespace GNex.Studio.Pages.Diagnostics;
 
 public class DiagnosticsResultsModel : PageModel
 {

@@ -1,7 +1,7 @@
 using Microsoft.AspNetCore.Mvc.RazorPages;
-using Hms.Web.ViewModels.Inpatient;
+using GNex.Studio.ViewModels.Inpatient;
 
-namespace Hms.Web.Pages.Inpatient;
+namespace GNex.Studio.Pages.Inpatient;
 
 public class AdmissionBoardModel : PageModel
 {

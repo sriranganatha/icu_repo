@@ -1,4 +1,4 @@
-namespace Hms.Web.ViewModels.Inpatient;
+namespace GNex.Studio.ViewModels.Inpatient;
 
 public sealed class AdmissionBoardViewModel
 {

@@ -1,7 +1,7 @@
-using Hms.Services.Dtos.Clinical;
+using GNex.Services.Dtos.Clinical;
 using Microsoft.Extensions.Logging;
 
-namespace Hms.Services.Clinical;
+namespace GNex.Services.Clinical;
 
 public sealed class EncounterService : IEncounterService
 {

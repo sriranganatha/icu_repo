@@ -1,6 +1,6 @@
-using Hms.Services.Dtos.Diagnostics;
+using GNex.Services.Dtos.Diagnostics;
 
-namespace Hms.Services.Diagnostics;
+namespace GNex.Services.Diagnostics;
 
 public interface IDiagnosticsService
 {

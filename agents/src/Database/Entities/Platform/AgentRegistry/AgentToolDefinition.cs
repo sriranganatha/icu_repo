@@ -1,6 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 
-namespace Hms.Database.Entities.Platform.AgentRegistry;
+namespace GNex.Database.Entities.Platform.AgentRegistry;
 
 public class AgentToolDefinition : PlatformEntityBase
 {

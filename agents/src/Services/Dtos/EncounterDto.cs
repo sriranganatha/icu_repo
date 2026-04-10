@@ -1,4 +1,4 @@
-namespace Hms.Services.Dtos.Clinical;
+namespace GNex.Services.Dtos.Clinical;
 
 public sealed record EncounterDto
 {

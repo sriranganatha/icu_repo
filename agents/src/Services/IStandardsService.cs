@@ -1,6 +1,6 @@
-using Hms.Services.Dtos.Platform;
+using GNex.Services.Dtos.Platform;
 
-namespace Hms.Services.Platform;
+namespace GNex.Services.Platform;
 
 public interface IStandardsService
 {

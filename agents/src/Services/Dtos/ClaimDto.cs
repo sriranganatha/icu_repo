@@ -1,4 +1,4 @@
-namespace Hms.Services.Dtos.Revenue;
+namespace GNex.Services.Dtos.Revenue;
 
 public sealed record ClaimDto
 {

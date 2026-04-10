@@ -1,4 +1,4 @@
-namespace Hms.Services.Dtos.Ai;
+namespace GNex.Services.Dtos.Ai;
 
 public sealed record AiInteractionDto
 {

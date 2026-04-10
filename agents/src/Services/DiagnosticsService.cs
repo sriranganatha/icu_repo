@@ -1,7 +1,7 @@
-using Hms.Services.Dtos.Diagnostics;
+using GNex.Services.Dtos.Diagnostics;
 using Microsoft.Extensions.Logging;
 
-namespace Hms.Services.Diagnostics;
+namespace GNex.Services.Diagnostics;
 
 public sealed class DiagnosticsService : IDiagnosticsService
 {

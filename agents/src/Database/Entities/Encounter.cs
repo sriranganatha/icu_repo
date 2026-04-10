@@ -1,6 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 
-namespace Hms.Database.Entities.Clinical;
+namespace GNex.Database.Entities.Clinical;
 
 public class Encounter
 {

@@ -1,6 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 
-namespace Hms.Database.Entities.Platform.Standards;
+namespace GNex.Database.Entities.Platform.Standards;
 
 public class SecurityPolicy : PlatformEntityBase
 {

@@ -1,6 +1,6 @@
-using Hms.Services.Dtos.Mpi;
+using GNex.Services.Dtos.Mpi;
 
-namespace Hms.Services.Mpi;
+namespace GNex.Services.Mpi;
 
 public interface IPatientService
 {

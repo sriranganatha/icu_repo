@@ -1,4 +1,4 @@
-namespace Hms.Services.Dtos.Platform;
+namespace GNex.Services.Dtos.Platform;
 
 // ── Technology DTOs ───────────────────────────────────────
 public sealed record LanguageDto

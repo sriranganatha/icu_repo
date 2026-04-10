@@ -1,4 +1,4 @@
-namespace Hms.Web.ViewModels.Governance;
+namespace GNex.Studio.ViewModels.Governance;
 
 public sealed class AuditLogViewModel
 {

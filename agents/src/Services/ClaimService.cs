@@ -1,7 +1,7 @@
-using Hms.Services.Dtos.Revenue;
+using GNex.Services.Dtos.Revenue;
 using Microsoft.Extensions.Logging;
 
-namespace Hms.Services.Revenue;
+namespace GNex.Services.Revenue;
 
 public sealed class ClaimService : IClaimService
 {

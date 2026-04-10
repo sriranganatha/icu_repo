@@ -1,15 +1,15 @@
-using Hms.Database;
-using Hms.Database.Entities.Platform.Configuration;
-using Hms.Database.Entities.Platform.Technology;
-using Hms.Database.Entities.Platform.LlmConfig;
-using Hms.Database.Entities.Platform.Workflows;
+using GNex.Database;
+using GNex.Database.Entities.Platform.Configuration;
+using GNex.Database.Entities.Platform.Technology;
+using GNex.Database.Entities.Platform.LlmConfig;
+using GNex.Database.Entities.Platform.Workflows;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
-namespace Hms.Services.Platform;
+namespace GNex.Services.Platform;
 
 /// <summary>Seeds default platform metadata on first run.</summary>
-public class PlatformDataSeeder(HmsDbContext db, ILogger<PlatformDataSeeder> logger)
+public class PlatformDataSeeder(GNexDbContext db, ILogger<PlatformDataSeeder> logger)
 {
     public async Task SeedAsync(CancellationToken ct = default)
     {

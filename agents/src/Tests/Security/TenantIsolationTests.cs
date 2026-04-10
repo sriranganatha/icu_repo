@@ -1,6 +1,6 @@
 using Xunit;
 
-namespace Hms.Tests.Security;
+namespace GNex.Tests.Security;
 
 public class TenantIsolationTests
 {

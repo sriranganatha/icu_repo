@@ -1,4 +1,4 @@
-namespace Hms.Services.Dtos.Emergency;
+namespace GNex.Services.Dtos.Emergency;
 
 public sealed record EmergencyArrivalDto
 {

@@ -1,4 +1,4 @@
-namespace Hms.Integration.Events;
+namespace GNex.Integration.Events;
 
 public interface IDomainEvent
 {

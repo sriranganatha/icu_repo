@@ -1,0 +1,80 @@
+@page
+@model GNex.Studio.Pages.Agents.ArtifactsModel
+@{
+    ViewData["Title"] = "Generated Artifacts";
+}
+
+<div class="container-fluid mt-3">
+    <h3><i class="bi bi-file-code"></i> Generated Artifacts</h3>
+    <p class="text-muted">Browse all code artifacts produced by the agent pipeline.</p>
+
+    <div class="row mb-3">
+        <div class="col-auto">
+            <select id="layerFilter" class="form-select form-select-sm" onchange="filterArtifacts()">
+                <option value="">All Layers</option>
+                <option value="Database">Database</option>
+                <option value="Repository">Repository</option>
+                <option value="Dto">DTO</option>
+                <option value="Service">Service</option>
+                <option value="ViewModel">ViewModel</option>
+                <option value="RazorPage">Razor Page</option>
+                <option value="Integration">Integration</option>
+                <option value="Test">Test</option>
+                <option value="Migration">Migration</option>
+                <option value="Configuration">Configuration</option>
+            </select>
+        </div>
+        <div class="col">
+            <input type="text" id="searchArtifact" class="form-control form-control-sm" placeholder="Search file name..." oninput="filterArtifacts()" />
+        </div>
+        <div class="col-auto">
+            <span id="artifactCount" class="badge bg-primary"></span>
+        </div>
+    </div>
+
+    <div id="artifactList"></div>
+</div>
+
+@section Scripts {
+    <script>
+        let allArtifacts = [];
+
+        async function loadArtifacts() {
+            const res = await fetch('/api/pipeline/artifacts');
+            allArtifacts = await res.json();
+            filterArtifacts();
+        }
+
+        function filterArtifacts() {
+            const layer = document.getElementById('layerFilter').value;
+            const search = document.getElementById('searchArtifact').value.toLowerCase();
+            let filtered = allArtifacts;
+            if (layer) filtered = filtered.filter(a => a.layer === layer);
+            if (search) filtered = filtered.filter(a => a.fileName.toLowerCase().includes(search) || a.relativePath.toLowerCase().includes(search));
+
+            document.getElementById('artifactCount').textContent = `${filtered.length} artifacts`;
+
+            const html = filtered.map(a => `
+                <div class="card mb-2">
+                    <div class="card-body py-2 px-3">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <i class="bi bi-file-earmark-code me-1 text-primary"></i>
+                                <strong>${a.fileName}</strong>
+                                <span class="badge bg-secondary ms-2">${a.layer}</span>
+                                <span class="badge bg-info ms-1">${a.producedBy}</span>
+                            </div>
+                            <div style="font-size:0.8rem;" class="text-muted">
+                                ${a.namespace} &mdash; ${a.tracedRequirements} req linked &mdash; ${a.contentLength} chars
+                            </div>
+                        </div>
+                        <small class="text-muted">${a.relativePath}</small>
+                    </div>
+                </div>`).join('');
+
+            document.getElementById('artifactList').innerHTML = html || '<p class="text-muted text-center mt-5">No artifacts yet. Run the pipeline first.</p>';
+        }
+
+        loadArtifacts();
+    </script>
+}

@@ -1,6 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 
-namespace Hms.Database.Entities.Inpatient;
+namespace GNex.Database.Entities.Inpatient;
 
 public class Admission
 {

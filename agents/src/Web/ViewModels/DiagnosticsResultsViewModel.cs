@@ -1,4 +1,4 @@
-namespace Hms.Web.ViewModels.Diagnostics;
+namespace GNex.Studio.ViewModels.Diagnostics;
 
 public sealed class DiagnosticsResultsViewModel
 {

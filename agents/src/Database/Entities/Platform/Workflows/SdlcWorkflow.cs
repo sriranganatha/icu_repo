@@ -1,6 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 
-namespace Hms.Database.Entities.Platform.Workflows;
+namespace GNex.Database.Entities.Platform.Workflows;
 
 public class SdlcWorkflow : PlatformEntityBase
 {

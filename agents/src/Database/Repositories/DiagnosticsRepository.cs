@@ -1,7 +1,7 @@
 using Microsoft.EntityFrameworkCore;
-using Hms.Database;
+using GNex.Database;
 
-namespace Hms.Database.Repositories;
+namespace GNex.Database.Repositories;
 
 public interface IDiagnosticsRepository
 {
@@ -13,9 +13,9 @@ public interface IDiagnosticsRepository
 
 public class DiagnosticsRepository : IDiagnosticsRepository
 {
-    private readonly HmsDbContext _db;
+    private readonly GNexDbContext _db;
 
-    public DiagnosticsRepository(HmsDbContext db) => _db = db;
+    public DiagnosticsRepository(GNexDbContext db) => _db = db;
 
     public async Task<ResultRecord?> GetByIdAsync(string id, CancellationToken ct = default)
         => await _db.Set<ResultRecord>().FindAsync([id], ct);

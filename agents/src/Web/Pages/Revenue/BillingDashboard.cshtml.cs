@@ -1,7 +1,7 @@
 using Microsoft.AspNetCore.Mvc.RazorPages;
-using Hms.Web.ViewModels.Revenue;
+using GNex.Studio.ViewModels.Revenue;
 
-namespace Hms.Web.Pages.Revenue;
+namespace GNex.Studio.Pages.Revenue;
 
 public class BillingDashboardModel : PageModel
 {

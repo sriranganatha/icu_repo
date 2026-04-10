@@ -1,0 +1,2754 @@
+﻿@page
+@model GNex.Studio.Pages.IndexModel
+@{
+    ViewData["Title"] = "Agent Pipeline Dashboard";
+}
+
+<div class="container-fluid mt-3">
+    <!-- Header -->
+    <div class="row mb-4">
+        <div class="col">
+            <h2><i class="bi bi-cpu"></i> GN Studio Dashboard</h2>
+            <p class="text-muted mb-0">Monitor agents building the Hospital Management System in real time.</p>
+        </div>
+        <div class="col-auto d-flex align-items-center gap-2">
+            <span id="connectionBadge" class="badge bg-secondary">Disconnected</span>
+            <button id="btnRunPipeline" class="btn btn-primary" onclick="runPipeline()">
+                <i class="bi bi-play-fill"></i> Run Full Pipeline
+            </button>
+            <button id="btnStopPipeline" class="btn btn-outline-danger" onclick="stopPipeline()" disabled>
+                <i class="bi bi-stop-fill"></i> Stop All Agents
+            </button>
+            <button class="btn btn-outline-danger btn-sm" onclick="resetProject()" title="Reset everything and start from scratch">
+                <i class="bi bi-arrow-counterclockwise"></i> Reset Project
+            </button>
+        </div>
+    </div>
+
+    <!-- Configuration Panel -->
+    <div class="card mb-4">
+        <div class="card-header d-flex justify-content-between align-items-center" data-bs-toggle="collapse" data-bs-target="#configPanel" role="button">
+            <span><i class="bi bi-gear"></i> Pipeline Configuration <small class="text-muted ms-2">(click to expand)</small></span>
+            <span class="d-flex gap-2" onclick="event.stopPropagation()">
+                <button class="btn btn-sm btn-outline-success" onclick="saveConfig()" title="Save config to file"><i class="bi bi-save"></i> Save</button>
+                <button class="btn btn-sm btn-outline-info" onclick="loadConfig()" title="Load saved config"><i class="bi bi-folder2-open"></i> Load</button>
+            </span>
+        </div>
+        <div class="collapse show" id="configPanel">
+            <div class="card-body">
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <label class="form-label fw-semibold"><i class="bi bi-folder2-open me-1"></i>Requirements Path</label>
+                        <input type="text" id="inputReqsPath" class="form-control" value="C:\sri\mywork\icu\docs" placeholder="e.g. C:\sri\mywork\icu\docs" />
+                        <small class="text-muted">Folder containing requirement markdown files</small>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label fw-semibold"><i class="bi bi-folder-plus me-1"></i>Output Path</label>
+                        <input type="text" id="inputOutputPath" class="form-control" value="C:\sri\mywork\icu\src" placeholder="e.g. C:\sri\mywork\icu\src" />
+                        <small class="text-muted">Target folder for generated solution code</small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label fw-semibold"><i class="bi bi-box me-1"></i>Docker Container Name</label>
+                        <input type="text" id="inputContainerName" class="form-control" value="GNex-postgres" />
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label fw-semibold"><i class="bi bi-server me-1"></i>DB Hostname</label>
+                        <input type="text" id="inputDbHost" class="form-control" value="localhost" />
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label fw-semibold"><i class="bi bi-hdd-network me-1"></i>DB Port</label>
+                        <input type="number" id="inputDbPort" class="form-control" value="5418" />
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label fw-semibold"><i class="bi bi-person-badge me-1"></i>DB Username</label>
+                        <input type="text" id="inputDbUser" class="form-control" value="gnex_admin" />
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label fw-semibold"><i class="bi bi-database me-1"></i>Database Name</label>
+                        <input type="text" id="inputDbName" class="form-control" value="gnex_db" />
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label fw-semibold"><i class="bi bi-shield-lock me-1"></i>DB Password</label>
+                        <input type="password" id="inputDbPassword" class="form-control" value="GNex@1234" />
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label fw-semibold">Solution Namespace</label>
+                        <input type="text" id="inputNamespace" class="form-control" value="GNex" />
+                    </div>
+                    <div class="col-md-6 d-flex align-items-end">
+                        <div class="form-check form-switch me-4">
+                            <input class="form-check-input" type="checkbox" id="chkSpinDocker" checked />
+                            <label class="form-check-label" for="chkSpinDocker">Spin up Docker DB</label>
+                        </div>
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" id="chkExecDdl" checked />
+                            <label class="form-check-label" for="chkExecDdl">Execute DDL</label>
+                        </div>
+                    </div>
+                </div>
+                <!-- WIP Limits -->
+                <hr class="my-3" />
+                <div class="d-flex align-items-center mb-2">
+                    <i class="bi bi-kanban me-2 text-warning"></i>
+                    <span class="fw-semibold">WIP Limits</span>
+                    <small class="text-muted ms-2">Cap the number of items in Queue and In-Dev to avoid overload</small>
+                </div>
+                <div class="row g-2">
+                    <div class="col-md-3 col-6">
+                        <label class="form-label fw-semibold">Max Queue Items</label>
+                        <input type="number" id="inputMaxQueue" class="form-control" value="10" min="1" max="200" />
+                        <small class="text-muted">Items in Received state</small>
+                    </div>
+                    <div class="col-md-3 col-6">
+                        <label class="form-label fw-semibold">Max In-Dev Items</label>
+                        <input type="number" id="inputMaxInDev" class="form-control" value="10" min="1" max="200" />
+                        <small class="text-muted">Items in InProgress state</small>
+                    </div>
+                </div>
+                <!-- Service Port Mapping -->
+                <hr class="my-3" />
+                <div class="d-flex align-items-center mb-2">
+                    <i class="bi bi-diagram-3 me-2 text-primary"></i>
+                    <span class="fw-semibold">Service Port Mapping</span>
+                    <small class="text-muted ms-2">Change ports if another service is already using a port</small>
+                </div>
+                <div class="row g-2">
+                    <div class="col-md-3 col-6">
+                        <div class="input-group input-group-sm">
+                            <span class="input-group-text" style="min-width:95px">Patient</span>
+                            <input type="number" id="portPatient" class="form-control" value="5101" />
+                        </div>
+                    </div>
+                    <div class="col-md-3 col-6">
+                        <div class="input-group input-group-sm">
+                            <span class="input-group-text" style="min-width:95px">Encounter</span>
+                            <input type="number" id="portEncounter" class="form-control" value="5102" />
+                        </div>
+                    </div>
+                    <div class="col-md-3 col-6">
+                        <div class="input-group input-group-sm">
+                            <span class="input-group-text" style="min-width:95px">Inpatient</span>
+                            <input type="number" id="portInpatient" class="form-control" value="5103" />
+                        </div>
+                    </div>
+                    <div class="col-md-3 col-6">
+                        <div class="input-group input-group-sm">
+                            <span class="input-group-text" style="min-width:95px">Emergency</span>
+                            <input type="number" id="portEmergency" class="form-control" value="5104" />
+                        </div>
+                    </div>
+                    <div class="col-md-3 col-6">
+                        <div class="input-group input-group-sm">
+                            <span class="input-group-text" style="min-width:95px">Diagnostics</span>
+                            <input type="number" id="portDiagnostics" class="form-control" value="5105" />
+                        </div>
+                    </div>
+                    <div class="col-md-3 col-6">
+                        <div class="input-group input-group-sm">
+                            <span class="input-group-text" style="min-width:95px">Revenue</span>
+                            <input type="number" id="portRevenue" class="form-control" value="5106" />
+                        </div>
+                    </div>
+                    <div class="col-md-3 col-6">
+                        <div class="input-group input-group-sm">
+                            <span class="input-group-text" style="min-width:95px">Audit</span>
+                            <input type="number" id="portAudit" class="form-control" value="5107" />
+                        </div>
+                    </div>
+                    <div class="col-md-3 col-6">
+                        <div class="input-group input-group-sm">
+                            <span class="input-group-text" style="min-width:95px">AI</span>
+                            <input type="number" id="portAi" class="form-control" value="5108" />
+                        </div>
+                    </div>
+                    <div class="col-md-3 col-6">
+                        <div class="input-group input-group-sm">
+                            <span class="input-group-text" style="min-width:95px">API Gateway</span>
+                            <input type="number" id="portGateway" class="form-control" value="5100" />
+                        </div>
+                    </div>
+                    <div class="col-md-3 col-6">
+                        <div class="input-group input-group-sm">
+                            <span class="input-group-text" style="min-width:95px">Kafka</span>
+                            <input type="number" id="portKafka" class="form-control" value="9092" />
+                        </div>
+                    </div>
+                </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Work Item Templates Panel -->
+    <div class="card mb-4 border-secondary">
+        <div class="card-header d-flex justify-content-between align-items-center" data-bs-toggle="collapse" data-bs-target="#templatePanel" role="button">
+            <span><i class="bi bi-card-list me-1"></i> Work Item Templates <small class="text-muted ms-2">View / edit canonical formats stored in DB</small></span>
+            <span class="d-flex gap-2" onclick="event.stopPropagation()">
+                <button class="btn btn-sm btn-outline-secondary" onclick="loadTemplates()"><i class="bi bi-arrow-clockwise"></i> Refresh</button>
+                <button class="btn btn-sm btn-outline-success" onclick="saveTemplate()"><i class="bi bi-save"></i> Save Template</button>
+            </span>
+        </div>
+        <div class="collapse" id="templatePanel">
+            <div class="card-body">
+                <div class="row g-2 mb-2">
+                    <div class="col-md-4">
+                        <label class="form-label fw-semibold">Template Key</label>
+                        <select id="tmplKey" class="form-select" onchange="onTemplateSelect(this.value)">
+                            <option value="">-- Select Template --</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label fw-semibold">Item Type</label>
+                        <input id="tmplItemType" class="form-control" />
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label fw-semibold">Template Name</label>
+                        <input id="tmplName" class="form-control" />
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label fw-semibold">Version</label>
+                        <input id="tmplVersion" type="number" min="1" class="form-control" value="1" />
+                    </div>
+                </div>
+                <div class="row g-2 mb-2">
+                    <div class="col-md-10">
+                        <label class="form-label fw-semibold">Purpose</label>
+                        <input id="tmplPurpose" class="form-control" />
+                    </div>
+                    <div class="col-md-2 d-flex align-items-end">
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" id="tmplIsActive" checked />
+                            <label class="form-check-label" for="tmplIsActive">Active</label>
+                        </div>
+                    </div>
+                </div>
+                <div class="mb-2">
+                    <label class="form-label fw-semibold">Template Format</label>
+                    <textarea id="tmplFormat" class="form-control" rows="3"></textarea>
+                </div>
+                <div class="mb-0">
+                    <label class="form-label fw-semibold">Example Content</label>
+                    <textarea id="tmplExample" class="form-control" rows="2"></textarea>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Orchestrator Instructions Panel -->
+    <div class="card mb-4 border-info">
+        <div class="card-header bg-info bg-opacity-10 d-flex justify-content-between align-items-center">
+            <span><i class="bi bi-chat-left-text text-info me-2"></i><strong>Orchestrator Instructions</strong> <small class="text-muted ms-2">Guide the pipeline with natural language directives</small></span>
+            <span id="instrQueueBadge" class="badge bg-info">0 queued</span>
+        </div>
+        <div class="card-body">
+            <div class="row g-2 mb-2">
+                <div class="col">
+                    <textarea id="inputInstructions" class="form-control" rows="3"
+                        placeholder="e.g. Focus on security hardening for patient data. Skip performance optimization. Ensure all services have HIPAA audit logging. Use async/await everywhere..."></textarea>
+                </div>
+            </div>
+            <div class="d-flex gap-2 align-items-center">
+                <button class="btn btn-info btn-sm text-white" onclick="sendInstruction()" title="Send instruction to live pipeline">
+                    <i class="bi bi-send-fill me-1"></i> Send to Pipeline
+                </button>
+                <button class="btn btn-outline-info btn-sm" onclick="saveInstructionToDb()" title="Save instruction for future reuse">
+                    <i class="bi bi-bookmark-plus me-1"></i> Save
+                </button>
+                <button class="btn btn-outline-secondary btn-sm" onclick="clearInstructions()" title="Clear instruction history">
+                    <i class="bi bi-trash me-1"></i> Clear
+                </button>
+                <button class="btn btn-outline-secondary btn-sm" onclick="toggleSavedInstructions()" title="Show/hide saved instructions">
+                    <i class="bi bi-clock-history me-1"></i> History
+                </button>
+                <small class="text-muted ms-auto">Instructions are picked up by agents at the start of each stage</small>
+            </div>
+            <div id="savedInstructionsPanel" class="mt-2 d-none">
+                <div class="border rounded p-2 bg-light" style="max-height: 200px; overflow-y: auto; font-size: 0.85rem;">
+                    <div id="savedInstructionsList" class="text-muted text-center">Loading...</div>
+                </div>
+            </div>
+            <div id="instrHistory" class="mt-2" style="max-height: 150px; overflow-y: auto; font-size: 0.85rem;"></div>
+        </div>
+    </div>
+
+    <!-- Human-in-the-Loop Decisions Panel -->
+    <div class="card mb-4 border-warning">
+        <div class="card-header bg-warning bg-opacity-10 d-flex justify-content-between align-items-center">
+            <span><i class="bi bi-person-check text-warning me-2"></i><strong>Human-in-the-Loop Decisions</strong> <small class="text-muted ms-2">Approve or reject agent requests that need human oversight</small></span>
+            <div>
+                <span class="badge bg-warning text-dark" id="hitlPendingBadge">0 pending</span>
+                <button class="btn btn-outline-warning btn-sm ms-2" onclick="refreshDecisions()" title="Refresh decisions"><i class="bi bi-arrow-clockwise"></i></button>
+            </div>
+        </div>
+        <div class="card-body p-0">
+            <div style="max-height: 350px; overflow-y: auto;">
+                <table class="table table-sm table-hover mb-0">
+                    <thead class="table-light sticky-top">
+                        <tr>
+                            <th style="width:120px">Agent</th>
+                            <th style="width:100px">Category</th>
+                            <th>Title</th>
+                            <th style="width:80px">Status</th>
+                            <th style="width:160px">Actions</th>
+                            <th style="width:120px">Requested</th>
+                        </tr>
+                    </thead>
+                    <tbody id="hitlBody">
+                        <tr><td colspan="6" class="text-center text-muted py-3">No pending decisions</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Submit New Requirements Panel -->
+    <div class="card mb-4 border-success">
+        <div class="card-header bg-success bg-opacity-10 d-flex justify-content-between align-items-center">
+            <span><i class="bi bi-plus-circle text-success me-2"></i><strong>Submit New Requirements</strong> <small class="text-muted ms-2">Add requirements mid-pipeline — auto-saved to docs, expanded to backlog, agents re-dispatched</small></span>
+            <span id="reqSubmitBadge" class="badge bg-success">0 submitted</span>
+        </div>
+        <div class="card-body">
+            <div class="row g-2 mb-2">
+                <div class="col-md-5">
+                    <input id="newReqTitle" class="form-control form-control-sm" placeholder="Requirement Title (e.g. Patient Medication Reconciliation)" />
+                </div>
+                <div class="col-md-3">
+                    <select id="newReqModule" class="form-select form-select-sm">
+                        <option value="General">General</option>
+                        <option value="Patient">Patient</option>
+                        <option value="Encounter">Encounter</option>
+                        <option value="Inpatient">Inpatient</option>
+                        <option value="Emergency">Emergency</option>
+                        <option value="Diagnostics">Diagnostics</option>
+                        <option value="Revenue">Revenue</option>
+                        <option value="Pharmacy">Pharmacy</option>
+                        <option value="AI">AI</option>
+                        <option value="Integration">Integration</option>
+                        <option value="Security">Security</option>
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <input id="newReqTags" class="form-control form-control-sm" placeholder="Tags (comma-separated)" />
+                </div>
+            </div>
+            <div class="row g-2 mb-2">
+                <div class="col-md-8">
+                    <textarea id="newReqDescription" class="form-control form-control-sm" rows="2" placeholder="Description — what should this feature do?"></textarea>
+                </div>
+                <div class="col-md-4">
+                    <textarea id="newReqAC" class="form-control form-control-sm" rows="2" placeholder="Acceptance Criteria (one per line)"></textarea>
+                </div>
+            </div>
+            <div class="d-flex gap-2 align-items-center">
+                <button class="btn btn-success btn-sm" onclick="submitRequirement()" title="Submit requirement to orchestrator">
+                    <i class="bi bi-plus-lg me-1"></i> Submit Requirement
+                </button>
+                <button class="btn btn-outline-success btn-sm" onclick="submitBulkRequirements()" title="Submit all queued requirements at once">
+                    <i class="bi bi-collection me-1"></i> Submit Bulk (<span id="bulkCount">0</span>)
+                </button>
+                <button class="btn btn-outline-secondary btn-sm" onclick="clearReqForm()">
+                    <i class="bi bi-x-circle me-1"></i> Clear
+                </button>
+                <small class="text-muted ms-auto">Requirements are saved to docs/ folder, expanded to backlog, and dispatched to agents</small>
+            </div>
+            <div id="reqQueue" class="mt-2" style="max-height: 200px; overflow-y: auto; font-size: 0.85rem;"></div>
+        </div>
+    </div>
+
+    <!-- Backlog Tracker Panel -->
+    <div class="card mb-4 border-secondary">
+        <div class="card-header bg-secondary bg-opacity-10 d-flex justify-content-between align-items-center flex-wrap gap-2">
+            <span><i class="bi bi-kanban text-secondary me-2"></i><strong>Backlog Tracker</strong> <small class="text-muted ms-2">SDLC work items — managed by BacklogAgent</small></span>
+            <div class="d-flex align-items-center gap-1 flex-wrap">
+                <button class="badge bg-primary border-0 me-1" id="blStatNew" onclick="setBacklogStatusQuickView('New')" title="Show New items">0 New</button>
+                <button class="badge bg-info border-0 me-1" id="blStatQueued" onclick="setBacklogStatusQuickView('InQueue')" title="Show Queued items">0 Queued</button>
+                <button class="badge bg-warning text-dark border-0 me-1" id="blStatDev" onclick="setBacklogStatusQuickView('InProgress')" title="Show In Dev items">0 In Dev</button>
+                <button class="badge bg-success border-0 me-1" id="blStatDone" onclick="setBacklogStatusQuickView('Completed')" title="Show Done items">0 Done</button>
+                <button class="badge bg-danger border-0 me-1" id="blStatBlocked" onclick="setBacklogStatusQuickView('Blocked')" title="Show Blocked items">0 Blocked</button>
+                <button class="btn btn-outline-secondary btn-sm ms-2" onclick="refreshBacklog()" title="Refresh backlog">
+                    <i class="bi bi-arrow-clockwise"></i>
+                </button>
+            </div>
+        </div>
+        <div class="card-body p-0">
+            <div class="row g-0">
+                <!-- Backlog progress bar -->
+                <div class="col-12 p-3 pb-0">
+                    <div class="progress" style="height: 22px;" id="backlogProgress">
+                        <div class="progress-bar bg-primary" id="blBarNew" role="progressbar" style="width: 0%"></div>
+                        <div class="progress-bar bg-info" id="blBarQueued" role="progressbar" style="width: 0%"></div>
+                        <div class="progress-bar bg-warning" id="blBarDev" role="progressbar" style="width: 0%"></div>
+                        <div class="progress-bar bg-success" id="blBarDone" role="progressbar" style="width: 0%"></div>
+                        <div class="progress-bar bg-danger" id="blBarBlocked" role="progressbar" style="width: 0%"></div>
+                    </div>
+                </div>
+
+                <!-- ── Filter / Search bar ── -->
+                <div class="col-12 px-3 pt-2 pb-1">
+                    <div class="d-flex gap-2 flex-wrap align-items-center">
+                        <input type="text" class="form-control form-control-sm" id="blSearchText" placeholder="Search title / module..." style="max-width:220px" oninput="_blPage=1;applyBacklogFilters()">
+                        <select class="form-select form-select-sm" id="blFilterStatus" style="max-width:130px" onchange="_blPage=1;applyBacklogFilters()">
+                            <option value="">All Statuses</option>
+                            <option value="New">New</option>
+                            <option value="InQueue">InQueue</option>
+                            <option value="Received">Received</option>
+                            <option value="InProgress">InProgress</option>
+                            <option value="Completed">Completed</option>
+                            <option value="Blocked">Blocked</option>
+                        </select>
+                        <select class="form-select form-select-sm" id="blFilterType" style="max-width:120px" onchange="_blPage=1;applyBacklogFilters()">
+                            <option value="">All Types</option>
+                            <option value="Epic">Epic</option>
+                            <option value="UserStory">UserStory</option>
+                            <option value="UseCase">UseCase</option>
+                            <option value="Task">Task</option>
+                            <option value="Bug">Bug</option>
+                        </select>
+                        <select class="form-select form-select-sm" id="blFilterModule" style="max-width:140px" onchange="_blPage=1;applyBacklogFilters()">
+                            <option value="">All Modules</option>
+                        </select>
+                        <select class="form-select form-select-sm" id="blFilterAgent" style="max-width:150px" onchange="_blPage=1;applyBacklogFilters()">
+                            <option value="">All Agents</option>
+                        </select>
+                        <select class="form-select form-select-sm" id="blFilterPriority" style="max-width:100px" onchange="_blPage=1;applyBacklogFilters()">
+                            <option value="">All P</option>
+                            <option value="0">P0 (Critical)</option>
+                            <option value="1">P1 (High)</option>
+                            <option value="2">P2 (Medium)</option>
+                            <option value="3">P3 (Low)</option>
+                        </select>
+                        <button class="btn btn-outline-secondary btn-sm" onclick="clearBacklogFilters()" title="Clear all filters"><i class="bi bi-x-circle"></i></button>
+                        <span class="text-muted small ms-auto" id="blFilterCount"></span>
+                    </div>
+                    <div class="d-flex gap-2 flex-wrap align-items-center mt-2">
+                        <small class="text-muted">Quick views:</small>
+                        <button class="btn btn-outline-info btn-sm" onclick="setBacklogStatusQuickView('InQueue')">Queue</button>
+                        <button class="btn btn-outline-warning btn-sm" onclick="setBacklogStatusQuickView('InProgress')">In Dev</button>
+                        <button class="btn btn-outline-success btn-sm" onclick="setBacklogStatusQuickView('Completed')">Done</button>
+                        <button class="btn btn-outline-danger btn-sm" onclick="setBacklogStatusQuickView('Blocked')">Blocked</button>
+                        <button class="btn btn-outline-secondary btn-sm" onclick="setBacklogStatusQuickView('')">All</button>
+                    </div>
+                </div>
+
+                <!-- Backlog items table -->
+                <div class="col-12">
+                    <div style="max-height: 400px; overflow-y: auto;">
+                        <table class="table table-sm table-hover mb-0" id="backlogTable">
+                            <thead class="table-light sticky-top">
+                                <tr>
+                                    <th style="width:60px;cursor:pointer" onclick="sortBacklog('itemType')">Type <i class="bi bi-arrow-down-up text-muted" style="font-size:.7rem"></i></th>
+                                    <th style="cursor:pointer" onclick="sortBacklog('title')">Title <i class="bi bi-arrow-down-up text-muted" style="font-size:.7rem"></i></th>
+                                    <th style="width:90px;cursor:pointer" onclick="sortBacklog('module')">Module <i class="bi bi-arrow-down-up text-muted" style="font-size:.7rem"></i></th>
+                                    <th style="width:90px;cursor:pointer" onclick="sortBacklog('status')">Status <i class="bi bi-arrow-down-up text-muted" style="font-size:.7rem"></i></th>
+                                    <th style="width:110px;cursor:pointer" onclick="sortBacklog('assignedAgent')">Agent <i class="bi bi-arrow-down-up text-muted" style="font-size:.7rem"></i></th>
+                                    <th style="width:80px;cursor:pointer" onclick="sortBacklog('priority')">Priority <i class="bi bi-arrow-down-up text-muted" style="font-size:.7rem"></i></th>
+                                    <th style="width:40px;cursor:pointer" onclick="sortBacklog('iteration')">Iter <i class="bi bi-arrow-down-up text-muted" style="font-size:.7rem"></i></th>
+                                    <th style="width:80px">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="backlogBody">
+                                <tr><td colspan="8" class="text-center text-muted py-3">No backlog items yet — submit requirements or run pipeline</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <!-- Pagination controls -->
+                    <div class="d-flex justify-content-between align-items-center px-3 py-2 border-top bg-light" id="blPaginationBar" style="display:none!important">
+                        <div class="d-flex align-items-center gap-2">
+                            <small class="text-muted">Rows per page:</small>
+                            <select class="form-select form-select-sm" style="width:70px" id="blPageSize" onchange="blChangePageSize()">
+                                <option value="25" selected>25</option>
+                                <option value="50">50</option>
+                                <option value="100">100</option>
+                                <option value="0">All</option>
+                            </select>
+                        </div>
+                        <small class="text-muted" id="blPageInfo"></small>
+                        <div class="btn-group btn-group-sm">
+                            <button class="btn btn-outline-secondary" onclick="blGoPage('first')" title="First page"><i class="bi bi-chevron-bar-left"></i></button>
+                            <button class="btn btn-outline-secondary" onclick="blGoPage('prev')" title="Previous"><i class="bi bi-chevron-left"></i></button>
+                            <button class="btn btn-outline-secondary" onclick="blGoPage('next')" title="Next"><i class="bi bi-chevron-right"></i></button>
+                            <button class="btn btn-outline-secondary" onclick="blGoPage('last')" title="Last page"><i class="bi bi-chevron-bar-right"></i></button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Stats Row -->
+    <div class="row mb-4 g-3">
+        <div class="col-md-3">
+            <div class="card text-bg-primary">
+                <div class="card-body">
+                    <h6 class="card-title">Requirements</h6>
+                    <h2 id="statReqs" class="mb-0">0</h2>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-bg-success">
+                <div class="card-body">
+                    <h6 class="card-title">Artifacts Generated</h6>
+                    <h2 id="statArtifacts" class="mb-0">0</h2>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-bg-warning">
+                <div class="card-body">
+                    <h6 class="card-title">Review Findings</h6>
+                    <h2 id="statFindings" class="mb-0">0</h2>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-bg-info">
+                <div class="card-body">
+                    <h6 class="card-title">Pipeline Time</h6>
+                    <h2 id="statTime" class="mb-0">--</h2>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Agent Cards: Core Pipeline -->
+    <h5 class="mb-2"><i class="bi bi-arrow-right-circle text-primary me-1"></i> Core Pipeline Agents</h5>
+    <div class="row mb-3 g-3">
+        <div class="col-md-4 col-lg-3" id="card-Orchestrator">
+            @await Html.PartialAsync("_AgentCard", new GNex.Studio.Pages.AgentCardModel { Name = "Orchestrator", Icon = "bi-diagram-3", AgentKey = "Orchestrator", Description = "Coordinates pipeline stages sequentially" })
+        </div>
+        <div class="col-md-4 col-lg-3" id="card-RequirementsReader">
+            @await Html.PartialAsync("_AgentCard", new GNex.Studio.Pages.AgentCardModel { Name = "Requirements Reader", Icon = "bi-file-earmark-text", AgentKey = "RequirementsReader", Description = "Scans icu/docs for structured requirements" })
+        </div>
+        <div class="col-md-4 col-lg-3" id="card-Architect">
+            @await Html.PartialAsync("_AgentCard", new GNex.Studio.Pages.AgentCardModel { Name = "Architect Agent", Icon = "bi-diagram-3-fill", AgentKey = "Architect", Description = "Derives architecture guidance and scoped service boundaries" })
+        </div>
+        <div class="col-md-4 col-lg-3" id="card-PlatformBuilder">
+            @await Html.PartialAsync("_AgentCard", new GNex.Studio.Pages.AgentCardModel { Name = "Platform Builder", Icon = "bi-hdd-stack", AgentKey = "PlatformBuilder", Description = "Defines platform constraints, runtime profile, and quality gates" })
+        </div>
+        <div class="col-md-4 col-lg-3" id="card-RequirementsExpander">
+            @await Html.PartialAsync("_AgentCard", new GNex.Studio.Pages.AgentCardModel { Name = "Reqs Expander", Icon = "bi-diagram-2", AgentKey = "RequirementsExpander", Description = "Expands requirements into epics, stories, tasks" })
+        </div>
+        <div class="col-md-4 col-lg-3" id="card-Backlog">
+            @await Html.PartialAsync("_AgentCard", new GNex.Studio.Pages.AgentCardModel { Name = "Backlog Manager", Icon = "bi-kanban", AgentKey = "Backlog", Description = "Tracks work item lifecycle and priorities" })
+        </div>
+        <div class="col-md-4 col-lg-3" id="card-RequirementAnalyzer">
+            @await Html.PartialAsync("_AgentCard", new GNex.Studio.Pages.AgentCardModel { Name = "Req Analyzer", Icon = "bi-search", AgentKey = "RequirementAnalyzer", Description = "Gap analysis — identifies missing coverage & generates stories" })
+        </div>
+        <div class="col-md-4 col-lg-3" id="card-Database">
+            @await Html.PartialAsync("_AgentCard", new GNex.Studio.Pages.AgentCardModel { Name = "Database Agent", Icon = "bi-database", AgentKey = "Database", Description = "Generates EF Core entities, DbContext, repos" })
+        </div>
+        <div class="col-md-4 col-lg-3" id="card-ServiceLayer">
+            @await Html.PartialAsync("_AgentCard", new GNex.Studio.Pages.AgentCardModel { Name = "Service Layer", Icon = "bi-layers", AgentKey = "ServiceLayer", Description = "Generates DTOs, service interfaces & impls" })
+        </div>
+        <div class="col-md-4 col-lg-3" id="card-Application">
+            @await Html.PartialAsync("_AgentCard", new GNex.Studio.Pages.AgentCardModel { Name = "Application Agent", Icon = "bi-window-stack", AgentKey = "Application", Description = "Generates Razor Pages, ViewModels, layouts" })
+        </div>
+        <div class="col-md-4 col-lg-3" id="card-Integration">
+            @await Html.PartialAsync("_AgentCard", new GNex.Studio.Pages.AgentCardModel { Name = "Integration Agent", Icon = "bi-plug", AgentKey = "Integration", Description = "Generates HL7/FHIR adapters, event publisher" })
+        </div>
+        <div class="col-md-4 col-lg-3" id="card-Testing">
+            @await Html.PartialAsync("_AgentCard", new GNex.Studio.Pages.AgentCardModel { Name = "Testing Agent", Icon = "bi-check2-circle", AgentKey = "Testing", Description = "Generates unit & integration test stubs" })
+        </div>
+        <div class="col-md-4 col-lg-3" id="card-Review">
+            @await Html.PartialAsync("_AgentCard", new GNex.Studio.Pages.AgentCardModel { Name = "Review Agent", Icon = "bi-shield-check", AgentKey = "Review", Description = "Reviews code against requirements & security" })
+        </div>
+    </div>
+    <!-- Agent Cards: Remediation Agents -->
+    <h5 class="mb-2"><i class="bi bi-wrench text-warning me-1"></i> Remediation Agents</h5>
+    <div class="row mb-3 g-3">
+        <div class="col-md-4 col-lg-3" id="card-BugFix">
+            @await Html.PartialAsync("_AgentCard", new GNex.Studio.Pages.AgentCardModel { Name = "BugFix Agent", Icon = "bi-bug", AgentKey = "BugFix", Description = "AI-driven code repair from Review findings" })
+        </div>
+        <div class="col-md-4 col-lg-3" id="card-Performance">
+            @await Html.PartialAsync("_AgentCard", new GNex.Studio.Pages.AgentCardModel { Name = "Performance Agent", Icon = "bi-speedometer2", AgentKey = "Performance", Description = "Caching, query optimization, pagination" })
+        </div>
+        <div class="col-md-4 col-lg-3" id="card-Security">
+            @await Html.PartialAsync("_AgentCard", new GNex.Studio.Pages.AgentCardModel { Name = "Security Agent", Icon = "bi-shield-lock", AgentKey = "Security", Description = "OWASP Top-10, input validation, auth guards" })
+        </div>
+        <div class="col-md-4 col-lg-3" id="card-Supervisor">
+            @await Html.PartialAsync("_AgentCard", new GNex.Studio.Pages.AgentCardModel { Name = "Supervisor Agent", Icon = "bi-eye", AgentKey = "Supervisor", Description = "Monitors agents, diagnoses failures, remediates" })
+        </div>
+    </div>
+    <!-- Agent Cards: Enrichment / Compliance Agents -->
+    <h5 class="mb-2"><i class="bi bi-shield-fill-check text-success me-1"></i> Enrichment &amp; Compliance Agents</h5>
+    <div class="row mb-4 g-3">
+        <div class="col-md-4 col-lg-3" id="card-HipaaCompliance">
+            @await Html.PartialAsync("_AgentCard", new GNex.Studio.Pages.AgentCardModel { Name = "HIPAA Compliance", Icon = "bi-heart-pulse", AgentKey = "HipaaCompliance", Description = "PHI encryption, audit trails, BAA compliance" })
+        </div>
+        <div class="col-md-4 col-lg-3" id="card-Soc2Compliance">
+            @await Html.PartialAsync("_AgentCard", new GNex.Studio.Pages.AgentCardModel { Name = "SOC2 Compliance", Icon = "bi-file-earmark-lock", AgentKey = "Soc2Compliance", Description = "SOC2 Type II controls & trust criteria" })
+        </div>
+        <div class="col-md-4 col-lg-3" id="card-AccessControl">
+            @await Html.PartialAsync("_AgentCard", new GNex.Studio.Pages.AgentCardModel { Name = "Access Control", Icon = "bi-key", AgentKey = "AccessControl", Description = "RBAC policies, JWT, claims-based auth" })
+        </div>
+        <div class="col-md-4 col-lg-3" id="card-Observability">
+            @await Html.PartialAsync("_AgentCard", new GNex.Studio.Pages.AgentCardModel { Name = "Observability", Icon = "bi-binoculars", AgentKey = "Observability", Description = "Health checks, metrics, distributed tracing" })
+        </div>
+        <div class="col-md-4 col-lg-3" id="card-Infrastructure">
+            @await Html.PartialAsync("_AgentCard", new GNex.Studio.Pages.AgentCardModel { Name = "Infrastructure", Icon = "bi-cloud-arrow-up", AgentKey = "Infrastructure", Description = "Docker, K8s, CI/CD, Terraform configs" })
+        </div>
+        <div class="col-md-4 col-lg-3" id="card-ApiDocumentation">
+            @await Html.PartialAsync("_AgentCard", new GNex.Studio.Pages.AgentCardModel { Name = "API Documentation", Icon = "bi-journal-code", AgentKey = "ApiDocumentation", Description = "OpenAPI specs, Swagger, endpoint docs" })
+        </div>
+    </div>
+    <!-- Agent Cards: Quality & Build Agents -->
+    <h5 class="mb-2"><i class="bi bi-tools text-secondary me-1"></i> Quality &amp; Build Agents</h5>
+    <div class="row mb-3 g-3">
+        <div class="col-md-4 col-lg-3" id="card-DependencyAudit">
+            @await Html.PartialAsync("_AgentCard", new GNex.Studio.Pages.AgentCardModel { Name = "Dependency Audit", Icon = "bi-shield-exclamation", AgentKey = "DependencyAudit", Description = "Scans package vulnerabilities, licensing, and version drift" })
+        </div>
+        <div class="col-md-4 col-lg-3" id="card-CodeQuality">
+            @await Html.PartialAsync("_AgentCard", new GNex.Studio.Pages.AgentCardModel { Name = "Code Quality", Icon = "bi-stars", AgentKey = "CodeQuality", Description = "Checks maintainability, duplication, and coding standards" })
+        </div>
+        <div class="col-md-4 col-lg-3" id="card-Refactoring">
+            @await Html.PartialAsync("_AgentCard", new GNex.Studio.Pages.AgentCardModel { Name = "Refactoring", Icon = "bi-bezier2", AgentKey = "Refactoring", Description = "Applies safe structural improvements from review findings" })
+        </div>
+        <div class="col-md-4 col-lg-3" id="card-Configuration">
+            @await Html.PartialAsync("_AgentCard", new GNex.Studio.Pages.AgentCardModel { Name = "Configuration", Icon = "bi-sliders", AgentKey = "Configuration", Description = "Generates environment settings, flags, and config baselines" })
+        </div>
+        <div class="col-md-4 col-lg-3" id="card-UiUx">
+            @await Html.PartialAsync("_AgentCard", new GNex.Studio.Pages.AgentCardModel { Name = "UI/UX", Icon = "bi-palette", AgentKey = "UiUx", Description = "Builds accessible, reusable UI patterns and components" })
+        </div>
+        <div class="col-md-4 col-lg-3" id="card-Migration">
+            @await Html.PartialAsync("_AgentCard", new GNex.Studio.Pages.AgentCardModel { Name = "Migration", Icon = "bi-arrow-left-right", AgentKey = "Migration", Description = "Creates migration scripts, rollbacks, and seed updates" })
+        </div>
+        <div class="col-md-4 col-lg-3" id="card-Build">
+            @await Html.PartialAsync("_AgentCard", new GNex.Studio.Pages.AgentCardModel { Name = "Build", Icon = "bi-hammer", AgentKey = "Build", Description = "Compiles solution and reports build diagnostics" })
+        </div>
+    </div>
+    <!-- Agent Cards: Reasoning Agents -->
+    <h5 class="mb-2"><i class="bi bi-lightbulb text-warning me-1"></i> Reasoning Agents</h5>
+    <div class="row mb-3 g-3">
+        <div class="col-md-4 col-lg-3" id="card-Planning">
+            @await Html.PartialAsync("_AgentCard", new GNex.Studio.Pages.AgentCardModel { Name = "Planning", Icon = "bi-map", AgentKey = "Planning", Description = "Produces execution plans and delivery sequencing" })
+        </div>
+        <div class="col-md-4 col-lg-3" id="card-CodeReasoning">
+            @await Html.PartialAsync("_AgentCard", new GNex.Studio.Pages.AgentCardModel { Name = "Code Reasoning", Icon = "bi-cpu", AgentKey = "CodeReasoning", Description = "Cross-service reasoning over generated code and constraints" })
+        </div>
+    </div>
+    <!-- Agent Cards: Gap Analysis -->
+    <h5 class="mb-2"><i class="bi bi-clipboard-data text-info me-1"></i> Gap Analysis</h5>
+    <div class="row mb-3 g-3">
+        <div class="col-md-4 col-lg-3" id="card-GapAnalysis">
+            @await Html.PartialAsync("_AgentCard", new GNex.Studio.Pages.AgentCardModel { Name = "Gap Analysis", Icon = "bi-clipboard-data", AgentKey = "GapAnalysis", Description = "Scans artifacts, identifies implementation gaps, feeds back to backlog" })
+        </div>
+    </div>
+    <!-- Agent Cards: Deployment -->
+    <h5 class="mb-2"><i class="bi bi-rocket-takeoff text-primary me-1"></i> Deployment</h5>
+    <div class="row mb-4 g-3">
+        <div class="col-md-4 col-lg-3" id="card-Deploy">
+            @await Html.PartialAsync("_AgentCard", new GNex.Studio.Pages.AgentCardModel { Name = "Deploy Agent", Icon = "bi-rocket-takeoff", AgentKey = "Deploy", Description = "Builds, publishes & deploys the generated GenesisNexus solution" })
+        </div>
+        <div class="col-md-4 col-lg-3" id="card-Monitor">
+            @await Html.PartialAsync("_AgentCard", new GNex.Studio.Pages.AgentCardModel { Name = "Monitor Agent", Icon = "bi-activity", AgentKey = "Monitor", Description = "Validates runtime health and service readiness" })
+        </div>
+        <div class="col-md-4 col-lg-3" id="card-LoadTest">
+            @await Html.PartialAsync("_AgentCard", new GNex.Studio.Pages.AgentCardModel { Name = "Load Test", Icon = "bi-graph-up", AgentKey = "LoadTest", Description = "Generates and runs load/performance test scenarios" })
+        </div>
+        <div class="col-md-8 col-lg-9">
+            <div class="card border-primary">
+                <div class="card-body">
+                    <h6 class="card-title"><i class="bi bi-rocket-takeoff me-1"></i> Deploy Project</h6>
+                    <div class="row g-2 align-items-end">
+                        <div class="col-md-6">
+                            <label class="form-label form-label-sm">Output Path</label>
+                            <input type="text" id="deployOutputPath" class="form-control form-control-sm" placeholder="e.g. C:\sri\mywork\icu\src" />
+                        </div>
+                        <div class="col-md-3">
+                            <div class="form-check form-switch mt-3">
+                                <input class="form-check-input" type="checkbox" id="deploySpinDocker" checked>
+                                <label class="form-check-label" for="deploySpinDocker">Docker Deploy</label>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <button class="btn btn-primary btn-sm w-100" onclick="triggerDeploy()">
+                                <i class="bi bi-rocket-takeoff me-1"></i> Deploy Now
+                            </button>
+                        </div>
+                    </div>
+                    <div id="deployStatus" class="mt-2 small text-muted" style="display:none;"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- NOC Charts Row 1 — Timeline + Event Throughput -->
+    <div class="row mb-4 g-3">
+        <div class="col-lg-8">
+            <div class="card">
+                <div class="card-header"><i class="bi bi-bar-chart-steps"></i> Agent Execution Timeline</div>
+                <div class="card-body" style="height:420px;">
+                    <canvas id="chartTimeline"></canvas>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-4">
+            <div class="card">
+                <div class="card-header"><i class="bi bi-activity"></i> Event Throughput <span class="badge bg-success ms-2" id="epsLabel">0 evt/s</span></div>
+                <div class="card-body" style="height:260px;">
+                    <canvas id="chartThroughput"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- NOC Charts Row 2 — Artifacts by Service + Layer + Severity -->
+    <div class="row mb-4 g-3">
+        <div class="col-lg-4">
+            <div class="card">
+                <div class="card-header"><i class="bi bi-diagram-3"></i> Artifacts by Microservice</div>
+                <div class="card-body d-flex justify-content-center" style="height:280px;">
+                    <canvas id="chartByService"></canvas>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-4">
+            <div class="card">
+                <div class="card-header"><i class="bi bi-stack"></i> Artifacts by Layer</div>
+                <div class="card-body" style="height:280px;">
+                    <canvas id="chartByLayer"></canvas>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-4">
+            <div class="card">
+                <div class="card-header"><i class="bi bi-shield-exclamation"></i> Review Severity Breakdown</div>
+                <div class="card-body d-flex justify-content-center" style="height:280px;">
+                    <canvas id="chartSeverity"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- NOC Row 3 — Agent Health Heatmap + Microservice Dependency -->
+    <div class="row mb-4 g-3">
+        <div class="col-lg-6">
+            <div class="card">
+                <div class="card-header"><i class="bi bi-grid-3x3"></i> Agent Health Status</div>
+                <div class="card-body p-3">
+                    <div id="agentHeatmap" class="d-flex flex-wrap gap-2 justify-content-center" style="min-height:80px;"></div>
+                    <div class="mt-2 d-flex gap-3 justify-content-center" style="font-size:0.75rem;">
+                        <span><span class="badge bg-secondary">&nbsp;</span> Idle</span>
+                        <span><span class="badge bg-primary">&nbsp;</span> Running</span>
+                        <span><span class="badge bg-success">&nbsp;</span> Completed</span>
+                        <span><span class="badge bg-danger">&nbsp;</span> Failed</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-6">
+            <div class="card">
+                <div class="card-header"><i class="bi bi-bezier2"></i> Microservice Event Flow</div>
+                <div class="card-body p-3" style="min-height:120px;">
+                    <div id="serviceFlow" class="d-flex flex-wrap gap-2 justify-content-center align-items-center"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Unit Test Diagnostics Row -->
+    <div class="row mb-4 g-3">
+        <div class="col-lg-4">
+            <div class="card">
+                <div class="card-header"><i class="bi bi-clipboard2-check"></i> Test Outcome Summary
+                    <span class="badge bg-info ms-2" id="testTotalBadge">0 tests</span>
+                </div>
+                <div class="card-body d-flex justify-content-center" style="height:260px;">
+                    <canvas id="chartTestOutcome"></canvas>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-4">
+            <div class="card">
+                <div class="card-header"><i class="bi bi-bar-chart"></i> Tests by Agent</div>
+                <div class="card-body" style="height:260px;">
+                    <canvas id="chartTestsByAgent"></canvas>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-4">
+            <div class="card">
+                <div class="card-header"><i class="bi bi-tags"></i> Tests by Category</div>
+                <div class="card-body" style="height:260px;">
+                    <canvas id="chartTestsByCategory"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Test Diagnostics Detail Table -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <span><i class="bi bi-journal-medical"></i> Test Diagnostics &amp; Remediation</span>
+                    <div class="d-flex gap-2">
+                        <select id="testFilterOutcome" class="form-select form-select-sm" style="width:auto;" onchange="filterTestTable()">
+                            <option value="all">All Outcomes</option>
+                            <option value="0">Passed</option>
+                            <option value="1">Failed</option>
+                            <option value="2">Skipped</option>
+                            <option value="3">Remediated</option>
+                        </select>
+                        <select id="testFilterAgent" class="form-select form-select-sm" style="width:auto;" onchange="filterTestTable()">
+                            <option value="all">All Agents</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="card-body p-0">
+                    <div style="max-height:400px;overflow-y:auto;">
+                        <table class="table table-sm table-striped table-hover mb-0" id="testDiagTable">
+                            <thead class="table-dark sticky-top">
+                                <tr>
+                                    <th style="width:30px;"></th>
+                                    <th>Test Name</th>
+                                    <th>Agent</th>
+                                    <th>Category</th>
+                                    <th>Outcome</th>
+                                    <th>Diagnostic</th>
+                                    <th>Remediation</th>
+                                    <th style="width:50px;">Attempt</th>
+                                </tr>
+                            </thead>
+                            <tbody id="testDiagBody">
+                                <tr><td colspan="8" class="text-center text-muted py-4">Run pipeline to see test diagnostics...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Live Event Log + Findings -->
+    <div class="row mb-4">
+        <div class="col-lg-8">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between">
+                    <span><i class="bi bi-terminal"></i> Live Event Log</span>
+                    <button class="btn btn-sm btn-outline-secondary" onclick="clearLog()">Clear</button>
+                </div>
+                <div class="card-body p-0">
+                    <div id="eventLog" style="height:400px;overflow-y:auto;font-family:monospace;font-size:0.85rem;padding:0.75rem;background:#1e1e1e;color:#d4d4d4;">
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-4">
+            <div class="card">
+                <div class="card-header"><i class="bi bi-exclamation-triangle"></i> Review Findings</div>
+                <div class="card-body p-0">
+                    <div id="findingsPanel" style="height:400px;overflow-y:auto;padding:0.75rem;">
+                        <p class="text-muted text-center mt-5">Run pipeline to see review findings.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Audit Log Panel -->
+    <div class="card mb-4 border-dark">
+        <div class="card-header bg-dark bg-opacity-10 d-flex justify-content-between align-items-center">
+            <span><i class="bi bi-shield-lock-fill me-2"></i><strong>Verifiable Audit Log</strong> <small class="text-muted ms-2">Hash-chained tamper-evident audit trail for all agent actions</small></span>
+            <div class="d-flex gap-2 align-items-center">
+                <span class="badge" id="auditVerifyBadge">—</span>
+                <button class="btn btn-outline-dark btn-sm" onclick="verifyAuditChain()" title="Verify chain integrity"><i class="bi bi-patch-check me-1"></i>Verify</button>
+                <button class="btn btn-outline-dark btn-sm" onclick="refreshAuditLog()" title="Refresh"><i class="bi bi-arrow-clockwise"></i></button>
+            </div>
+        </div>
+        <div class="card-body p-0">
+            <div style="max-height: 400px; overflow-y: auto;">
+                <table class="table table-sm table-hover mb-0" style="font-size: 0.82rem;">
+                    <thead class="table-light sticky-top">
+                        <tr>
+                            <th style="width:40px">#</th>
+                            <th style="width:100px">Agent</th>
+                            <th style="width:120px">Action</th>
+                            <th style="width:70px">Severity</th>
+                            <th>Description</th>
+                            <th style="width:120px">Hash</th>
+                            <th style="width:100px">Time</th>
+                        </tr>
+                    </thead>
+                    <tbody id="auditBody">
+                        <tr><td colspan="7" class="text-center text-muted py-3">Run pipeline to see audit log</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Agent Detail Modal (full-screen) -->
+<div class="modal fade" id="agentDetailModal" tabindex="-1" aria-labelledby="agentDetailTitle" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="agentDetailTitle"><i class="bi bi-cpu me-2"></i>Agent Details</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body p-0">
+                <!-- Summary strip -->
+                <div class="d-flex gap-3 p-3 bg-light border-bottom flex-wrap align-items-center" id="agentDetailSummary">
+                    <span class="badge bg-secondary fs-6" id="adStatus">Idle</span>
+                    <span><i class="bi bi-clock me-1"></i><span id="adElapsed">—</span></span>
+                    <span><a href="#" id="adArtifactsLink" onclick="showAgentArtifactsTab(); return false;" class="text-decoration-none"><i class="bi bi-file-earmark-code me-1"></i>Artifacts: <strong id="adArtifacts">0</strong></a></span>
+                    <span><i class="bi bi-exclamation-triangle me-1"></i>Findings: <strong id="adFindings">0</strong></span>
+                    <span><i class="bi bi-arrow-repeat me-1"></i>Retries: <strong id="adRetries">0</strong></span>
+                </div>
+                <!-- Tabs -->
+                <ul class="nav nav-tabs px-3 pt-2" id="agentDetailTabs" role="tablist">
+                    <li class="nav-item"><a class="nav-link active" data-bs-toggle="tab" href="#adTabTimeline">Activity Timeline</a></li>
+                    <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#adTabArtifacts">Artifacts</a></li>
+                    <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#adTabAudit">Audit Log</a></li>
+                    <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#adTabDecisions">Decisions</a></li>
+                    <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#adTabAsk"><i class="bi bi-chat-dots me-1"></i>Ask Agent</a></li>
+                </ul>
+                <div class="tab-content p-3">
+                    <!-- Activity Timeline tab -->
+                    <div class="tab-pane fade show active" id="adTabTimeline">
+                        <div style="max-height: 450px; overflow-y: auto;">
+                            <div id="adTimelineList" class="d-flex flex-column gap-1"></div>
+                        </div>
+                    </div>
+                    <!-- Artifacts tab -->
+                    <div class="tab-pane fade" id="adTabArtifacts">
+                        <div style="max-height: 450px; overflow-y: auto;">
+                            <div id="adArtifactsList" class="d-flex flex-column gap-2"></div>
+                        </div>
+                    </div>
+                    <!-- Audit Log tab -->
+                    <div class="tab-pane fade" id="adTabAudit">
+                        <div style="max-height: 450px; overflow-y: auto;">
+                            <table class="table table-sm table-hover mb-0" style="font-size:0.82rem;">
+                                <thead class="table-light sticky-top">
+                                    <tr><th>#</th><th>Action</th><th>Severity</th><th>Description</th><th>Hash</th><th>Time</th></tr>
+                                </thead>
+                                <tbody id="adAuditBody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <!-- HITL Decisions tab -->
+                    <div class="tab-pane fade" id="adTabDecisions">
+                        <div style="max-height: 450px; overflow-y: auto;">
+                            <div id="adDecisionList" class="d-flex flex-column gap-2"></div>
+                        </div>
+                    </div>
+                    <!-- Ask Agent tab -->
+                    <div class="tab-pane fade" id="adTabAsk">
+                        <div class="mb-2">
+                            <small class="text-muted">Ask this agent about its completed or in-progress work. Scope is limited to this agent's artifacts, findings, and backlog items.</small>
+                        </div>
+                        <div id="adChatHistory" style="max-height:320px; overflow-y:auto; border:1px solid #dee2e6; border-radius:6px; padding:10px; background:#f8f9fa;" class="mb-2">
+                            <p class="text-muted text-center py-4 mb-0" id="adChatPlaceholder">Ask a question about this agent's work...</p>
+                        </div>
+                        <div class="input-group">
+                            <input type="text" class="form-control" id="adAskInput" placeholder="e.g. What artifacts did you generate? What errors did you fix?" onkeydown="if(event.key==='Enter')askAgent()">
+                            <button class="btn btn-primary" onclick="askAgent()" id="adAskBtn"><i class="bi bi-send me-1"></i>Ask</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/8.0.0/signalr.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+    <script>
+        // ─── NOC Chart State ─────────────────────────────────────────────
+        // AgentType enum order is sourced from GNex.Core.Enums.AgentType.
+        const ALL_AGENTS = [
+            "Orchestrator","RequirementsReader","Architect","PlatformBuilder","Database","ServiceLayer","Application","Integration",
+            "Review","Testing","Supervisor","BugFix","Performance","Security","HipaaCompliance","Soc2Compliance",
+            "AccessControl","Observability","Infrastructure","ApiDocumentation","RequirementsExpander","Backlog","Deploy",
+            "RequirementAnalyzer","Build","Monitor","Migration","CodeQuality","DependencyAudit","Refactoring",
+            "Configuration","UiUx","LoadTest","GapAnalysis","Planning","CodeReasoning"
+        ];
+        const ALL_AGENT_LABELS = [
+            "Orchestrator","Reqs Reader","Architect","Platform Builder","Database","Service","Application","Integration",
+            "Review","Testing","Supervisor","BugFix","Performance","Security","HIPAA","SOC2",
+            "AccessCtrl","Observability","Infra","API Docs","Reqs Expander","Backlog","Deploy",
+            "Req Analyzer","Build","Monitor","Migration","Code Quality","Dependency Audit","Refactoring",
+            "Configuration","UI/UX","Load Test","Gap Analysis","Planning","Code Reasoning"
+        ];
+        const ALL_AGENT_ICONS = [
+            "bi-diagram-3","bi-file-earmark-text","bi-diagram-3-fill","bi-hdd-stack","bi-database","bi-layers","bi-window-stack","bi-plug",
+            "bi-shield-check","bi-check2-circle","bi-eye","bi-bug","bi-speedometer2","bi-shield-lock","bi-heart-pulse","bi-file-earmark-lock",
+            "bi-key","bi-binoculars","bi-cloud-arrow-up","bi-journal-code","bi-diagram-2","bi-kanban","bi-rocket-takeoff",
+            "bi-search","bi-hammer","bi-activity","bi-arrow-left-right","bi-stars","bi-shield-exclamation","bi-bezier2",
+            "bi-sliders","bi-palette","bi-graph-up","bi-clipboard-data","bi-map","bi-cpu"
+        ];
+        const ALL_AGENT_COLORS = [
+            "#78909c","#42a5f5","#1e88e5","#3949ab","#66bb6a","#ffa726","#ef5350","#ab47bc",
+            "#26c6da","#8d6e63","#e91e63","#ff7043","#29b6f6","#ec407a","#66bb6a","#5c6bc0",
+            "#ffca28","#26a69a","#7e57c2","#8d6e63","#7cb342","#9575cd","#1e88e5",
+            "#00897b","#6d4c41","#00acc1","#546e7a","#8e24aa","#c62828","#5d4037",
+            "#3949ab","#ff8f00","#2e7d32","#00838f","#f9a825","#455a64"
+        ];
+        // Keep backward compat aliases
+        const AGENTS = ALL_AGENTS;
+        const AGENT_LABELS = ALL_AGENT_LABELS;
+        const SERVICES = ["Patient","Encounter","Inpatient","Emergency","Diagnostics","Revenue","Audit","AI"];
+        const LAYERS = ["Database","Repository","Service","Dto","ViewModel","RazorPage","Integration","Test","Migration","Configuration","Security","Compliance","Observability","Infrastructure","Documentation"];
+        const SVC_COLORS = ["#42a5f5","#66bb6a","#ffa726","#ef5350","#ab47bc","#26c6da","#8d6e63","#78909c"];
+        const LAYER_COLORS = ["#1565c0","#2e7d32","#ef6c00","#c62828","#6a1b9a","#00838f","#4e342e","#37474f","#ad1457","#546e7a","#d81b60","#283593","#00695c","#4527a0","#bf360c"];
+
+        const nocState = {
+            agentTiming: {},       // agentKey → { start, end, elapsed }
+            artifactsByService: {},
+            artifactsByLayer: {},
+            severityCounts: [0,0,0,0,0,0], // Info, Warning, Error, Critical, Security, Compliance
+            throughputLog: [],     // { time, count }
+            eventCount: 0,
+            lastEpsTick: Date.now(),
+            agentStatuses: {}      // agentKey → status enum
+        };
+
+        // ─── Chart: Agent Timeline (horizontal bar) ─────────────────────
+        const ctxTimeline = document.getElementById('chartTimeline').getContext('2d');
+        const chartTimeline = new Chart(ctxTimeline, {
+            type: 'bar',
+            data: {
+                labels: ALL_AGENT_LABELS,
+                datasets: [{
+                    label: 'Duration (ms)',
+                    data: new Array(ALL_AGENTS.length).fill(0),
+                    backgroundColor: ALL_AGENT_COLORS,
+                    borderRadius: 4
+                }]
+            },
+            options: {
+                indexAxis: 'y',
+                responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { display: false },
+                    title: { display: false } },
+                scales: {
+                    x: { title: { display: true, text: 'ms', color: '#888' }, grid: { color: 'rgba(0,0,0,0.05)' } },
+                    y: { grid: { display: false } }
+                }
+            }
+        });
+
+        // ─── Chart: Event Throughput (real-time line) ────────────────────
+        const ctxThroughput = document.getElementById('chartThroughput').getContext('2d');
+        const chartThroughput = new Chart(ctxThroughput, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [{
+                    label: 'Events/sec',
+                    data: [],
+                    borderColor: '#4caf50',
+                    backgroundColor: 'rgba(76,175,80,0.1)',
+                    fill: true, tension: 0.4, pointRadius: 0,
+                    borderWidth: 2
+                }]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                animation: { duration: 300 },
+                plugins: { legend: { display: false } },
+                scales: {
+                    x: { display: true, grid: { display: false }, ticks: { maxTicksLimit: 8, font: { size: 10 } } },
+                    y: { beginAtZero: true, grid: { color: 'rgba(0,0,0,0.05)' }, title: { display: true, text: 'evt/s', color: '#888' } }
+                }
+            }
+        });
+
+        // ─── Chart: Artifacts by Microservice (doughnut) ─────────────────
+        const ctxByService = document.getElementById('chartByService').getContext('2d');
+        const chartByService = new Chart(ctxByService, {
+            type: 'doughnut',
+            data: {
+                labels: SERVICES,
+                datasets: [{ data: new Array(8).fill(0), backgroundColor: SVC_COLORS, borderWidth: 0 }]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                cutout: '55%',
+                plugins: {
+                    legend: { position: 'right', labels: { boxWidth: 12, font: { size: 11 } } }
+                }
+            }
+        });
+
+        // ─── Chart: Artifacts by Layer (bar) ─────────────────────────────
+        const ctxByLayer = document.getElementById('chartByLayer').getContext('2d');
+        const chartByLayer = new Chart(ctxByLayer, {
+            type: 'bar',
+            data: {
+                labels: LAYERS,
+                datasets: [{
+                    label: 'Count',
+                    data: new Array(15).fill(0),
+                    backgroundColor: LAYER_COLORS,
+                    borderRadius: 3
+                }]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                    x: { grid: { display: false }, ticks: { font: { size: 10 }, maxRotation: 45 } },
+                    y: { beginAtZero: true, grid: { color: 'rgba(0,0,0,0.05)' }, ticks: { stepSize: 1 } }
+                }
+            }
+        });
+
+        // ─── Chart: Review Severity (polar area) ────────────────────────
+        const ctxSeverity = document.getElementById('chartSeverity').getContext('2d');
+        const chartSeverity = new Chart(ctxSeverity, {
+            type: 'polarArea',
+            data: {
+                labels: ['Info','Warning','Error','Critical','Security','Compliance'],
+                datasets: [{
+                    data: [0,0,0,0,0,0],
+                    backgroundColor: ['rgba(33,150,243,0.6)','rgba(255,193,7,0.6)','rgba(244,67,54,0.6)','rgba(183,28,28,0.7)','rgba(156,39,176,0.6)','rgba(255,152,0,0.6)'],
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { position: 'right', labels: { boxWidth: 12, font: { size: 11 } } } },
+                scales: { r: { beginAtZero: true, ticks: { stepSize: 1 } } }
+            }
+        });
+
+        // ─── Agent Heatmap & Service Flow init ──────────────────────────
+        function initHeatmap() {
+            const hm = document.getElementById('agentHeatmap');
+            hm.innerHTML = ALL_AGENTS.map((a, i) => `
+                <div id="hm-${a}" class="text-center px-2 py-2 rounded-3" style="min-width:80px;background:#dee2e6;transition:all 0.3s;">
+                    <div style="font-size:1.2rem;"><i class="bi ${ALL_AGENT_ICONS[i]}"></i></div>
+                    <div style="font-size:0.6rem;font-weight:600;">${ALL_AGENT_LABELS[i]}</div>
+                    <div style="font-size:0.55rem;" id="hm-time-${a}">--</div>
+                </div>
+            `).join('');
+        }
+
+        function initServiceFlow() {
+            const sf = document.getElementById('serviceFlow');
+            const svcDefs = [
+                { name: 'Patient', port: 5101, icon: 'bi-person' },
+                { name: 'Encounter', port: 5102, icon: 'bi-calendar-event' },
+                { name: 'Inpatient', port: 5103, icon: 'bi-building' },
+                { name: 'Emergency', port: 5104, icon: 'bi-exclamation-diamond' },
+                { name: 'Diagnostics', port: 5105, icon: 'bi-clipboard2-pulse' },
+                { name: 'Revenue', port: 5106, icon: 'bi-cash-stack' },
+                { name: 'Audit', port: 5107, icon: 'bi-journal-text' },
+                { name: 'AI', port: 5108, icon: 'bi-robot' }
+            ];
+            sf.innerHTML =
+                '<div class="text-center px-2 py-2 rounded-3 border border-2 border-warning" style="min-width:80px;background:#fff8e1;">' +
+                '  <i class="bi bi-hdd-rack fs-5 text-warning"></i><div style="font-size:0.65rem;font-weight:700;">Kafka</div>' +
+                '  <div style="font-size:0.6rem;color:#888;">Event Bus</div></div>' +
+                '<i class="bi bi-arrow-left-right text-muted mx-1"></i>' +
+                svcDefs.map((s, i) => `
+                    <div id="sf-${s.name}" class="text-center px-2 py-2 rounded-3 border" style="min-width:68px;background:#f5f5f5;transition:all 0.3s;">
+                        <i class="bi ${s.icon}" style="font-size:1.1rem;color:${SVC_COLORS[i]}"></i>
+                        <div style="font-size:0.6rem;font-weight:600;">${s.name}</div>
+                        <div style="font-size:0.55rem;color:#999;">:${s.port}</div>
+                    </div>
+                `).join('<i class="bi bi-arrow-left-right text-muted" style="font-size:0.7rem;"></i>');
+        }
+
+        initHeatmap();
+        initServiceFlow();
+
+        // ─── NOC Update Functions ───────────────────────────────────────
+        function nocUpdateAgentTiming(agentKey, status, elapsedMs) {
+            const name = getAgentName(agentKey);
+            const idx = ALL_AGENTS.indexOf(name);
+            if (idx < 0) return;
+
+            nocState.agentStatuses[name] = status;
+
+            if (status === 1) { // Running
+                nocState.agentTiming[name] = { start: Date.now(), end: null, elapsed: 0 };
+            }
+            if (status === 3 || status === 4) { // Completed or Failed
+                if (nocState.agentTiming[name]) {
+                    nocState.agentTiming[name].end = Date.now();
+                    nocState.agentTiming[name].elapsed = elapsedMs;
+                }
+                chartTimeline.data.datasets[0].data[idx] = elapsedMs;
+                chartTimeline.update('none');
+            }
+
+            // Heatmap
+            const hmEl = document.getElementById(`hm-${name}`);
+            if (hmEl) {
+                const colors = { 0: '#dee2e6', 1: '#42a5f5', 2: '#90caf9', 3: '#66bb6a', 4: '#ef5350' };
+                const textColors = { 0: '#333', 1: '#fff', 2: '#333', 3: '#fff', 4: '#fff' };
+                hmEl.style.background = colors[status] || '#dee2e6';
+                hmEl.style.color = textColors[status] || '#333';
+                const timeEl = document.getElementById(`hm-time-${name}`);
+                if (timeEl && elapsedMs > 0) timeEl.textContent = elapsedMs.toFixed(0) + 'ms';
+            }
+        }
+
+        function nocTrackArtifact(agentKey, artifactCount) {
+            // Map agent → likely service contributions (heuristic from path)
+            const agentName = getAgentName(agentKey);
+            if (!nocState.artifactsByService[agentName])
+                nocState.artifactsByService[agentName] = artifactCount;
+            else
+                nocState.artifactsByService[agentName] = artifactCount;
+        }
+
+        function nocTrackEvent() {
+            nocState.eventCount++;
+        }
+
+        function nocUpdateServiceArtifacts(data) {
+            // data.artifacts array from PipelineComplete
+            if (!data.artifacts) return;
+            const svcCounts = {};
+            const layerCounts = {};
+            SERVICES.forEach(s => svcCounts[s] = 0);
+            LAYERS.forEach(l => layerCounts[l] = 0);
+
+            data.artifacts.forEach(a => {
+                // Map by path prefix to service
+                const path = a.relativePath || '';
+                SERVICES.forEach((svc, i) => {
+                    if (path.toLowerCase().includes(svc.toLowerCase())) svcCounts[svc]++;
+                });
+
+                // Map by layer enum
+                const layerName = LAYERS[a.layer] || '';
+                if (layerName) layerCounts[layerName] = (layerCounts[layerName] || 0) + 1;
+            });
+
+            chartByService.data.datasets[0].data = SERVICES.map(s => svcCounts[s]);
+            chartByService.update();
+
+            chartByLayer.data.datasets[0].data = LAYERS.map(l => layerCounts[l] || 0);
+            chartByLayer.update();
+
+            // Light up service flow nodes
+            SERVICES.forEach(svc => {
+                const el = document.getElementById(`sf-${svc}`);
+                if (el && svcCounts[svc] > 0) {
+                    el.style.background = '#e8f5e9';
+                    el.style.borderColor = '#4caf50';
+                }
+            });
+        }
+
+        function nocUpdateSeverity(findings) {
+            if (!findings || !findings.length) return;
+            const counts = [0,0,0,0,0,0];
+            findings.forEach(f => { if (f.severity >= 0 && f.severity <= 5) counts[f.severity]++; });
+            chartSeverity.data.datasets[0].data = counts;
+            chartSeverity.update();
+        }
+
+        // Throughput ticker — every 2s
+        setInterval(() => {
+            const now = Date.now();
+            const dt = (now - nocState.lastEpsTick) / 1000;
+            const eps = dt > 0 ? (nocState.eventCount / dt) : 0;
+            nocState.eventCount = 0;
+            nocState.lastEpsTick = now;
+
+            const label = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            const ds = chartThroughput.data;
+            ds.labels.push(label);
+            ds.datasets[0].data.push(Math.round(eps * 10) / 10);
+            if (ds.labels.length > 30) { ds.labels.shift(); ds.datasets[0].data.shift(); }
+            chartThroughput.update('none');
+
+            document.getElementById('epsLabel').textContent = eps.toFixed(1) + ' evt/s';
+        }, 2000);
+
+        // ─── Chart: Test Outcome (doughnut) ────────────────────────────
+        const ctxTestOutcome = document.getElementById('chartTestOutcome').getContext('2d');
+        const chartTestOutcome = new Chart(ctxTestOutcome, {
+            type: 'doughnut',
+            data: {
+                labels: ['Passed', 'Failed', 'Skipped', 'Remediated'],
+                datasets: [{
+                    data: [0, 0, 0, 0],
+                    backgroundColor: ['#4caf50', '#f44336', '#9e9e9e', '#ff9800'],
+                    borderWidth: 2
+                }]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                cutout: '50%',
+                plugins: {
+                    legend: { position: 'right', labels: { boxWidth: 12, font: { size: 11 } } }
+                }
+            }
+        });
+
+        // ─── Chart: Tests by Agent (stacked bar) ────────────────────────
+        const ctxTestsByAgent = document.getElementById('chartTestsByAgent').getContext('2d');
+        const chartTestsByAgent = new Chart(ctxTestsByAgent, {
+            type: 'bar',
+            data: {
+                labels: [],
+                datasets: [
+                    { label: 'Passed', data: [], backgroundColor: '#4caf50', borderRadius: 2 },
+                    { label: 'Failed', data: [], backgroundColor: '#f44336', borderRadius: 2 },
+                    { label: 'Remediated', data: [], backgroundColor: '#ff9800', borderRadius: 2 },
+                    { label: 'Skipped', data: [], backgroundColor: '#9e9e9e', borderRadius: 2 }
+                ]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { position: 'top', labels: { boxWidth: 10, font: { size: 10 } } } },
+                scales: {
+                    x: { stacked: true, grid: { display: false }, ticks: { font: { size: 10 } } },
+                    y: { stacked: true, beginAtZero: true, ticks: { stepSize: 1 } }
+                }
+            }
+        });
+
+        // ─── Chart: Tests by Category (horizontal bar) ──────────────────
+        const ctxTestsByCategory = document.getElementById('chartTestsByCategory').getContext('2d');
+        const chartTestsByCategory = new Chart(ctxTestsByCategory, {
+            type: 'bar',
+            data: {
+                labels: [],
+                datasets: [
+                    { label: 'Passed', data: [], backgroundColor: '#4caf50' },
+                    { label: 'Failed', data: [], backgroundColor: '#f44336' },
+                    { label: 'Remediated', data: [], backgroundColor: '#ff9800' }
+                ]
+            },
+            options: {
+                indexAxis: 'y',
+                responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { position: 'top', labels: { boxWidth: 10, font: { size: 10 } } } },
+                scales: {
+                    x: { stacked: true, beginAtZero: true, ticks: { stepSize: 1 } },
+                    y: { stacked: true, grid: { display: false }, ticks: { font: { size: 10 } } }
+                }
+            }
+        });
+
+        // ─── Test Diagnostics State & Functions ─────────────────────────
+        let allTestDiagnostics = [];
+
+        function nocUpdateTestDiagnostics(diagnostics) {
+            if (!diagnostics || !diagnostics.length) return;
+            allTestDiagnostics = diagnostics;
+
+            // Outcome summary
+            const outcomes = [0, 0, 0, 0]; // Passed, Failed, Skipped, Remediated
+            diagnostics.forEach(d => { if (d.outcome >= 0 && d.outcome <= 3) outcomes[d.outcome]++; });
+            chartTestOutcome.data.datasets[0].data = outcomes;
+            chartTestOutcome.update();
+            document.getElementById('testTotalBadge').textContent = `${diagnostics.length} tests`;
+
+            // Tests by agent
+            const agentMap = {};
+            diagnostics.forEach(d => {
+                if (!agentMap[d.agentUnderTest]) agentMap[d.agentUnderTest] = [0,0,0,0];
+                if (d.outcome >= 0 && d.outcome <= 3) agentMap[d.agentUnderTest][d.outcome]++;
+            });
+            const agentNames = Object.keys(agentMap);
+            chartTestsByAgent.data.labels = agentNames;
+            chartTestsByAgent.data.datasets[0].data = agentNames.map(a => agentMap[a][0]);
+            chartTestsByAgent.data.datasets[1].data = agentNames.map(a => agentMap[a][1]);
+            chartTestsByAgent.data.datasets[2].data = agentNames.map(a => agentMap[a][3]);
+            chartTestsByAgent.data.datasets[3].data = agentNames.map(a => agentMap[a][2]);
+            chartTestsByAgent.update();
+
+            // Tests by category
+            const catMap = {};
+            diagnostics.forEach(d => {
+                if (!catMap[d.category]) catMap[d.category] = [0,0,0];
+                if (d.outcome === 0) catMap[d.category][0]++;
+                else if (d.outcome === 1) catMap[d.category][1]++;
+                else if (d.outcome === 3) catMap[d.category][2]++;
+            });
+            const cats = Object.keys(catMap);
+            chartTestsByCategory.data.labels = cats;
+            chartTestsByCategory.data.datasets[0].data = cats.map(c => catMap[c][0]);
+            chartTestsByCategory.data.datasets[1].data = cats.map(c => catMap[c][1]);
+            chartTestsByCategory.data.datasets[2].data = cats.map(c => catMap[c][2]);
+            chartTestsByCategory.update();
+
+            // Populate filter dropdown
+            const agentFilter = document.getElementById('testFilterAgent');
+            agentFilter.innerHTML = '<option value="all">All Agents</option>' +
+                agentNames.map(a => `<option value="${a}">${a}</option>`).join('');
+
+            // Render table
+            renderTestTable(diagnostics);
+        }
+
+        function renderTestTable(diagnostics) {
+            const tbody = document.getElementById('testDiagBody');
+            const outcomeIcons = ['<i class="bi bi-check-circle-fill text-success"></i>',
+                                  '<i class="bi bi-x-circle-fill text-danger"></i>',
+                                  '<i class="bi bi-dash-circle text-secondary"></i>',
+                                  '<i class="bi bi-arrow-repeat text-warning"></i>'];
+            const outcomeLabels = ['Passed','Failed','Skipped','Remediated'];
+            const outcomeBadges = ['bg-success','bg-danger','bg-secondary','bg-warning text-dark'];
+
+            tbody.innerHTML = diagnostics.map(d => {
+                const oc = d.outcome >= 0 && d.outcome <= 3 ? d.outcome : 2;
+                return `<tr class="${oc === 1 ? 'table-danger' : oc === 3 ? 'table-warning' : ''}">
+                    <td>${outcomeIcons[oc]}</td>
+                    <td style="font-size:0.8rem;font-family:monospace;">${escapeHtml(d.testName)}</td>
+                    <td><span class="badge bg-primary" style="font-size:0.7rem;">${escapeHtml(d.agentUnderTest)}</span></td>
+                    <td><span class="badge bg-info text-dark" style="font-size:0.65rem;">${escapeHtml(d.category)}</span></td>
+                    <td><span class="badge ${outcomeBadges[oc]}" style="font-size:0.7rem;">${outcomeLabels[oc]}</span></td>
+                    <td style="font-size:0.78rem;">${escapeHtml(d.diagnostic)}</td>
+                    <td style="font-size:0.78rem;${oc === 1 ? 'color:#d32f2f;font-weight:600;' : oc === 3 ? 'color:#e65100;font-weight:600;' : ''}">${escapeHtml(d.remediation)}</td>
+                    <td class="text-center">${d.attemptNumber > 1 ? `<span class="badge bg-warning text-dark">${d.attemptNumber}</span>` : '1'}</td>
+                </tr>`;
+            }).join('');
+        }
+
+        function filterTestTable() {
+            const outcomeFilter = document.getElementById('testFilterOutcome').value;
+            const agentFilter = document.getElementById('testFilterAgent').value;
+            let filtered = allTestDiagnostics;
+            if (outcomeFilter !== 'all') filtered = filtered.filter(d => d.outcome === parseInt(outcomeFilter));
+            if (agentFilter !== 'all') filtered = filtered.filter(d => d.agentUnderTest === agentFilter);
+            renderTestTable(filtered);
+        }
+
+        function escapeHtml(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+
+        // ─── SignalR ────────────────────────────────────────────────────
+        const connection = new signalR.HubConnectionBuilder()
+            .withUrl("/hubs/pipeline")
+            .withAutomaticReconnect()
+            .build();
+
+        connection.on("Connected", msg => {
+            document.getElementById("connectionBadge").className = "badge bg-success";
+            document.getElementById("connectionBadge").textContent = "Connected";
+            appendLog("system", msg);
+        });
+
+        connection.on("PipelineEvent", evt => {
+            updateAgentCard(evt.agent, evt.status, evt.message, evt.artifactCount, evt.findingCount, evt.elapsedMs);
+            appendLog(getStatusClass(evt.status), `[${getAgentName(evt.agent)}] ${evt.message} (${evt.elapsedMs.toFixed(0)}ms)${evt.retryAttempt > 0 ? ' [retry #' + evt.retryAttempt + ']' : ''}`);
+
+            // NOC updates
+            nocTrackEvent();
+            nocUpdateAgentTiming(evt.agent, evt.status, evt.elapsedMs);
+            nocTrackArtifact(evt.agent, evt.artifactCount);
+
+            // Inline test diagnostics from Supervisor events
+            if (evt.testDiagnostics && evt.testDiagnostics.length > 0) {
+                nocUpdateTestDiagnostics(evt.testDiagnostics);
+                appendLog('system', `[Supervisor] ${evt.testDiagnostics.length} test diagnostics received`);
+            }
+        });
+
+        connection.on("PipelineComplete", data => {
+            document.getElementById("statReqs").textContent = data.requirementCount;
+            document.getElementById("statArtifacts").textContent = data.artifactCount;
+            document.getElementById("statFindings").textContent = data.findingCount;
+            document.getElementById("statTime").textContent = data.durationMs.toFixed(0) + "ms";
+            appendLog(data.cancelled ? "warning" : "success", data.cancelled
+                ? `Pipeline stopped: ${data.artifactCount} artifacts, ${data.findingCount} findings, ${data.testDiagnosticCount || 0} tests`
+                : `Pipeline complete: ${data.artifactCount} artifacts, ${data.findingCount} findings, ${data.testDiagnosticCount || 0} tests`);
+            document.getElementById("btnRunPipeline").disabled = false;
+            document.getElementById("btnStopPipeline").disabled = true;
+            if (data.findings && data.findings.length > 0) {
+                renderFindings(data.findings);
+                nocUpdateSeverity(data.findings);
+            }
+            if (data.artifacts) nocUpdateServiceArtifacts(data);
+            if (data.testDiagnostics && data.testDiagnostics.length > 0) {
+                nocUpdateTestDiagnostics(data.testDiagnostics);
+            }
+
+            // Final: update layer chart from cumulative agent artifact counts
+            updateLayerChartFromAgents();
+        });
+
+        connection.onreconnecting(() => {
+            document.getElementById("connectionBadge").className = "badge bg-warning";
+            document.getElementById("connectionBadge").textContent = "Reconnecting...";
+        });
+        connection.onreconnected(() => {
+            document.getElementById("connectionBadge").className = "badge bg-success";
+            document.getElementById("connectionBadge").textContent = "Connected";
+        });
+        connection.start().catch(err => appendLog("error", "Connection failed: " + err));
+
+        // ─── HITL: Human-in-the-Loop Decisions ──────────────────────────
+        connection.on("HumanApprovalRequested", req => {
+            appendLog("warning", `⚠ HITL: ${req.agent} requests approval — ${req.title}`);
+            refreshDecisions();
+            // Flash the panel border to draw attention
+            const panel = document.querySelector('.card.border-warning');
+            if (panel) { panel.classList.add('border-3'); setTimeout(() => panel.classList.remove('border-3'), 5000); }
+        });
+
+        connection.on("HumanDecisionMade", data => {
+            appendLog("system", `HITL decision: ${data.decision} ${data.reason ? '— ' + data.reason : ''}`);
+            refreshDecisions();
+        });
+
+        async function refreshDecisions() {
+            try {
+                const res = await fetch('/api/pipeline/decisions');
+                const data = await res.json();
+                const items = data.pending || [];
+                const tbody = document.getElementById('hitlBody');
+                const pending = items.filter(d => d.decision === 'Pending');
+                document.getElementById('hitlPendingBadge').textContent = pending.length + ' pending';
+                document.getElementById('hitlPendingBadge').className = pending.length > 0 ? 'badge bg-danger' : 'badge bg-warning text-dark';
+
+                if (items.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-3">No pending decisions</td></tr>';
+                    return;
+                }
+                tbody.innerHTML = items.map(d => {
+                    const catColors = { 'DatabaseDdl': 'info', 'SecurityViolation': 'danger', 'ComplianceViolation': 'warning' };
+                    const statusColors = { 'Pending': 'warning', 'Approved': 'success', 'Rejected': 'danger', 'TimedOut': 'secondary' };
+                    const actions = d.decision === 'Pending'
+                        ? `<button class="btn btn-success btn-sm me-1" onclick="submitDecision('${d.id}', true)"><i class="bi bi-check-lg"></i> Approve</button>` +
+                          `<button class="btn btn-danger btn-sm" onclick="submitDecision('${d.id}', false)"><i class="bi bi-x-lg"></i> Reject</button>`
+                        : `<small class="text-muted">${d.decisionReason || '—'}</small>`;
+                    const time = d.requestedAt ? new Date(d.requestedAt).toLocaleTimeString() : '—';
+                    return `<tr class="${d.decision === 'Pending' ? 'table-warning' : ''}">
+                        <td><small>${d.agent}</small></td>
+                        <td><span class="badge bg-${catColors[d.category] || 'secondary'}">${d.category}</span></td>
+                        <td title="${(d.description||'').replace(/"/g,'&quot;')}">${d.title}</td>
+                        <td><span class="badge bg-${statusColors[d.decision] || 'secondary'}">${d.decision}</span></td>
+                        <td>${actions}</td>
+                        <td><small class="text-muted">${time}</small></td>
+                    </tr>`;
+                }).join('');
+            } catch (e) {
+                console.warn('Decisions refresh failed:', e);
+            }
+        }
+
+        async function submitDecision(id, approved) {
+            try {
+                const endpoint = approved ? 'approve' : 'reject';
+                const res = await fetch(`/api/pipeline/decisions/${id}/${endpoint}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ reason: approved ? 'Approved via dashboard' : 'Rejected via dashboard' })
+                });
+                if (res.ok) {
+                    appendLog(approved ? 'success' : 'warning', `HITL decision ${approved ? 'approved' : 'rejected'}: ${id}`);
+                    refreshDecisions();
+                } else {
+                    appendLog('error', `Failed to submit decision: ${res.statusText}`);
+                }
+            } catch (e) {
+                appendLog('error', `Decision error: ${e.message}`);
+            }
+        }
+
+        // Load decisions on page load and poll during active pipeline
+        refreshDecisions();
+        setInterval(() => {
+            const ctx = nocState.agentStatuses;
+            const anyRunning = Object.values(ctx).some(s => s === 1);
+            if (anyRunning) refreshDecisions();
+        }, 3000);
+
+        // ─── Config Save / Load ─────────────────────────────────────────
+        const CONFIG_FIELDS = [
+            'inputReqsPath', 'inputOutputPath', 'inputNamespace',
+            'inputContainerName', 'inputDbHost', 'inputDbPort', 'inputDbUser',
+            'inputDbName', 'inputDbPassword',
+            'inputMaxQueue', 'inputMaxInDev',
+            'portPatient', 'portEncounter', 'portInpatient', 'portEmergency',
+            'portDiagnostics', 'portRevenue', 'portAudit', 'portAi',
+            'portGateway', 'portKafka'
+        ];
+        const CONFIG_CHECKS = ['chkSpinDocker', 'chkExecDdl'];
+
+        async function saveConfig() {
+            const cfg = {};
+            CONFIG_FIELDS.forEach(id => { cfg[id] = document.getElementById(id)?.value ?? ''; });
+            CONFIG_CHECKS.forEach(id => { cfg[id] = document.getElementById(id)?.checked ?? false; });
+            try {
+                const res = await fetch('/api/pipeline/config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(cfg)
+                });
+                if (res.ok) appendLog('system', 'Configuration saved.');
+                else appendLog('error', 'Failed to save config: ' + res.statusText);
+            } catch (e) { appendLog('error', 'Save config error: ' + e.message); }
+        }
+
+        async function loadConfig() {
+            try {
+                const res = await fetch('/api/pipeline/config');
+                if (!res.ok) { appendLog('error', 'No saved config found.'); return; }
+                const cfg = await res.json();
+                if (!cfg || Object.keys(cfg).length === 0) { appendLog('system', 'No saved configuration found.'); return; }
+                CONFIG_FIELDS.forEach(id => {
+                    const el = document.getElementById(id);
+                    if (el && cfg[id] !== undefined && cfg[id] !== '') el.value = cfg[id];
+                });
+                CONFIG_CHECKS.forEach(id => {
+                    const el = document.getElementById(id);
+                    if (el && cfg[id] !== undefined) el.checked = cfg[id];
+                });
+                appendLog('system', 'Configuration loaded from saved file.');
+            } catch (e) { appendLog('error', 'Load config error: ' + e.message); }
+        }
+
+        // Auto-load config on page start
+        loadConfig();
+
+        // ─── Template Manager ───────────────────────────────────────
+        let _templateRows = [];
+
+        async function loadTemplates() {
+            try {
+                const res = await fetch('/api/pipeline/templates');
+                if (!res.ok) { appendLog('error', 'Failed to load templates: ' + res.statusText); return; }
+                const data = await res.json();
+                _templateRows = data.templates || [];
+
+                const sel = document.getElementById('tmplKey');
+                sel.innerHTML = '<option value="">-- Select Template --</option>' +
+                    _templateRows.map(t => `<option value="${t.templateKey}">${t.templateKey} (${t.itemType})</option>`).join('');
+
+                if (_templateRows.length > 0) {
+                    sel.value = _templateRows[0].templateKey;
+                    onTemplateSelect(sel.value);
+                }
+
+                appendLog('system', `Loaded ${_templateRows.length} templates.`);
+            } catch (e) {
+                appendLog('error', 'Load templates error: ' + e.message);
+            }
+        }
+
+        function onTemplateSelect(templateKey) {
+            const t = _templateRows.find(x => x.templateKey === templateKey);
+            if (!t) return;
+
+            document.getElementById('tmplItemType').value = t.itemType || '';
+            document.getElementById('tmplName').value = t.templateName || '';
+            document.getElementById('tmplPurpose').value = t.purpose || '';
+            document.getElementById('tmplFormat').value = t.templateFormat || '';
+            document.getElementById('tmplExample').value = t.exampleContent || '';
+            document.getElementById('tmplVersion').value = t.version || 1;
+            document.getElementById('tmplIsActive').checked = !!t.isActive;
+        }
+
+        async function saveTemplate() {
+            const templateKey = (document.getElementById('tmplKey').value || '').trim();
+            if (!templateKey) {
+                appendLog('error', 'Select a template key to save.');
+                return;
+            }
+
+            const payload = {
+                itemType: document.getElementById('tmplItemType').value.trim(),
+                templateName: document.getElementById('tmplName').value.trim(),
+                purpose: document.getElementById('tmplPurpose').value.trim(),
+                templateFormat: document.getElementById('tmplFormat').value.trim(),
+                exampleContent: document.getElementById('tmplExample').value.trim(),
+                version: parseInt(document.getElementById('tmplVersion').value) || 1,
+                isActive: document.getElementById('tmplIsActive').checked
+            };
+
+            try {
+                const res = await fetch('/api/pipeline/templates/' + encodeURIComponent(templateKey), {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                if (!res.ok) {
+                    appendLog('error', 'Failed to save template: ' + res.statusText);
+                    return;
+                }
+                appendLog('success', `Template saved: ${templateKey}`);
+                await loadTemplates();
+                document.getElementById('tmplKey').value = templateKey;
+                onTemplateSelect(templateKey);
+            } catch (e) {
+                appendLog('error', 'Save template error: ' + e.message);
+            }
+        }
+
+        loadTemplates();
+
+        // ─── Restore dashboard state from last run ──────────────────────
+        async function restoreDashboardState() {
+            try {
+                const res = await fetch('/api/pipeline/status');
+                if (!res.ok) return;
+                const data = await res.json();
+                if (!data || data.status === 'no_run') return;
+
+                const statusMap = { 'Idle': 0, 'Running': 1, 'Waiting': 2, 'Completed': 3, 'Failed': 4, 'ReviewPending': 5 };
+
+                // Restore agent cards
+                if (data.agentStatuses) {
+                    Object.entries(data.agentStatuses).forEach(([agent, statusStr]) => {
+                        const statusNum = typeof statusStr === 'string' ? (statusMap[statusStr] ?? 0) : statusStr;
+                        const msg = data.agentMessages ? (data.agentMessages[agent] || '') : '';
+                        const artifacts = data.agentArtifacts ? (data.agentArtifacts[agent] || 0) : 0;
+                        const findings = data.agentFindings ? (data.agentFindings[agent] || 0) : 0;
+                        const elapsed = data.agentElapsed ? (data.agentElapsed[agent] || 0) : 0;
+                        updateAgentCard(agent, statusNum, msg, artifacts, findings, elapsed);
+                    });
+                }
+
+                // Restore summary stats
+                if (data.requirements !== undefined)
+                    document.getElementById('statReqs').textContent = data.requirements;
+                if (data.artifacts !== undefined)
+                    document.getElementById('statArtifacts').textContent = data.artifacts;
+                if (data.findings !== undefined)
+                    document.getElementById('statFindings').textContent = data.findings;
+                if (data.durationMs)
+                    document.getElementById('statTime').textContent = Math.round(data.durationMs) + 'ms';
+
+                // Show run ID
+                if (data.runId)
+                    appendLog('system', `Restored state from previous run: ${data.runId} (${data.status})`);
+
+                // Restore backlog
+                refreshBacklog();
+            } catch (e) {
+                console.warn('Failed to restore dashboard state:', e);
+            }
+        }
+        restoreDashboardState();
+
+        // ─── Project Reset ──────────────────────────────────────────
+        async function resetProject() {
+            const deleteCode = await new Promise(resolve => {
+                const modal = document.createElement('div');
+                modal.className = 'modal fade';
+                modal.tabIndex = -1;
+                modal.innerHTML = `
+                    <div class="modal-dialog">
+                        <div class="modal-content">
+                            <div class="modal-header bg-danger text-white py-2">
+                                <h6 class="modal-title"><i class="bi bi-exclamation-triangle-fill me-1"></i> Reset Project — Confirm</h6>
+                                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                            </div>
+                            <div class="modal-body">
+                                <p><strong>This will permanently delete:</strong></p>
+                                <ul class="mb-3">
+                                    <li>All pipeline run history &amp; agent events</li>
+                                    <li>All backlog items, findings, artifacts, test diagnostics</li>
+                                    <li>All audit log entries and HITL decisions</li>
+                                    <li>In-memory pipeline state</li>
+                                </ul>
+                                <div class="form-check mb-2">
+                                    <input class="form-check-input" type="checkbox" id="resetDeleteCode">
+                                    <label class="form-check-label" for="resetDeleteCode">
+                                        Also delete generated code (GNex.* folders in Output Path)
+                                    </label>
+                                </div>
+                                <div class="form-check mb-2">
+                                    <input class="form-check-input" type="checkbox" id="resetDeleteDb">
+                                    <label class="form-check-label" for="resetDeleteDb">
+                                        Also drop PostgreSQL database schemas (cl_mpi, cl_encounter, etc.)
+                                    </label>
+                                </div>
+                                <p class="text-muted small mb-0">The requirements source files will NOT be deleted.</p>
+                            </div>
+                            <div class="modal-footer py-2">
+                                <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+                                <button class="btn btn-danger btn-sm" id="resetConfirmBtn">Reset Everything</button>
+                            </div>
+                        </div>
+                    </div>`;
+                document.body.appendChild(modal);
+                const bsModal = new bootstrap.Modal(modal);
+                modal.querySelector('#resetConfirmBtn').onclick = () => {
+                    const del = modal.querySelector('#resetDeleteCode').checked;
+                    const delDb = modal.querySelector('#resetDeleteDb').checked;
+                    bsModal.hide();
+                    resolve({ del, delDb });
+                };
+                modal.addEventListener('hidden.bs.modal', () => { modal.remove(); resolve(null); });
+                bsModal.show();
+            });
+
+            if (deleteCode === null) return; // cancelled
+
+            const outputPath = document.getElementById('inputOutputPath')?.value?.trim() || '';
+            try {
+                const res = await fetch('/api/pipeline/reset', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ deleteGeneratedCode: deleteCode.del, deleteDatabase: deleteCode.delDb, outputPath })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    // Clear all UI state
+                    resetCards();
+                    nocResetCharts();
+                    clearLog();
+                    _backlogItems = [];
+                    _blPage = 1;
+                    applyBacklogFilters();
+                    document.getElementById('btnRunPipeline').disabled = false;
+                    document.getElementById('btnStopPipeline').disabled = true;
+                    appendLog('info', `Project reset complete.${data.outputDeleted ? ' Generated code deleted.' : ''}${data.databaseDeleted ? ' Database schemas dropped.' : ''} Ready to start fresh.`);
+                } else {
+                    appendLog('error', 'Reset failed: ' + (data.error || 'unknown'));
+                }
+            } catch (e) {
+                appendLog('error', 'Reset request failed: ' + e.message);
+            }
+        }
+
+        // ─── Pipeline + Card logic ──────────────────────────────────────
+        async function runPipeline() {
+            document.getElementById("btnRunPipeline").disabled = true;
+            document.getElementById("btnStopPipeline").disabled = false;
+            resetCards();
+            nocResetCharts();
+            clearLog();
+
+            const reqsPath = document.getElementById('inputReqsPath').value.trim();
+            const outputPath = document.getElementById('inputOutputPath').value.trim();
+            if (!reqsPath || !outputPath) {
+                appendLog('error', 'Requirements Path and Output Path are required.');
+                document.getElementById('btnRunPipeline').disabled = false;
+                document.getElementById('btnStopPipeline').disabled = true;
+                return;
+            }
+
+            const body = {
+                projectId: window.getActiveProjectId ? window.getActiveProjectId() : null,
+                requirementsPath: reqsPath,
+                outputPath: outputPath,
+                solutionNamespace: document.getElementById('inputNamespace').value || 'GNex',
+                dockerContainerName: document.getElementById('inputContainerName').value || 'icu-postgres',
+                dbHost: document.getElementById('inputDbHost').value || 'localhost',
+                dbPort: parseInt(document.getElementById('inputDbPort').value) || 5432,
+                dbUser: document.getElementById('inputDbUser').value || 'gnex',
+                dbName: document.getElementById('inputDbName').value || 'gnex',
+                dbPassword: document.getElementById('inputDbPassword').value || 'gnex_dev_pw',
+                spinUpDocker: document.getElementById('chkSpinDocker').checked,
+                executeDdl: document.getElementById('chkExecDdl').checked,
+                maxQueueItems: parseInt(document.getElementById('inputMaxQueue').value) || 10,
+                maxInDevItems: parseInt(document.getElementById('inputMaxInDev').value) || 10,
+                orchestratorInstructions: document.getElementById('inputInstructions').value.trim(),
+                servicePorts: {
+                    patient: parseInt(document.getElementById('portPatient').value) || 5101,
+                    encounter: parseInt(document.getElementById('portEncounter').value) || 5102,
+                    inpatient: parseInt(document.getElementById('portInpatient').value) || 5103,
+                    emergency: parseInt(document.getElementById('portEmergency').value) || 5104,
+                    diagnostics: parseInt(document.getElementById('portDiagnostics').value) || 5105,
+                    revenue: parseInt(document.getElementById('portRevenue').value) || 5106,
+                    audit: parseInt(document.getElementById('portAudit').value) || 5107,
+                    ai: parseInt(document.getElementById('portAi').value) || 5108,
+                    gateway: parseInt(document.getElementById('portGateway').value) || 5100,
+                    kafka: parseInt(document.getElementById('portKafka').value) || 9092
+                }
+            };
+
+            appendLog('system', `Starting pipeline — reqs: ${body.requirementsPath}, output: ${body.outputPath}`);
+            if (body.spinUpDocker) appendLog('system', `Docker: ${body.dockerContainerName} \u2014 ${body.dbUser}@@${body.dbHost}:${body.dbPort}/${body.dbName}`);
+
+            try {
+                const res = await fetch('/api/pipeline/run', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+                if (!res.ok) {
+                    appendLog('error', 'Pipeline trigger failed: ' + res.statusText);
+                    document.getElementById('btnRunPipeline').disabled = false;
+                    document.getElementById('btnStopPipeline').disabled = true;
+                }
+            } catch (e) {
+                appendLog('error', 'Request failed: ' + e.message);
+                document.getElementById('btnRunPipeline').disabled = false;
+                document.getElementById('btnStopPipeline').disabled = true;
+            }
+        }
+
+        async function stopPipeline() {
+            try {
+                const res = await fetch('/api/pipeline/stop', { method: 'POST' });
+                const data = await res.json();
+                if (res.ok && data.stopped) {
+                    appendLog('warning', data.message || 'Stop requested for all running agents.');
+                    document.getElementById('btnStopPipeline').disabled = true;
+                } else {
+                    appendLog('system', (data && data.message) ? data.message : 'No active pipeline run to stop.');
+                    document.getElementById('btnStopPipeline').disabled = true;
+                }
+            } catch (e) {
+                appendLog('error', 'Stop request failed: ' + e.message);
+            }
+        }
+
+        function updateAgentCard(agentKey, status, message, artifacts, findings, elapsed) {
+            const agentName = getAgentName(agentKey);
+            const card = document.querySelector(`#card-${agentName}`);
+            if (!card) return;
+            const statusBadge = card.querySelector(".agent-status");
+            const artifactSpan = card.querySelector(".agent-artifacts");
+            const messageSpan = card.querySelector(".agent-message");
+            const progressBar = card.querySelector(".progress-bar");
+            if (statusBadge) { statusBadge.className = `badge agent-status ${getStatusBadgeClass(status)}`; statusBadge.textContent = getStatusText(status); }
+            if (artifactSpan) artifactSpan.textContent = artifacts;
+            if (messageSpan) messageSpan.textContent = message;
+            if (progressBar) { progressBar.style.width = status >= 3 ? "100%" : status >= 1 ? "50%" : "0%"; progressBar.className = `progress-bar ${getProgressClass(status)}`; }
+        }
+
+        function resetCards() {
+            document.querySelectorAll(".agent-status").forEach(el => { el.className = "badge agent-status bg-secondary"; el.textContent = "Idle"; });
+            document.querySelectorAll(".agent-artifacts").forEach(el => el.textContent = "0");
+            document.querySelectorAll(".agent-message").forEach(el => el.textContent = "Waiting...");
+            document.querySelectorAll(".progress-bar").forEach(el => el.style.width = "0%");
+            ["statReqs","statArtifacts","statFindings"].forEach(id => document.getElementById(id).textContent = "0");
+            document.getElementById("statTime").textContent = "--";
+            document.getElementById("findingsPanel").innerHTML = '<p class="text-muted text-center mt-5">Running...</p>';
+            document.getElementById("instrHistory").innerHTML = '';
+            document.getElementById("instrQueueBadge").textContent = '0 queued';
+        }
+
+        // ── Orchestrator Instruction Functions ──
+        async function sendInstruction() {
+            const input = document.getElementById('inputInstructions');
+            const text = input.value.trim();
+            if (!text) return;
+
+            try {
+                const res = await fetch('/api/pipeline/instruct', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ instruction: text })
+                });
+                const data = await res.json();
+                if (data.accepted) {
+                    addInstrHistoryEntry(text);
+                    document.getElementById('instrQueueBadge').textContent = data.queuedCount + ' queued';
+                    input.value = '';
+                    appendLog('system', 'Instruction sent: ' + text);
+                } else {
+                    appendLog('warning', 'Instruction not accepted: ' + (data.reason || 'Unknown'));
+                }
+            } catch (e) {
+                appendLog('error', 'Failed to send instruction: ' + e.message);
+            }
+        }
+
+        function addInstrHistoryEntry(text) {
+            const hist = document.getElementById('instrHistory');
+            const ts = new Date().toLocaleTimeString();
+            const entry = document.createElement('div');
+            entry.className = 'border-start border-info border-3 ps-2 py-1 mb-1 bg-light rounded-end';
+            entry.innerHTML = '<small class="text-muted">' + ts + '</small> <span>' + text.replace(/</g, '&lt;') + '</span>';
+            hist.prepend(entry);
+        }
+
+        function clearInstructions() {
+            document.getElementById('inputInstructions').value = '';
+            document.getElementById('instrHistory').innerHTML = '';
+        }
+
+        async function saveInstructionToDb() {
+            const input = document.getElementById('inputInstructions');
+            const text = input.value.trim();
+            if (!text) return;
+            try {
+                const res = await fetch('/api/pipeline/instructions/save', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ instruction: text })
+                });
+                const data = await res.json();
+                if (data.saved) {
+                    appendLog('system', 'Instruction saved for future reuse.');
+                    input.value = '';
+                    // Refresh the history if panel is open
+                    if (!document.getElementById('savedInstructionsPanel').classList.contains('d-none')) {
+                        await loadSavedInstructions();
+                    }
+                }
+            } catch (e) {
+                appendLog('error', 'Failed to save instruction: ' + e.message);
+            }
+        }
+
+        async function toggleSavedInstructions() {
+            const panel = document.getElementById('savedInstructionsPanel');
+            panel.classList.toggle('d-none');
+            if (!panel.classList.contains('d-none')) {
+                await loadSavedInstructions();
+            }
+        }
+
+        async function loadSavedInstructions() {
+            const list = document.getElementById('savedInstructionsList');
+            try {
+                const res = await fetch('/api/pipeline/instructions/history?limit=30');
+                const data = await res.json();
+                if (!data.instructions || data.instructions.length === 0) {
+                    list.innerHTML = '<div class="text-muted text-center py-2">No saved instructions yet.</div>';
+                    return;
+                }
+                // Deduplicate by instruction text, keep most recent
+                const seen = new Set();
+                const unique = [];
+                for (const row of data.instructions) {
+                    if (!seen.has(row.instruction)) {
+                        seen.add(row.instruction);
+                        unique.push(row);
+                    }
+                }
+                list.innerHTML = unique.map(row => {
+                    const ts = new Date(row.createdAt).toLocaleDateString() + ' ' + new Date(row.createdAt).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+                    const srcBadge = row.source === 'PipelineStart' ? '<span class="badge bg-primary me-1">start</span>' :
+                                     row.source === 'MidPipeline' ? '<span class="badge bg-info me-1">mid-run</span>' :
+                                     '<span class="badge bg-secondary me-1">saved</span>';
+                    const escapedText = row.instruction.replace(/</g, '&lt;').replace(/"/g, '&quot;');
+                    return '<div class="d-flex align-items-start gap-2 py-1 border-bottom">' +
+                        '<button class="btn btn-outline-info btn-sm py-0 px-1 flex-shrink-0" onclick="reuseInstruction(\'' + escapedText.replace(/'/g, "\\'") + '\')" title="Load into editor"><i class="bi bi-arrow-return-left"></i></button>' +
+                        srcBadge +
+                        '<span class="flex-grow-1">' + escapedText + '</span>' +
+                        '<small class="text-muted flex-shrink-0">' + ts + '</small>' +
+                    '</div>';
+                }).join('');
+            } catch (e) {
+                list.innerHTML = '<div class="text-danger">Failed to load: ' + e.message + '</div>';
+            }
+        }
+
+        function reuseInstruction(text) {
+            document.getElementById('inputInstructions').value = text;
+        }
+
+        // ─── Requirement Submission ─────────────────────────────────
+        let reqQueue = [];
+        let reqSubmitCount = 0;
+
+        function submitRequirement() {
+            const title = document.getElementById('newReqTitle').value.trim();
+            if (!title) { appendLog('warning', 'Requirement title is required'); return; }
+
+            const req = {
+                title: title,
+                description: document.getElementById('newReqDescription').value.trim(),
+                module: document.getElementById('newReqModule').value,
+                tags: document.getElementById('newReqTags').value.split(',').map(t => t.trim()).filter(Boolean),
+                acceptanceCriteria: document.getElementById('newReqAC').value.split('\n').map(l => l.trim()).filter(Boolean)
+            };
+
+            // Submit single requirement immediately
+            doSubmitRequirements([req]);
+            clearReqForm();
+        }
+
+        function submitBulkRequirements() {
+            if (reqQueue.length === 0) { appendLog('warning', 'No requirements queued'); return; }
+            doSubmitRequirements(reqQueue);
+            reqQueue = [];
+            document.getElementById('bulkCount').textContent = '0';
+            document.getElementById('reqQueue').innerHTML = '';
+        }
+
+        async function doSubmitRequirements(reqs) {
+            try {
+                const res = await fetch('/api/pipeline/requirements', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ requirements: reqs })
+                });
+                const data = await res.json();
+                if (data.accepted) {
+                    reqSubmitCount += data.count;
+                    document.getElementById('reqSubmitBadge').textContent = reqSubmitCount + ' submitted';
+                    appendLog('system', `Submitted ${data.count} requirements → ${data.message}`);
+                    // Auto-refresh backlog after short delay
+                    setTimeout(refreshBacklog, 3000);
+                } else {
+                    appendLog('warning', 'Requirements not accepted: ' + (data.reason || 'Unknown'));
+                }
+            } catch (e) {
+                appendLog('error', 'Failed to submit requirements: ' + e.message);
+            }
+        }
+
+        function clearReqForm() {
+            document.getElementById('newReqTitle').value = '';
+            document.getElementById('newReqDescription').value = '';
+            document.getElementById('newReqTags').value = '';
+            document.getElementById('newReqAC').value = '';
+            document.getElementById('newReqModule').selectedIndex = 0;
+        }
+
+        // ─── Backlog Tracker ────────────────────────────────────────
+        let _backlogItems = [];         // raw items from API
+        let _backlogSortField = 'priority';
+        let _backlogSortAsc = true;
+        let _blPage = 1;
+        let _blPageSize = 25;
+
+        const blStatusColors = {
+            'New': 'primary',
+            'InQueue': 'info',
+            'Received': 'secondary',
+            'InProgress': 'warning',
+            'Completed': 'success',
+            'Blocked': 'danger'
+        };
+        const blTypeIcons = { 'Epic': 'bi-layers', 'UserStory': 'bi-person', 'UseCase': 'bi-lightning', 'Task': 'bi-check-square', 'Bug': 'bi-bug-fill' };
+        const blPriorityLabels = { 0: 'P0 Critical', 1: 'P1 High', 2: 'P2 Medium', 3: 'P3 Low' };
+        const blPriorityBadge = { 0: 'danger', 1: 'warning text-dark', 2: 'info', 3: 'secondary' };
+
+        function normalizeBacklogStatus(status) {
+            if (status === 'UnderDev') return 'InProgress';
+            return status;
+        }
+
+        async function refreshBacklog() {
+            try {
+                const res = await fetch('/api/pipeline/backlog');
+                const data = await res.json();
+                if (!data.items) return;
+
+                const s = data.stats;
+                const total = data.totalItems || 1;
+                document.getElementById('blStatNew').textContent = (s.newCount || 0) + ' New';
+                const queueCount = s.readyBacklog ?? s.inQueue ?? 0;
+                const devCount = s.inDev ?? s.underDev ?? 0;
+
+                document.getElementById('blStatQueued').textContent = queueCount + ' Queued';
+                document.getElementById('blStatDev').textContent = devCount + ' In Dev';
+                document.getElementById('blStatDone').textContent = (s.completed || 0) + ' Done';
+                document.getElementById('blStatBlocked').textContent = (s.blocked || 0) + ' Blocked';
+
+                // Progress bar
+                document.getElementById('blBarNew').style.width = ((s.newCount || 0) / total * 100) + '%';
+                document.getElementById('blBarQueued').style.width = (queueCount / total * 100) + '%';
+                document.getElementById('blBarDev').style.width = (devCount / total * 100) + '%';
+                document.getElementById('blBarDone').style.width = ((s.completed || 0) / total * 100) + '%';
+                document.getElementById('blBarBlocked').style.width = ((s.blocked || 0) / total * 100) + '%';
+
+                // Store items and populate filters
+                _backlogItems = Array.isArray(data.items)
+                    ? data.items.map(i => ({ ...i, status: normalizeBacklogStatus(i.status) }))
+                    : [];
+                populateBacklogFilterDropdowns();
+                applyBacklogFilters();
+            } catch (e) {
+                console.warn('Backlog refresh failed:', e);
+            }
+        }
+
+        function populateBacklogFilterDropdowns() {
+            const modules = [...new Set(_backlogItems.map(i => i.module).filter(Boolean))].sort();
+            const agents = [...new Set(_backlogItems.map(i => i.assignedAgent).filter(Boolean))].sort();
+
+            const modSel = document.getElementById('blFilterModule');
+            const curMod = modSel.value;
+            modSel.innerHTML = '<option value="">All Modules</option>' + modules.map(m => `<option value="${m}">${m}</option>`).join('');
+            modSel.value = curMod;
+
+            const agSel = document.getElementById('blFilterAgent');
+            const curAg = agSel.value;
+            agSel.innerHTML = '<option value="">All Agents</option>' + agents.map(a => `<option value="${a}">${a}</option>`).join('');
+            agSel.value = curAg;
+        }
+
+        function getFilteredBacklogItems() {
+            const search = (document.getElementById('blSearchText').value || '').toLowerCase();
+            const fStatus = document.getElementById('blFilterStatus').value;
+            const fType = document.getElementById('blFilterType').value;
+            const fModule = document.getElementById('blFilterModule').value;
+            const fAgent = document.getElementById('blFilterAgent').value;
+            const fPriority = document.getElementById('blFilterPriority').value;
+
+            let items = _backlogItems.filter(item => {
+                if (search && !(item.title || '').toLowerCase().includes(search) && !(item.module || '').toLowerCase().includes(search) && !(item.description || '').toLowerCase().includes(search)) return false;
+                if (fStatus && item.status !== fStatus) return false;
+                if (fType && item.itemType !== fType) return false;
+                if (fModule && item.module !== fModule) return false;
+                if (fAgent && item.assignedAgent !== fAgent) return false;
+                if (fPriority !== '' && item.priority !== parseInt(fPriority)) return false;
+                return true;
+            });
+
+            // Sort
+            items.sort((a, b) => {
+                let va = a[_backlogSortField] ?? '';
+                let vb = b[_backlogSortField] ?? '';
+                if (typeof va === 'number') return _backlogSortAsc ? va - vb : vb - va;
+                va = String(va).toLowerCase(); vb = String(vb).toLowerCase();
+                return _backlogSortAsc ? va.localeCompare(vb) : vb.localeCompare(va);
+            });
+            return items;
+        }
+
+        function applyBacklogFilters() {
+            const allFiltered = getFilteredBacklogItems();
+            const totalFiltered = allFiltered.length;
+            const tbody = document.getElementById('backlogBody');
+            const pagBar = document.getElementById('blPaginationBar');
+
+            // Pagination math
+            const pageSize = _blPageSize > 0 ? _blPageSize : totalFiltered;
+            const totalPages = Math.max(1, Math.ceil(totalFiltered / pageSize));
+            if (_blPage > totalPages) _blPage = totalPages;
+            if (_blPage < 1) _blPage = 1;
+            const start = (_blPage - 1) * pageSize;
+            const items = allFiltered.slice(start, start + pageSize);
+
+            document.getElementById('blFilterCount').textContent = `${totalFiltered} of ${_backlogItems.length} items`;
+
+            // Show/hide pagination bar
+            if (totalFiltered > 25) {
+                pagBar.style.removeProperty('display');
+                pagBar.classList.add('d-flex');
+                document.getElementById('blPageInfo').textContent = `${start + 1}–${Math.min(start + pageSize, totalFiltered)} of ${totalFiltered} (page ${_blPage}/${totalPages})`;
+            } else {
+                pagBar.classList.remove('d-flex');
+                pagBar.style.display = 'none';
+            }
+
+            if (items.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted py-3">No items match current filters</td></tr>';
+                return;
+            }
+            tbody.innerHTML = items.map(item => {
+                const pLabel = blPriorityLabels[item.priority] || `P${item.priority}`;
+                const pBadge = blPriorityBadge[item.priority] || 'secondary';
+                const escapedDesc = (item.description || '').replace(/"/g, '&quot;');
+                return `
+                <tr data-item-id="${item.id}">
+                    <td><i class="bi ${blTypeIcons[item.itemType] || 'bi-circle'} me-1"></i><small>${item.itemType}</small></td>
+                    <td title="${escapedDesc}">
+                        <span>${item.title}</span>
+                        ${item.tags && item.tags.length ? '<br>' + item.tags.map(t => `<span class="badge bg-light text-dark border me-1" style="font-size:.65rem">${t}</span>`).join('') : ''}
+                    </td>
+                    <td><small>${item.module || '—'}</small></td>
+                    <td>
+                        <select class="form-select form-select-sm border-0 p-0" style="font-size:.75rem;background-color:transparent" onchange="updateBacklogField('${item.id}','status',this.value)">
+                            ${['New','InQueue','Received','InProgress','Completed','Blocked'].map(s => `<option value="${s}" ${item.status === s ? 'selected' : ''} class="bg-white">${s}</option>`).join('')}
+                        </select>
+                    </td>
+                    <td><small class="text-muted">${item.assignedAgent || '—'}</small></td>
+                    <td>
+                        <select class="form-select form-select-sm border-0 p-0" style="font-size:.75rem;background-color:transparent" onchange="updateBacklogField('${item.id}','priority',parseInt(this.value))">
+                            <option value="0" ${item.priority === 0 ? 'selected' : ''} class="bg-white">P0 Critical</option>
+                            <option value="1" ${item.priority === 1 ? 'selected' : ''} class="bg-white">P1 High</option>
+                            <option value="2" ${item.priority === 2 ? 'selected' : ''} class="bg-white">P2 Medium</option>
+                            <option value="3" ${item.priority === 3 ? 'selected' : ''} class="bg-white">P3 Low</option>
+                        </select>
+                    </td>
+                    <td>${item.iteration}</td>
+                    <td>
+                        <div class="btn-group btn-group-sm">
+                            <button class="btn btn-outline-primary btn-sm py-0 px-1" onclick="showBacklogDetail('${item.id}')" title="Details"><i class="bi bi-eye"></i></button>
+                            <button class="btn btn-outline-warning btn-sm py-0 px-1" onclick="promoteBacklogItem('${item.id}')" title="Promote priority"><i class="bi bi-arrow-up"></i></button>
+                        </div>
+                    </td>
+                </tr>`;
+            }).join('');
+        }
+
+        function sortBacklog(field) {
+            if (_backlogSortField === field) { _backlogSortAsc = !_backlogSortAsc; }
+            else { _backlogSortField = field; _backlogSortAsc = true; }
+            _blPage = 1;
+            applyBacklogFilters();
+        }
+
+        function setBacklogStatusQuickView(status) {
+            document.getElementById('blFilterStatus').value = status || '';
+            _blPage = 1;
+            applyBacklogFilters();
+        }
+
+        function clearBacklogFilters() {
+            document.getElementById('blSearchText').value = '';
+            document.getElementById('blFilterStatus').value = '';
+            document.getElementById('blFilterType').value = '';
+            document.getElementById('blFilterModule').value = '';
+            document.getElementById('blFilterAgent').value = '';
+            document.getElementById('blFilterPriority').value = '';
+            _backlogSortField = 'priority'; _backlogSortAsc = true;
+            _blPage = 1;
+            applyBacklogFilters();
+        }
+
+        function blGoPage(dir) {
+            const total = getFilteredBacklogItems().length;
+            const pageSize = _blPageSize > 0 ? _blPageSize : total;
+            const totalPages = Math.max(1, Math.ceil(total / pageSize));
+            if (dir === 'first') _blPage = 1;
+            else if (dir === 'prev') _blPage = Math.max(1, _blPage - 1);
+            else if (dir === 'next') _blPage = Math.min(totalPages, _blPage + 1);
+            else if (dir === 'last') _blPage = totalPages;
+            applyBacklogFilters();
+        }
+
+        function blChangePageSize() {
+            _blPageSize = parseInt(document.getElementById('blPageSize').value);
+            _blPage = 1;
+            applyBacklogFilters();
+        }
+
+        async function updateBacklogField(itemId, field, value) {
+            try {
+                const body = {};
+                body[field] = value;
+                const res = await fetch(`/api/pipeline/backlog/${itemId}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+                if (!res.ok) { console.warn('Update failed:', await res.text()); return; }
+                // Update local cache
+                const item = _backlogItems.find(i => i.id === itemId);
+                if (item) item[field] = value;
+                // Re-render stats if status changed
+                if (field === 'status') refreshBacklog();
+            } catch (e) { console.warn('Backlog update failed:', e); }
+        }
+
+        async function promoteBacklogItem(itemId) {
+            const item = _backlogItems.find(i => i.id === itemId);
+            if (!item || item.priority <= 0) return;
+            await updateBacklogField(itemId, 'priority', item.priority - 1);
+            applyBacklogFilters();
+        }
+
+        function showBacklogDetail(itemId) {
+            const item = _backlogItems.find(i => i.id === itemId);
+            if (!item) return;
+            const pLabel = blPriorityLabels[item.priority] || `P${item.priority}`;
+            const ac = item.acceptanceCriteria || [];
+            const deps = item.dependsOn || [];
+            const tags = item.tags || [];
+            const dod = item.definitionOfDone || [];
+            const technicalNotes = (item.technicalNotes || '').trim();
+            const detailedSpec = (item.detailedSpec || '').trim();
+
+            const html = `
+                <div class="mb-3">
+                    <div class="d-flex justify-content-between align-items-start mb-2">
+                        <div>
+                            <h6 class="mb-1">${item.title}</h6>
+                            <span class="badge bg-${blStatusColors[item.status] || 'secondary'} me-1">${item.status}</span>
+                            <span class="badge bg-${blPriorityBadge[item.priority] || 'secondary'} me-1">${pLabel}</span>
+                            <span class="badge bg-light text-dark border me-1">${item.itemType}</span>
+                            ${item.module ? `<span class="badge bg-light text-dark border">${item.module}</span>` : ''}
+                        </div>
+                        <small class="text-muted">ID: ${item.id}</small>
+                    </div>
+                    <p class="text-muted small mb-2">${item.description || 'No description'}</p>
+                    ${item.assignedAgent ? `<p class="small"><strong>Assigned:</strong> ${item.assignedAgent}</p>` : ''}
+                    <p class="small mb-1"><strong>Iteration:</strong> ${item.iteration} &nbsp; <strong>Created:</strong> ${new Date(item.createdAt).toLocaleString()}</p>
+                    ${item.startedAt ? `<p class="small mb-1"><strong>Started:</strong> ${new Date(item.startedAt).toLocaleString()}</p>` : ''}
+                    ${item.completedAt ? `<p class="small mb-1"><strong>Completed:</strong> ${new Date(item.completedAt).toLocaleString()}</p>` : ''}
+                </div>
+                ${ac.length ? `<div class="mb-2"><strong class="small">Acceptance Criteria:</strong><ul class="small mb-0">${ac.map(c => `<li>${c}</li>`).join('')}</ul></div>` : ''}
+                ${deps.length ? `<div class="mb-2"><strong class="small">Dependencies:</strong><ul class="small mb-0">${deps.map(d => `<li>${d}</li>`).join('')}</ul></div>` : ''}
+                ${tags.length ? `<div class="mb-2"><strong class="small">Tags:</strong> ${tags.map(t => `<span class="badge bg-light text-dark border me-1">${t}</span>`).join('')}</div>` : ''}
+                ${(item.itemType === 'Task' && technicalNotes) ? `<div class="mb-2"><strong class="small">Technical Notes:</strong><p class="small text-muted mb-0">${technicalNotes}</p></div>` : ''}
+                ${(item.itemType === 'Task' && dod.length) ? `<div class="mb-2"><strong class="small">Definition Of Done:</strong><ul class="small mb-0">${dod.map(d => `<li>${d}</li>`).join('')}</ul></div>` : ''}
+                ${(item.itemType === 'Task' && detailedSpec) ? `<div class="mb-2"><strong class="small">Detailed Spec:</strong><p class="small text-muted mb-0">${detailedSpec}</p></div>` : ''}
+                <hr>
+                <div class="row g-2">
+                    <div class="col-6">
+                        <label class="form-label small mb-1">Priority</label>
+                        <select class="form-select form-select-sm" id="detailPriority">
+                            <option value="0" ${item.priority===0?'selected':''}>P0 — Critical</option>
+                            <option value="1" ${item.priority===1?'selected':''}>P1 — High</option>
+                            <option value="2" ${item.priority===2?'selected':''}>P2 — Medium</option>
+                            <option value="3" ${item.priority===3?'selected':''}>P3 — Low</option>
+                        </select>
+                    </div>
+                    <div class="col-6">
+                        <label class="form-label small mb-1">Status</label>
+                        <select class="form-select form-select-sm" id="detailStatus">
+                            ${['New','InQueue','UnderDev','Completed','Blocked'].map(s => `<option value="${s}" ${item.status===s?'selected':''}>${s}</option>`).join('')}
+                        </select>
+                    </div>
+                </div>
+                <button class="btn btn-primary btn-sm mt-2 w-100" onclick="saveBacklogDetail('${item.id}')">Save Changes</button>
+            `;
+
+            // Re-use the existing modal or create one
+            let modal = document.getElementById('backlogDetailModal');
+            if (!modal) {
+                modal = document.createElement('div');
+                modal.id = 'backlogDetailModal';
+                modal.className = 'modal fade';
+                modal.tabIndex = -1;
+                modal.innerHTML = `
+                    <div class="modal-dialog">
+                        <div class="modal-content">
+                            <div class="modal-header py-2">
+                                <h6 class="modal-title">Backlog Item Detail</h6>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                            </div>
+                            <div class="modal-body" id="backlogDetailBody"></div>
+                        </div>
+                    </div>`;
+                document.body.appendChild(modal);
+            }
+            document.getElementById('backlogDetailBody').innerHTML = html;
+            new bootstrap.Modal(modal).show();
+        }
+
+        async function saveBacklogDetail(itemId) {
+            const priority = parseInt(document.getElementById('detailPriority').value);
+            const status = document.getElementById('detailStatus').value;
+            await updateBacklogField(itemId, 'priority', priority);
+            await updateBacklogField(itemId, 'status', status);
+            bootstrap.Modal.getInstance(document.getElementById('backlogDetailModal')).hide();
+            refreshBacklog();
+        }
+
+        // Auto-refresh backlog every 5 seconds during pipeline run
+        setInterval(() => {
+            const ctx = nocState.agentStatuses;
+            const anyRunning = Object.values(ctx).some(s => s === 1);
+            if (anyRunning || document.getElementById('backlogBody').children.length <= 1) {
+                refreshBacklog();
+            }
+        }, 5000);
+
+        function nocResetCharts() {
+            chartTimeline.data.datasets[0].data = new Array(ALL_AGENTS.length).fill(0);
+            chartTimeline.update('none');
+            chartByService.data.datasets[0].data = new Array(8).fill(0);
+            chartByService.update('none');
+            chartByLayer.data.datasets[0].data = new Array(15).fill(0);
+            chartByLayer.update('none');
+            chartSeverity.data.datasets[0].data = [0,0,0,0,0,0];
+            chartSeverity.update('none');
+
+            // Reset test charts
+            chartTestOutcome.data.datasets[0].data = [0,0,0,0];
+            chartTestOutcome.update('none');
+            chartTestsByAgent.data.labels = [];
+            chartTestsByAgent.data.datasets.forEach(ds => ds.data = []);
+            chartTestsByAgent.update('none');
+            chartTestsByCategory.data.labels = [];
+            chartTestsByCategory.data.datasets.forEach(ds => ds.data = []);
+            chartTestsByCategory.update('none');
+            allTestDiagnostics = [];
+            document.getElementById('testDiagBody').innerHTML = '<tr><td colspan="8" class="text-center text-muted py-4">Running...</td></tr>';
+            document.getElementById('testTotalBadge').textContent = '0 tests';
+
+            nocState.agentTiming = {};
+            nocState.artifactsByService = {};
+            nocState.artifactsByLayer = {};
+            nocState.severityCounts = [0,0,0,0,0,0];
+            nocState.agentStatuses = {};
+            initHeatmap();
+            // Reset service flow nodes
+            SERVICES.forEach(svc => {
+                const el = document.getElementById(`sf-${svc}`);
+                if (el) { el.style.background = '#f5f5f5'; el.style.borderColor = '#dee2e6'; }
+            });
+        }
+
+        function updateLayerChartFromAgents() {
+            const agentLayerMap = {
+                'Database': [0,1,8],       // Database, Repository, Migration
+                'ServiceLayer': [2,3,6],   // Service, Dto, Integration
+                'Application': [4,5,9],    // ViewModel, RazorPage, Configuration
+                'Integration': [6],        // Integration
+                'Testing': [7],            // Test
+                'Security': [10],          // Security
+                'HipaaCompliance': [11],   // Compliance
+                'Soc2Compliance': [11],
+                'AccessControl': [10],
+                'Observability': [12],     // Observability
+                'Infrastructure': [13],    // Infrastructure
+                'ApiDocumentation': [14],  // Documentation
+                'Performance': [9],        // Configuration
+                'Review': [],
+                'BugFix': [2,3]            // Service, Dto fixes
+            };
+            const layerData = new Array(15).fill(0);
+            Object.entries(nocState.artifactsByService).forEach(([agent, count]) => {
+                const layers = agentLayerMap[agent] || [];
+                if (layers.length > 0) {
+                    const per = Math.ceil(count / layers.length);
+                    layers.forEach(li => layerData[li] += per);
+                }
+            });
+            chartByLayer.data.datasets[0].data = layerData;
+            chartByLayer.update();
+        }
+
+        // ─── Utilities ──────────────────────────────────────────────────
+        function appendLog(cls, msg) {
+            const log = document.getElementById("eventLog");
+            const ts = new Date().toLocaleTimeString();
+            const colors = { system: "#569cd6", success: "#4ec9b0", error: "#f44747", warning: "#dcdcaa" };
+            log.innerHTML += `<div style="color:${colors[cls] || '#d4d4d4'}">[${ts}] ${msg}</div>`;
+            log.scrollTop = log.scrollHeight;
+        }
+        function clearLog() { document.getElementById("eventLog").innerHTML = ""; }
+
+        function renderFindings(findings) {
+            const panel = document.getElementById("findingsPanel");
+            panel.innerHTML = findings.map(f => {
+                const sev = f.severity >= 4 ? "danger" : f.severity >= 3 ? "warning" : "info";
+                return `<div class="alert alert-${sev} py-1 px-2 mb-1" style="font-size:0.8rem"><strong>${f.category}</strong>: ${f.message}${f.filePath ? `<br/><small class="text-muted">${f.filePath}</small>` : ""}</div>`;
+            }).join("");
+        }
+
+        function getAgentName(k) { return typeof k==="number" ? (ALL_AGENTS[k] || String(k)) : k; }
+        function getStatusText(s) { return ["Idle","Running","Waiting","Completed","Failed","Review Pending"][s]||s; }
+        function getStatusClass(s) { return ["system","warning","system","success","error","warning"][s]||"system"; }
+        function getStatusBadgeClass(s) { return ["bg-secondary","bg-primary","bg-info","bg-success","bg-danger","bg-warning"][s]||"bg-secondary"; }
+        function getProgressClass(s) { return ["","bg-primary progress-bar-striped progress-bar-animated","bg-info","bg-success","bg-danger","bg-warning"][s]||""; }
+
+        // ─── Per-Agent Activity Log (in-memory) ─────────────────────
+        const agentActivityLog = {};   // agentKey → [ { time, status, message, artifacts, findings, elapsed } ]
+
+        // Hook into PipelineEvent to record per-agent activity
+        connection.on("PipelineEvent", evt => {
+            const name = getAgentName(evt.agent);
+            if (!agentActivityLog[name]) agentActivityLog[name] = [];
+            agentActivityLog[name].push({
+                time: new Date().toLocaleTimeString(),
+                status: evt.status,
+                message: evt.message,
+                artifacts: evt.artifactCount,
+                findings: evt.findingCount,
+                elapsed: evt.elapsedMs,
+                retry: evt.retryAttempt || 0
+            });
+        });
+
+        // ─── Agent Detail Modal ─────────────────────────────────────
+        // ─── Ask Agent ──────────────────────────────────────────────
+        let _askAgentKey = '';
+        let _askChatHistory = [];
+
+        async function askAgent() {
+            const input = document.getElementById('adAskInput');
+            const question = input.value.trim();
+            if (!question) return;
+
+            const chatDiv = document.getElementById('adChatHistory');
+            const placeholder = document.getElementById('adChatPlaceholder');
+            if (placeholder) placeholder.remove();
+
+            // Show user message
+            chatDiv.innerHTML += `<div class="d-flex justify-content-end mb-2"><div class="bg-primary text-white rounded-3 px-3 py-2" style="max-width:80%;font-size:0.88rem;">${escapeHtml(question)}</div></div>`;
+            input.value = '';
+            input.disabled = true;
+            document.getElementById('adAskBtn').disabled = true;
+
+            // Show typing indicator
+            const typingId = 'typing-' + Date.now();
+            chatDiv.innerHTML += `<div id="${typingId}" class="d-flex mb-2"><div class="bg-white border rounded-3 px-3 py-2 text-muted" style="font-size:0.85rem;"><i class="bi bi-three-dots"></i> Thinking...</div></div>`;
+            chatDiv.scrollTop = chatDiv.scrollHeight;
+
+            try {
+                const res = await fetch('/api/pipeline/agent/ask', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ agentKey: _askAgentKey, question: question })
+                });
+                const data = await res.json();
+                document.getElementById(typingId)?.remove();
+
+                const answer = data.answer || data.error || 'No response received.';
+                chatDiv.innerHTML += `<div class="d-flex mb-2"><div class="bg-white border rounded-3 px-3 py-2" style="max-width:85%;font-size:0.88rem;white-space:pre-wrap;">${escapeHtml(answer)}</div></div>`;
+            } catch (err) {
+                document.getElementById(typingId)?.remove();
+                chatDiv.innerHTML += `<div class="d-flex mb-2"><div class="bg-danger-subtle border rounded-3 px-3 py-2" style="font-size:0.85rem;">Failed to get response: ${escapeHtml(err.message)}</div></div>`;
+            }
+
+            chatDiv.scrollTop = chatDiv.scrollHeight;
+            input.disabled = false;
+            document.getElementById('adAskBtn').disabled = false;
+            input.focus();
+        }
+
+        function showAgentArtifactsTab() {
+            const trigger = document.querySelector('a[data-bs-toggle="tab"][href="#adTabArtifacts"]');
+            if (trigger) bootstrap.Tab.getOrCreateInstance(trigger).show();
+        }
+
+        async function openAgentDetail(agentKey) {
+            _askAgentKey = agentKey;
+            // Reset Ask Agent chat
+            document.getElementById('adChatHistory').innerHTML = '<p class="text-muted text-center py-4 mb-0" id="adChatPlaceholder">Ask a question about this agent\'s work...</p>';
+            document.getElementById('adAskInput').value = '';
+
+            const idx = ALL_AGENTS.indexOf(agentKey);
+            const label = idx >= 0 ? ALL_AGENT_LABELS[idx] : agentKey;
+            const icon = idx >= 0 ? ALL_AGENT_ICONS[idx] : 'bi-cpu';
+
+            // Set title
+            document.getElementById('agentDetailTitle').innerHTML =
+                `<i class="bi ${icon} me-2"></i>${label} — Agent Details`;
+
+            // Summary strip
+            const status = nocState.agentStatuses[agentKey];
+            const statusNum = status !== undefined ? status : 0;
+            document.getElementById('adStatus').className = `badge fs-6 ${getStatusBadgeClass(statusNum)}`;
+            document.getElementById('adStatus').textContent = getStatusText(statusNum);
+
+            const timing = nocState.agentTiming[agentKey];
+            document.getElementById('adElapsed').textContent = timing && timing.elapsed > 0
+                ? (timing.elapsed >= 1000 ? (timing.elapsed / 1000).toFixed(1) + 's' : timing.elapsed.toFixed(0) + 'ms')
+                : '—';
+
+            // Get artifact/finding counts from card
+            const card = document.querySelector(`#card-${agentKey}`);
+            const artifactCount = card ? (card.querySelector('.agent-artifacts')?.textContent || '0') : '0';
+            document.getElementById('adArtifacts').textContent = artifactCount;
+            document.getElementById('adFindings').textContent = '0';
+
+            // ── Artifacts tab ──
+            const artifactsDiv = document.getElementById('adArtifactsList');
+            artifactsDiv.innerHTML = '<p class="text-muted text-center py-4 mb-0">Loading artifacts...</p>';
+            try {
+                const res = await fetch('/api/pipeline/artifacts');
+                if (res.ok) {
+                    const allArtifacts = await res.json();
+                    const rows = (allArtifacts || []).filter(a => (a.producedBy || '') === agentKey);
+                    if (rows.length === 0) {
+                        artifactsDiv.innerHTML = '<p class="text-muted text-center py-4 mb-0">No artifacts found for this agent.</p>';
+                    } else {
+                        artifactsDiv.innerHTML = rows.map(a => {
+                            const path = a.relativePath || a.fileName || a.id;
+                            const layer = a.layer || 'Unknown';
+                            const size = a.contentLength || 0;
+                            return `<div class="border rounded p-2">
+                                <div class="d-flex justify-content-between align-items-center gap-2">
+                                    <a href="/api/pipeline/artifacts/${encodeURIComponent(a.id)}" target="_blank" rel="noopener" class="fw-semibold text-decoration-none">${escapeHtml(path)}</a>
+                                    <span class="badge bg-light text-dark border">${escapeHtml(layer)}</span>
+                                </div>
+                                <div class="text-muted" style="font-size:0.8rem;">
+                                    ${escapeHtml(a.namespace || '')} ${size > 0 ? `• ${size} chars` : ''}
+                                </div>
+                            </div>`;
+                        }).join('');
+                    }
+                } else {
+                    artifactsDiv.innerHTML = '<p class="text-muted text-center py-4 mb-0">Artifacts API unavailable.</p>';
+                }
+            } catch {
+                artifactsDiv.innerHTML = '<p class="text-muted text-center py-4 mb-0">Failed to load artifacts.</p>';
+            }
+
+            // Retries
+            const activity = agentActivityLog[agentKey] || [];
+            const maxRetry = activity.reduce((m, e) => Math.max(m, e.retry || 0), 0);
+            document.getElementById('adRetries').textContent = maxRetry;
+
+            // ── Activity Timeline tab ──
+            const tlDiv = document.getElementById('adTimelineList');
+            if (activity.length === 0) {
+                tlDiv.innerHTML = '<p class="text-muted text-center py-4">No activity recorded yet for this agent.</p>';
+            } else {
+                tlDiv.innerHTML = activity.map((e, i) => {
+                    const statusBadge = getStatusBadgeClass(e.status);
+                    const statusLabel = getStatusText(e.status);
+                    const elapsedStr = e.elapsed > 0 ? (e.elapsed >= 1000 ? (e.elapsed / 1000).toFixed(1) + 's' : e.elapsed.toFixed(0) + 'ms') : '';
+                    return `<div class="d-flex align-items-start gap-2 py-2 px-3 ${i % 2 === 0 ? 'bg-light' : ''} rounded">
+                        <div class="text-muted" style="min-width:75px;font-size:0.78rem;">${e.time}</div>
+                        <span class="badge ${statusBadge}" style="min-width:70px;">${statusLabel}</span>
+                        <div class="flex-grow-1" style="font-size:0.85rem;">
+                            ${escapeHtml(e.message)}
+                            ${e.retry > 0 ? `<span class="badge bg-warning text-dark ms-1">retry #${e.retry}</span>` : ''}
+                        </div>
+                        <div class="text-end text-muted" style="min-width:100px;font-size:0.78rem;">
+                            ${e.artifacts > 0 ? `<span class="me-2"><i class="bi bi-file-earmark-code"></i> ${e.artifacts}</span>` : ''}
+                            ${elapsedStr ? `<i class="bi bi-clock"></i> ${elapsedStr}` : ''}
+                        </div>
+                    </div>`;
+                }).join('');
+            }
+
+            // ── Audit Log tab ──
+            const auditBody = document.getElementById('adAuditBody');
+            auditBody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-3">Loading...</td></tr>';
+            try {
+                const res = await fetch('/api/pipeline/audit?limit=200');
+                if (res.ok) {
+                    const data = await res.json();
+                    const allEntries = data.entries || [];
+                    const entries = allEntries.filter(e => e.agent === agentKey || e.agent === label);
+                    if (entries.length === 0) {
+                        auditBody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-3">No audit entries for this agent</td></tr>';
+                    } else {
+                        auditBody.innerHTML = entries.map((e, i) => {
+                            const sevClass = e.severity === 'Critical' ? 'text-danger fw-bold' : e.severity === 'Warning' ? 'text-warning' : '';
+                            return `<tr>
+                                <td>${i + 1}</td>
+                                <td>${escapeHtml(e.action)}</td>
+                                <td class="${sevClass}">${escapeHtml(e.severity)}</td>
+                                <td style="max-width:300px;" title="${escapeHtml(e.description)}">${escapeHtml(e.description)}</td>
+                                <td><code style="font-size:0.65rem;">${(e.outputHash || '').substring(0, 12)}</code></td>
+                                <td style="font-size:0.75rem;">${e.timestamp ? new Date(e.timestamp).toLocaleTimeString() : ''}</td>
+                            </tr>`;
+                        }).join('');
+                    }
+                } else {
+                    auditBody.innerHTML = '<tr><td colspan="6" class="text-muted">Audit API unavailable</td></tr>';
+                }
+            } catch {
+                auditBody.innerHTML = '<tr><td colspan="6" class="text-muted">Failed to load audit log</td></tr>';
+            }
+
+            // ── HITL Decisions tab ──
+            const decDiv = document.getElementById('adDecisionList');
+            decDiv.innerHTML = '<p class="text-muted text-center py-3">Loading...</p>';
+            try {
+                const res = await fetch('/api/pipeline/decisions/history');
+                if (res.ok) {
+                    const data = await res.json();
+                    const allItems = data.decisions || [];
+                    const items = allItems.filter(d => d.agent === agentKey || d.agent === label);
+                    if (items.length === 0) {
+                        decDiv.innerHTML = '<p class="text-muted text-center py-3">No HITL decisions for this agent</p>';
+                    } else {
+                        decDiv.innerHTML = items.map(d => {
+                            const statusBg = d.status === 'Approved' ? 'success' : d.status === 'Rejected' ? 'danger' : 'warning';
+                            return `<div class="border rounded p-2">
+                                <div class="d-flex justify-content-between">
+                                    <strong>${escapeHtml(d.title || d.category || 'Decision')}</strong>
+                                    <span class="badge bg-${statusBg}">${escapeHtml(d.status)}</span>
+                                </div>
+                                <div class="text-muted" style="font-size:0.8rem;">${escapeHtml(d.description || '')}</div>
+                            </div>`;
+                        }).join('');
+                    }
+                } else {
+                    decDiv.innerHTML = '<p class="text-muted text-center py-3">Decisions API unavailable</p>';
+                }
+            } catch {
+                decDiv.innerHTML = '<p class="text-muted text-center py-3">Failed to load decisions</p>';
+            }
+
+            // Show modal
+            new bootstrap.Modal(document.getElementById('agentDetailModal')).show();
+        }
+    </script>
+
+    <style>
+        .agent-card-clickable:hover {
+            box-shadow: 0 4px 15px rgba(0,0,0,0.15);
+            transform: translateY(-2px);
+            transition: all 0.2s ease;
+        }
+        .agent-card-clickable {
+            transition: all 0.2s ease;
+        }
+    </style>
+}

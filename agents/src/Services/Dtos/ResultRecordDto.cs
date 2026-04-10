@@ -1,4 +1,4 @@
-namespace Hms.Services.Dtos.Diagnostics;
+namespace GNex.Services.Dtos.Diagnostics;
 
 public sealed record ResultRecordDto
 {

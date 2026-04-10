@@ -1,7 +1,7 @@
-using Hms.Services.Dtos.Emergency;
+using GNex.Services.Dtos.Emergency;
 using Microsoft.Extensions.Logging;
 
-namespace Hms.Services.Emergency;
+namespace GNex.Services.Emergency;
 
 public sealed class EmergencyService : IEmergencyService
 {

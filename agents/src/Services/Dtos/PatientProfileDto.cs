@@ -1,4 +1,4 @@
-namespace Hms.Services.Dtos.Mpi;
+namespace GNex.Services.Dtos.Mpi;
 
 public sealed record PatientProfileDto
 {

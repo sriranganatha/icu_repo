@@ -1,4 +1,4 @@
-namespace Hms.Services.Dtos.Governance;
+namespace GNex.Services.Dtos.Governance;
 
 public sealed record AuditEventDto
 {

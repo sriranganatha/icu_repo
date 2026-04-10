@@ -1,4 +1,4 @@
-namespace Hms.Web.ViewModels.Clinical;
+namespace GNex.Studio.ViewModels.Clinical;
 
 public sealed class EncounterListViewModel
 {

@@ -1,7 +1,7 @@
 using Microsoft.EntityFrameworkCore;
-using Hms.Database.Entities.Platform.AgentRegistry;
+using GNex.Database.Entities.Platform.AgentRegistry;
 
-namespace Hms.Database.Repositories;
+namespace GNex.Database.Repositories;
 
 public interface IAgentRegistryRepository : IPlatformRepository<AgentTypeDefinition>
 {
@@ -12,7 +12,7 @@ public interface IAgentRegistryRepository : IPlatformRepository<AgentTypeDefinit
 
 public class AgentRegistryRepository : PlatformRepository<AgentTypeDefinition>, IAgentRegistryRepository
 {
-    public AgentRegistryRepository(HmsDbContext db) : base(db) { }
+    public AgentRegistryRepository(GNexDbContext db) : base(db) { }
 
     public async Task<AgentTypeDefinition?> GetWithConfigAsync(string id, CancellationToken ct = default)
         => await Set

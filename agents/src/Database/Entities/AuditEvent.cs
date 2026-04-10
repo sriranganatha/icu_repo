@@ -1,6 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 
-namespace Hms.Database.Entities.Governance;
+namespace GNex.Database.Entities.Governance;
 
 public class AuditEvent
 {

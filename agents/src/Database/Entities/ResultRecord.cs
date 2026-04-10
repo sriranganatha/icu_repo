@@ -1,6 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 
-namespace Hms.Database.Entities.Diagnostics;
+namespace GNex.Database.Entities.Diagnostics;
 
 public class ResultRecord
 {

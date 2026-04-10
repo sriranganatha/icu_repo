@@ -1,7 +1,7 @@
 using Microsoft.AspNetCore.Mvc.RazorPages;
-using Hms.Web.ViewModels.Emergency;
+using GNex.Studio.ViewModels.Emergency;
 
-namespace Hms.Web.Pages.Emergency;
+namespace GNex.Studio.Pages.Emergency;
 
 public class EmergencyBoardModel : PageModel
 {

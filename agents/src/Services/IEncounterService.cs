@@ -1,6 +1,6 @@
-using Hms.Services.Dtos.Clinical;
+using GNex.Services.Dtos.Clinical;
 
-namespace Hms.Services.Clinical;
+namespace GNex.Services.Clinical;
 
 public interface IEncounterService
 {

@@ -1,10 +1,10 @@
-using Hms.Database;
-using Hms.Database.Entities.Platform.Configuration;
-using Hms.Database.Repositories;
+using GNex.Database;
+using GNex.Database.Entities.Platform.Configuration;
+using GNex.Database.Repositories;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
-namespace Hms.Services.Platform;
+namespace GNex.Services.Platform;
 
 /// <summary>Validates tech stack selections against compatibility rules.</summary>
 public interface ICompatibilityService
@@ -18,13 +18,13 @@ public interface ICompatibilityService
 public record CompatibilityIssue(string SourceTech, string TargetTech, string Compatibility, string? Reason);
 
 public class CompatibilityService(
-    HmsDbContext db,
+    GNexDbContext db,
     IPlatformRepository<CompatibilityRule> ruleRepo,
     ILogger<CompatibilityService> logger) : ICompatibilityService
 {
     public async Task<List<CompatibilityIssue>> ValidateTechStackAsync(string projectId, CancellationToken ct = default)
     {
-        var techStack = await db.Set<Hms.Database.Entities.Platform.Projects.ProjectTechStack>()
+        var techStack = await db.Set<GNex.Database.Entities.Platform.Projects.ProjectTechStack>()
             .Where(t => t.ProjectId == projectId)
             .ToListAsync(ct);
 

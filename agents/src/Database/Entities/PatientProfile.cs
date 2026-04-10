@@ -1,6 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 
-namespace Hms.Database.Entities.Mpi;
+namespace GNex.Database.Entities.Mpi;
 
 public class PatientProfile
 {

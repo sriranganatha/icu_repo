@@ -1,20 +1,20 @@
 using System.Text.RegularExpressions;
-using Hms.Database;
-using Hms.Database.Entities.Platform.Projects;
-using Hms.Database.Repositories;
-using Hms.Services.Dtos.Platform;
+using GNex.Database;
+using GNex.Database.Entities.Platform.Projects;
+using GNex.Database.Repositories;
+using GNex.Services.Dtos.Platform;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
-namespace Hms.Services.Platform;
+namespace GNex.Services.Platform;
 
 public sealed partial class ProjectManagementService : IProjectManagementService
 {
     private readonly IProjectRepository _projectRepo;
-    private readonly HmsDbContext _db;
+    private readonly GNexDbContext _db;
     private readonly ILogger<ProjectManagementService> _logger;
 
-    public ProjectManagementService(IProjectRepository projectRepo, HmsDbContext db, ILogger<ProjectManagementService> logger)
+    public ProjectManagementService(IProjectRepository projectRepo, GNexDbContext db, ILogger<ProjectManagementService> logger)
     {
         _projectRepo = projectRepo;
         _db = db;

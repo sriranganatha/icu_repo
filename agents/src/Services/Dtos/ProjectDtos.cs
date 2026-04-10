@@ -1,4 +1,4 @@
-namespace Hms.Services.Dtos.Platform;
+namespace GNex.Services.Dtos.Platform;
 
 // ── Project DTOs ──────────────────────────────────────────
 public sealed record ProjectDto

@@ -1,4 +1,4 @@
-namespace Hms.Services.Dtos.Inpatient;
+namespace GNex.Services.Dtos.Inpatient;
 
 public sealed record AdmissionDto
 {

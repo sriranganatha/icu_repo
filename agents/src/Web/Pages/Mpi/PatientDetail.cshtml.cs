@@ -1,7 +1,7 @@
 using Microsoft.AspNetCore.Mvc.RazorPages;
-using Hms.Web.ViewModels.Mpi;
+using GNex.Studio.ViewModels.Mpi;
 
-namespace Hms.Web.Pages.Mpi;
+namespace GNex.Studio.Pages.Mpi;
 
 public class PatientDetailModel : PageModel
 {

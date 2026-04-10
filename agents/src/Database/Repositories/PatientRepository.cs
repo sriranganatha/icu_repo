@@ -1,7 +1,7 @@
 using Microsoft.EntityFrameworkCore;
-using Hms.Database;
+using GNex.Database;
 
-namespace Hms.Database.Repositories;
+namespace GNex.Database.Repositories;
 
 public interface IPatientRepository
 {
@@ -13,9 +13,9 @@ public interface IPatientRepository
 
 public class PatientRepository : IPatientRepository
 {
-    private readonly HmsDbContext _db;
+    private readonly GNexDbContext _db;
 
-    public PatientRepository(HmsDbContext db) => _db = db;
+    public PatientRepository(GNexDbContext db) => _db = db;
 
     public async Task<PatientProfile?> GetByIdAsync(string id, CancellationToken ct = default)
         => await _db.Set<PatientProfile>().FindAsync([id], ct);

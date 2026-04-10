@@ -1,6 +1,6 @@
-using Hms.Services.Dtos.Revenue;
+using GNex.Services.Dtos.Revenue;
 
-namespace Hms.Services.Revenue;
+namespace GNex.Services.Revenue;
 
 public interface IClaimService
 {

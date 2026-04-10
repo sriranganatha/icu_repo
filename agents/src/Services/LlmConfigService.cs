@@ -1,21 +1,21 @@
-using Hms.Database;
-using Hms.Database.Entities.Platform.LlmConfig;
-using Hms.Database.Repositories;
-using Hms.Services.Dtos.Platform;
+using GNex.Database;
+using GNex.Database.Entities.Platform.LlmConfig;
+using GNex.Database.Repositories;
+using GNex.Services.Dtos.Platform;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
-namespace Hms.Services.Platform;
+namespace GNex.Services.Platform;
 
 public sealed class LlmConfigService : ILlmConfigService
 {
     private readonly IPlatformRepository<LlmProviderConfig> _providerRepo;
-    private readonly HmsDbContext _db;
+    private readonly GNexDbContext _db;
     private readonly ILogger<LlmConfigService> _logger;
 
     public LlmConfigService(
         IPlatformRepository<LlmProviderConfig> providerRepo,
-        HmsDbContext db,
+        GNexDbContext db,
         ILogger<LlmConfigService> logger)
     {
         _providerRepo = providerRepo;

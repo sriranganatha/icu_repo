@@ -1,11 +1,11 @@
-using Hms.Database;
-using Hms.Database.Entities.Platform.Standards;
-using Hms.Database.Repositories;
-using Hms.Services.Dtos.Platform;
+using GNex.Database;
+using GNex.Database.Entities.Platform.Standards;
+using GNex.Database.Repositories;
+using GNex.Services.Dtos.Platform;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
-namespace Hms.Services.Platform;
+namespace GNex.Services.Platform;
 
 public sealed class StandardsService : IStandardsService
 {
@@ -14,7 +14,7 @@ public sealed class StandardsService : IStandardsService
     private readonly IPlatformRepository<QualityGate> _gateRepo;
     private readonly IPlatformRepository<ReviewChecklist> _checklistRepo;
     private readonly IPlatformRepository<SecurityPolicy> _policyRepo;
-    private readonly HmsDbContext _db;
+    private readonly GNexDbContext _db;
     private readonly ILogger<StandardsService> _logger;
 
     public StandardsService(
@@ -23,7 +23,7 @@ public sealed class StandardsService : IStandardsService
         IPlatformRepository<QualityGate> gateRepo,
         IPlatformRepository<ReviewChecklist> checklistRepo,
         IPlatformRepository<SecurityPolicy> policyRepo,
-        HmsDbContext db,
+        GNexDbContext db,
         ILogger<StandardsService> logger)
     {
         _codingRepo = codingRepo;

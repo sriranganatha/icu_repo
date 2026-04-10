@@ -1,11 +1,11 @@
-using Hms.Database;
-using Hms.Database.Entities.Platform.Configuration;
-using Hms.Database.Repositories;
+using GNex.Database;
+using GNex.Database.Entities.Platform.Configuration;
+using GNex.Database.Repositories;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using System.Text.Json;
 
-namespace Hms.Services.Platform;
+namespace GNex.Services.Platform;
 
 /// <summary>Manages starter kits for quick project creation.</summary>
 public interface IStarterKitService

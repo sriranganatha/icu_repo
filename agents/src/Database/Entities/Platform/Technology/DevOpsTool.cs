@@ -1,6 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 
-namespace Hms.Database.Entities.Platform.Technology;
+namespace GNex.Database.Entities.Platform.Technology;
 
 public class DevOpsTool : PlatformEntityBase
 {

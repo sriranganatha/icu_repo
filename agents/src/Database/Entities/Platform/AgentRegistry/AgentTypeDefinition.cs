@@ -1,6 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 
-namespace Hms.Database.Entities.Platform.AgentRegistry;
+namespace GNex.Database.Entities.Platform.AgentRegistry;
 
 /// <summary>
 /// DB-backed definition of an agent type. Maps to the AgentType enum but allows

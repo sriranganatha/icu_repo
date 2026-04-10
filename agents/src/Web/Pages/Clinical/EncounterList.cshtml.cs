@@ -1,7 +1,7 @@
 using Microsoft.AspNetCore.Mvc.RazorPages;
-using Hms.Web.ViewModels.Clinical;
+using GNex.Studio.ViewModels.Clinical;
 
-namespace Hms.Web.Pages.Clinical;
+namespace GNex.Studio.Pages.Clinical;
 
 public class EncounterListModel : PageModel
 {

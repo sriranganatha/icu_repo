@@ -1,4 +1,4 @@
-namespace Hms.Web.ViewModels.Ai;
+namespace GNex.Studio.ViewModels.Ai;
 
 public sealed class AiCopilotDashboardViewModel
 {

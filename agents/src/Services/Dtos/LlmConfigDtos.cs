@@ -1,4 +1,4 @@
-namespace Hms.Services.Dtos.Platform;
+namespace GNex.Services.Dtos.Platform;
 
 // ─── LLM Config DTOs ────────────────────────────────────────
 public sealed record LlmProviderDto(

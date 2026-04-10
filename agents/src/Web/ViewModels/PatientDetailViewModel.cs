@@ -1,4 +1,4 @@
-namespace Hms.Web.ViewModels.Mpi;
+namespace GNex.Studio.ViewModels.Mpi;
 
 public sealed class PatientDetailViewModel
 {

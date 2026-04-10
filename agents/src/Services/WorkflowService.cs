@@ -1,21 +1,21 @@
-using Hms.Database;
-using Hms.Database.Entities.Platform.Workflows;
-using Hms.Database.Repositories;
-using Hms.Services.Dtos.Platform;
+using GNex.Database;
+using GNex.Database.Entities.Platform.Workflows;
+using GNex.Database.Repositories;
+using GNex.Services.Dtos.Platform;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
-namespace Hms.Services.Platform;
+namespace GNex.Services.Platform;
 
 public sealed class WorkflowService : IWorkflowService
 {
     private readonly IPlatformRepository<SdlcWorkflow> _workflowRepo;
-    private readonly HmsDbContext _db;
+    private readonly GNexDbContext _db;
     private readonly ILogger<WorkflowService> _logger;
 
     public WorkflowService(
         IPlatformRepository<SdlcWorkflow> workflowRepo,
-        HmsDbContext db,
+        GNexDbContext db,
         ILogger<WorkflowService> logger)
     {
         _workflowRepo = workflowRepo;

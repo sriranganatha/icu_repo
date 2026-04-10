@@ -1,0 +1,303 @@
+@page
+@model GNex.Studio.Pages.Admin.Agents.PluginBuilderModel
+@{ ViewData["Title"] = "Agent Plugin Builder"; }
+
+<div class="container-fluid py-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h2><i class="bi bi-puzzle me-2"></i>Agent Plugin Builder</h2>
+            <p class="text-muted mb-0">Define new agent types purely via configuration — no code required</p>
+        </div>
+        <div class="d-flex gap-2">
+            <button class="btn btn-outline-secondary" onclick="loadExisting()">
+                <i class="bi bi-list me-1"></i>Existing Plugins
+            </button>
+            <button class="btn btn-primary" onclick="resetForm()">
+                <i class="bi bi-plus-lg me-1"></i>New Plugin
+            </button>
+        </div>
+    </div>
+
+    <div class="row g-4">
+        <!-- Plugin Definition Form -->
+        <div class="col-lg-8">
+            <div class="card">
+                <div class="card-header">
+                    <ul class="nav nav-tabs card-header-tabs" role="tablist">
+                        <li class="nav-item">
+                            <a class="nav-link active" data-bs-toggle="tab" href="#tabIdentity">Identity</a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" data-bs-toggle="tab" href="#tabPrompt">System Prompt</a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" data-bs-toggle="tab" href="#tabTools">Tools</a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" data-bs-toggle="tab" href="#tabConstraints">Constraints</a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" data-bs-toggle="tab" href="#tabSchema">I/O Schema</a>
+                        </li>
+                    </ul>
+                </div>
+                <div class="card-body">
+                    <div class="tab-content">
+                        <!-- Identity -->
+                        <div class="tab-pane fade show active" id="tabIdentity">
+                            <div class="row g-3">
+                                <div class="col-md-6">
+                                    <label class="form-label">Agent Type Code</label>
+                                    <input type="text" class="form-control" id="agentTypeCode" placeholder="e.g. custom_analyzer" />
+                                    <div class="form-text">Unique identifier. Use snake_case.</div>
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label">Display Name</label>
+                                    <input type="text" class="form-control" id="displayName" placeholder="e.g. Custom Analyzer Agent" />
+                                </div>
+                                <div class="col-12">
+                                    <label class="form-label">Description</label>
+                                    <textarea class="form-control" id="pluginDescription" rows="2" placeholder="What does this agent do?"></textarea>
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label">Fallback Agent</label>
+                                    <select class="form-select" id="fallbackAgent">
+                                        <option value="">None (fail if unavailable)</option>
+                                        <option value="review">Review Agent</option>
+                                        <option value="code_quality">Code Quality Agent</option>
+                                        <option value="supervisor">Supervisor Agent</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="form-check mt-4">
+                                        <input class="form-check-input" type="checkbox" id="isEnabled" checked>
+                                        <label class="form-check-label" for="isEnabled">Enabled</label>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- System Prompt -->
+                        <div class="tab-pane fade" id="tabPrompt">
+                            <label class="form-label">System Prompt</label>
+                            <textarea class="form-control font-monospace" id="systemPrompt" rows="15"
+                                      placeholder="You are a specialized agent that...&#10;&#10;Your responsibilities:&#10;1. ...&#10;2. ...&#10;&#10;Output format:&#10;..."></textarea>
+                            <div class="form-text">
+                                Supports template variables: <code>{{project.name}}</code>, <code>{{project.tech_stack}}</code>,
+                                <code>{{agent.previous_output}}</code>
+                            </div>
+                            <div class="mt-2">
+                                <button class="btn btn-outline-secondary btn-sm" onclick="insertPromptTemplate('analyzer')">
+                                    <i class="bi bi-file-text me-1"></i>Analyzer Template
+                                </button>
+                                <button class="btn btn-outline-secondary btn-sm" onclick="insertPromptTemplate('generator')">
+                                    <i class="bi bi-file-code me-1"></i>Generator Template
+                                </button>
+                                <button class="btn btn-outline-secondary btn-sm" onclick="insertPromptTemplate('reviewer')">
+                                    <i class="bi bi-check-circle me-1"></i>Reviewer Template
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Tools -->
+                        <div class="tab-pane fade" id="tabTools">
+                            <div class="d-flex justify-content-between align-items-center mb-3">
+                                <label class="form-label mb-0">Available Tools</label>
+                                <button class="btn btn-outline-primary btn-sm" onclick="addTool()">
+                                    <i class="bi bi-plus me-1"></i>Add Tool
+                                </button>
+                            </div>
+                            <div id="toolsList">
+                                <div class="border rounded p-3 mb-2 tool-item">
+                                    <div class="row g-2">
+                                        <div class="col-md-4">
+                                            <input type="text" class="form-control form-control-sm" placeholder="Tool name" value="file_read" />
+                                        </div>
+                                        <div class="col-md-6">
+                                            <input type="text" class="form-control form-control-sm" placeholder="Description" value="Read file contents from the project" />
+                                        </div>
+                                        <div class="col-md-2 text-end">
+                                            <button class="btn btn-outline-danger btn-sm" onclick="this.closest('.tool-item').remove()">
+                                                <i class="bi bi-trash"></i>
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="border rounded p-3 mb-2 tool-item">
+                                    <div class="row g-2">
+                                        <div class="col-md-4">
+                                            <input type="text" class="form-control form-control-sm" placeholder="Tool name" value="file_write" />
+                                        </div>
+                                        <div class="col-md-6">
+                                            <input type="text" class="form-control form-control-sm" placeholder="Description" value="Write file contents to the project" />
+                                        </div>
+                                        <div class="col-md-2 text-end">
+                                            <button class="btn btn-outline-danger btn-sm" onclick="this.closest('.tool-item').remove()">
+                                                <i class="bi bi-trash"></i>
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Constraints -->
+                        <div class="tab-pane fade" id="tabConstraints">
+                            <div class="row g-3">
+                                <div class="col-md-6">
+                                    <label class="form-label">Max Tokens per Request</label>
+                                    <input type="number" class="form-control" id="maxTokens" value="4096" />
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label">Timeout (seconds)</label>
+                                    <input type="number" class="form-control" id="timeout" value="300" />
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label">Max Retries</label>
+                                    <input type="number" class="form-control" id="maxRetries" value="3" />
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label">Temperature</label>
+                                    <input type="range" class="form-range" id="temperature" min="0" max="2" step="0.1" value="0.7" />
+                                    <small class="text-muted">Current: <span id="tempValue">0.7</span></small>
+                                </div>
+                                <div class="col-12">
+                                    <label class="form-label">Additional Constraints (JSON)</label>
+                                    <textarea class="form-control font-monospace" id="constraintsJson" rows="4" placeholder='{&#10;  "allowedFileTypes": [".cs", ".json"],&#10;  "maxFileSize": 1048576&#10;}'></textarea>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- I/O Schema -->
+                        <div class="tab-pane fade" id="tabSchema">
+                            <div class="row g-3">
+                                <div class="col-md-6">
+                                    <label class="form-label">Input Schema (JSON Schema)</label>
+                                    <textarea class="form-control font-monospace" id="inputSchema" rows="10"
+                                              placeholder='{&#10;  "type": "object",&#10;  "properties": {&#10;    "sourceCode": { "type": "string" },&#10;    "language": { "type": "string" }&#10;  }&#10;}'></textarea>
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label">Output Schema (JSON Schema)</label>
+                                    <textarea class="form-control font-monospace" id="outputSchema" rows="10"
+                                              placeholder='{&#10;  "type": "object",&#10;  "properties": {&#10;    "findings": { "type": "array" },&#10;    "summary": { "type": "string" }&#10;  }&#10;}'></textarea>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="card-footer d-flex justify-content-between">
+                    <button class="btn btn-outline-secondary" onclick="testPlugin()">
+                        <i class="bi bi-play me-1"></i>Test Run
+                    </button>
+                    <div class="d-flex gap-2">
+                        <button class="btn btn-outline-primary" onclick="saveAsDraft()">Save Draft</button>
+                        <button class="btn btn-primary" onclick="publishPlugin()">
+                            <i class="bi bi-check-lg me-1"></i>Publish Plugin
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Sidebar -->
+        <div class="col-lg-4">
+            <!-- Existing Plugins -->
+            <div class="card mb-3">
+                <div class="card-header">Registered Plugins</div>
+                <div class="card-body p-0">
+                    <div class="list-group list-group-flush" id="pluginList" style="max-height:300px; overflow-y:auto;">
+                        <div class="text-center text-muted py-4">
+                            <small>No custom plugins yet</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Manifest Preview -->
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <span>Manifest Preview</span>
+                    <button class="btn btn-outline-secondary btn-sm" onclick="copyManifest()">
+                        <i class="bi bi-clipboard"></i>
+                    </button>
+                </div>
+                <div class="card-body p-0">
+                    <pre id="manifestPreview" class="bg-dark text-light p-3 m-0 rounded-bottom" style="max-height:300px; overflow:auto; font-size:0.75rem;">
+{
+  "agentTypeCode": "",
+  "displayName": "",
+  "systemPrompt": "",
+  "tools": [],
+  "constraints": {},
+  "inputSchema": {},
+  "outputSchema": {}
+}
+                    </pre>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+<script>
+    document.getElementById('temperature').addEventListener('input', function() {
+        document.getElementById('tempValue').textContent = this.value;
+    });
+
+    function addTool() {
+        const html = `<div class="border rounded p-3 mb-2 tool-item">
+            <div class="row g-2">
+                <div class="col-md-4"><input type="text" class="form-control form-control-sm" placeholder="Tool name" /></div>
+                <div class="col-md-6"><input type="text" class="form-control form-control-sm" placeholder="Description" /></div>
+                <div class="col-md-2 text-end"><button class="btn btn-outline-danger btn-sm" onclick="this.closest('.tool-item').remove()"><i class="bi bi-trash"></i></button></div>
+            </div>
+        </div>`;
+        document.getElementById('toolsList').insertAdjacentHTML('beforeend', html);
+    }
+
+    function insertPromptTemplate(type) {
+        const templates = {
+            analyzer: 'You are an analysis agent for the {{project.name}} project.\n\nAnalyze the provided input and produce structured findings.\n\nRules:\n- Be specific and actionable\n- Rate severity: critical, high, medium, low\n- Include file paths and line numbers when possible',
+            generator: 'You are a code generation agent for the {{project.name}} project.\n\nGenerate code following the project standards:\n- Language: {{project.tech_stack.backend.language}}\n- Framework: {{project.tech_stack.backend.framework}}\n\nOutput clean, well-documented code.',
+            reviewer: 'You are a code review agent for the {{project.name}} project.\n\nReview the provided code for:\n- Correctness and logic errors\n- Security vulnerabilities\n- Performance issues\n- Coding standards compliance\n\nProvide approve/request-changes verdict.'
+        };
+        document.getElementById('systemPrompt').value = templates[type] || '';
+    }
+
+    function buildManifest() {
+        const tools = [];
+        document.querySelectorAll('.tool-item').forEach(item => {
+            const inputs = item.querySelectorAll('input');
+            if (inputs[0].value) tools.push({ name: inputs[0].value, description: inputs[1].value });
+        });
+        return {
+            agentTypeCode: document.getElementById('agentTypeCode').value,
+            displayName: document.getElementById('displayName').value,
+            systemPrompt: document.getElementById('systemPrompt').value,
+            tools,
+            constraints: { maxTokens: +document.getElementById('maxTokens').value, timeout: +document.getElementById('timeout').value, maxRetries: +document.getElementById('maxRetries').value, temperature: +document.getElementById('temperature').value },
+            inputSchema: tryParseJson(document.getElementById('inputSchema').value),
+            outputSchema: tryParseJson(document.getElementById('outputSchema').value),
+            isEnabled: document.getElementById('isEnabled').checked
+        };
+    }
+
+    function tryParseJson(str) { try { return JSON.parse(str); } catch { return {}; } }
+
+    // Live manifest preview
+    setInterval(() => {
+        document.getElementById('manifestPreview').textContent = JSON.stringify(buildManifest(), null, 2);
+    }, 1000);
+
+    function copyManifest() {
+        navigator.clipboard.writeText(JSON.stringify(buildManifest(), null, 2));
+    }
+
+    function resetForm() { location.reload(); }
+    function loadExisting() { /* Placeholder — fetch from /api/agents/plugins */ }
+    function saveAsDraft() { /* Placeholder — POST to /api/agents/plugins with draft status */ }
+    function publishPlugin() { /* Placeholder — POST to /api/agents/plugins with enabled status */ }
+    function testPlugin() { /* Placeholder — POST to /api/agents/plugins/test */ }
+</script>
+}

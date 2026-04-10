@@ -1,7 +1,7 @@
 using Microsoft.EntityFrameworkCore;
-using Hms.Database;
+using GNex.Database;
 
-namespace Hms.Database.Repositories;
+namespace GNex.Database.Repositories;
 
 public interface IEmergencyRepository
 {
@@ -13,9 +13,9 @@ public interface IEmergencyRepository
 
 public class EmergencyRepository : IEmergencyRepository
 {
-    private readonly HmsDbContext _db;
+    private readonly GNexDbContext _db;
 
-    public EmergencyRepository(HmsDbContext db) => _db = db;
+    public EmergencyRepository(GNexDbContext db) => _db = db;
 
     public async Task<EmergencyArrival?> GetByIdAsync(string id, CancellationToken ct = default)
         => await _db.Set<EmergencyArrival>().FindAsync([id], ct);

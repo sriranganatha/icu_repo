@@ -1,4 +1,4 @@
-namespace Hms.Web.ViewModels.Emergency;
+namespace GNex.Studio.ViewModels.Emergency;
 
 public sealed class EmergencyBoardViewModel
 {

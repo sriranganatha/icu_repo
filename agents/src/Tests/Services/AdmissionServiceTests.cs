@@ -1,6 +1,6 @@
 using Xunit;
 
-namespace Hms.Tests.Services;
+namespace GNex.Tests.Services;
 
 public class AdmissionServiceTests
 {

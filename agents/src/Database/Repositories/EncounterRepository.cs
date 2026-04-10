@@ -1,7 +1,7 @@
 using Microsoft.EntityFrameworkCore;
-using Hms.Database;
+using GNex.Database;
 
-namespace Hms.Database.Repositories;
+namespace GNex.Database.Repositories;
 
 public interface IEncounterRepository
 {
@@ -13,9 +13,9 @@ public interface IEncounterRepository
 
 public class EncounterRepository : IEncounterRepository
 {
-    private readonly HmsDbContext _db;
+    private readonly GNexDbContext _db;
 
-    public EncounterRepository(HmsDbContext db) => _db = db;
+    public EncounterRepository(GNexDbContext db) => _db = db;
 
     public async Task<Encounter?> GetByIdAsync(string id, CancellationToken ct = default)
         => await _db.Set<Encounter>().FindAsync([id], ct);

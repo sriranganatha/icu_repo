@@ -1,4 +1,4 @@
-namespace Hms.Database.Entities.Platform.Configuration;
+namespace GNex.Database.Entities.Platform.Configuration;
 
 /// <summary>Captures full resolved configuration at pipeline run start for reproducibility.</summary>
 public class ConfigSnapshot : PlatformEntityBase

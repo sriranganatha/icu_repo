@@ -1,0 +1,256 @@
+@page
+@{
+    ViewData["Title"] = "Template Library";
+}
+
+<div class="container-fluid px-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2><i class="bi bi-file-earmark-code me-2"></i>Template Library</h2>
+        <button class="btn btn-primary" onclick="showAddTemplate()"><i class="bi bi-plus-lg me-1"></i>Add Template</button>
+    </div>
+
+    <ul class="nav nav-tabs mb-3" id="tmplTabs">
+        <li class="nav-item"><a class="nav-link active" href="#" data-tab="brd">BRD</a></li>
+        <li class="nav-item"><a class="nav-link" href="#" data-tab="architecture">Architecture</a></li>
+        <li class="nav-item"><a class="nav-link" href="#" data-tab="code">Code</a></li>
+        <li class="nav-item"><a class="nav-link" href="#" data-tab="file-structure">File Structure</a></li>
+        <li class="nav-item"><a class="nav-link" href="#" data-tab="cicd">CI/CD</a></li>
+        <li class="nav-item"><a class="nav-link" href="#" data-tab="docker">Docker</a></li>
+        <li class="nav-item"><a class="nav-link" href="#" data-tab="test">Test</a></li>
+        <li class="nav-item"><a class="nav-link" href="#" data-tab="iac">IaC</a></li>
+        <li class="nav-item"><a class="nav-link" href="#" data-tab="documentation">Docs</a></li>
+    </ul>
+
+    <div class="row g-3" id="tmplList">
+        <div class="col-12 text-center text-muted py-5">Loading templates...</div>
+    </div>
+
+    <!-- Add Template Modal -->
+    <div class="modal fade" id="tmplModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header bg-primary text-white">
+                    <h5 class="modal-title" id="tmplModalTitle">Add Template</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body" id="tmplModalBody"></div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button class="btn btn-primary" onclick="saveTemplate()">Save</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+<script>
+    const API = '/api/templates';
+    let activeTab = 'brd';
+    let data = {};
+    let editing = null;
+
+    document.querySelectorAll('#tmplTabs a').forEach(tab => {
+        tab.addEventListener('click', e => {
+            e.preventDefault();
+            document.querySelectorAll('#tmplTabs a').forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+            activeTab = tab.dataset.tab;
+            renderTemplates();
+        });
+    });
+
+    async function loadAll() {
+        const tabs = ['brd','architecture','code','file-structure','cicd','docker','test','iac','documentation'];
+        const results = await Promise.all(tabs.map(t => fetch(`${API}/${t}`).then(r => r.json())));
+        tabs.forEach((t, i) => data[t] = results[i]);
+        renderTemplates();
+    }
+
+    function renderTemplates() {
+        const items = data[activeTab] || [];
+        const container = document.getElementById('tmplList');
+        if (items.length === 0) {
+            container.innerHTML = '<div class="col-12 text-center text-muted py-5">No templates in this category</div>';
+            return;
+        }
+        container.innerHTML = items.map(t => `
+            <div class="col-md-4 col-lg-3">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-start mb-2">
+                            <h6 class="card-title mb-0">${esc(t.name)}</h6>
+                            <div class="d-flex gap-1">
+                                <button class="btn btn-sm btn-outline-secondary" onclick="editTemplate('${activeTab}','${t.id}')" title="Edit"><i class="bi bi-pencil"></i></button>
+                                <button class="btn btn-sm btn-outline-danger" onclick="deleteTemplate('${activeTab}','${t.id}')" title="Delete"><i class="bi bi-trash"></i></button>
+                            </div>
+                        </div>
+                        ${t.projectType ? `<span class="badge bg-info mb-1">${esc(t.projectType)}</span>` : ''}
+                        ${t.pattern ? `<span class="badge bg-warning text-dark mb-1">${esc(t.pattern)}</span>` : ''}
+                        ${t.templateType ? `<span class="badge bg-secondary mb-1">${esc(t.templateType)}</span>` : ''}
+                        ${t.provider ? `<span class="badge bg-success mb-1">${esc(t.provider)}</span>` : ''}
+                        ${t.testType ? `<span class="badge bg-primary mb-1">${esc(t.testType)}</span>` : ''}
+                        ${t.tool ? `<span class="badge bg-dark mb-1">${esc(t.tool)}</span>` : ''}
+                        ${t.docType ? `<span class="badge bg-info mb-1">${esc(t.docType)}</span>` : ''}
+                        <div class="small text-muted mt-2">${fmtDate(t.createdAt)}</div>
+                    </div>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    function renderForm(tab, item = null) {
+        const get = (key, fallback = '') => item?.[key] ?? fallback;
+        const checked = get('isDefault', false) ? 'checked' : '';
+
+        let html = `<div class="mb-3"><label class="form-label">Name</label><input class="form-control" id="fName" value="${escAttr(get('name'))}"></div>`;
+        switch (tab) {
+            case 'brd':
+                html += `<div class="mb-3"><label class="form-label">Project Type</label><input class="form-control" id="fProjectType" value="${escAttr(get('projectType', 'web_app'))}"></div>
+                    <div class="mb-3"><label class="form-label">Sections JSON</label><textarea class="form-control" id="fContent" rows="10">${esc(get('sectionsJson', '[]'))}</textarea></div>
+                    <div class="form-check mb-3"><input class="form-check-input" type="checkbox" id="fIsDefault" ${checked}><label class="form-check-label" for="fIsDefault">Default</label></div>`;
+                break;
+            case 'architecture':
+                html += `<div class="mb-3"><label class="form-label">Pattern</label><input class="form-control" id="fPattern" value="${escAttr(get('pattern', 'monolith'))}"></div>
+                    <div class="mb-3"><label class="form-label">Diagram Template (Mermaid)</label><textarea class="form-control" id="fContent" rows="8">${esc(get('diagramTemplate', ''))}</textarea></div>`;
+                break;
+            case 'code':
+                html += `<div class="mb-3"><label class="form-label">Language Id (optional)</label><input class="form-control" id="fLanguageId" value="${escAttr(get('languageId', ''))}"></div>
+                    <div class="mb-3"><label class="form-label">Framework Id (optional)</label><input class="form-control" id="fFrameworkId" value="${escAttr(get('frameworkId', ''))}"></div>
+                    <div class="mb-3"><label class="form-label">Template Type</label><input class="form-control" id="fType" value="${escAttr(get('templateType', 'scaffold'))}"></div>
+                    <div class="mb-3"><label class="form-label">Variables JSON</label><textarea class="form-control" id="fVars" rows="3">${esc(get('variablesJson', '[]'))}</textarea></div>
+                    <div class="mb-3"><label class="form-label">Content</label><textarea class="form-control" id="fContent" rows="8">${esc(get('content', ''))}</textarea></div>`;
+                break;
+            case 'file-structure':
+                html += `<div class="mb-3"><label class="form-label">Framework Id (optional)</label><input class="form-control" id="fFrameworkId" value="${escAttr(get('frameworkId', ''))}"></div>
+                    <div class="mb-3"><label class="form-label">Tree JSON</label><textarea class="form-control" id="fContent" rows="8">${esc(get('treeJson', '{}'))}</textarea></div>`;
+                break;
+            case 'cicd':
+                html += `<div class="mb-3"><label class="form-label">Provider</label><input class="form-control" id="fProvider" value="${escAttr(get('provider', 'github'))}"></div>
+                    <div class="mb-3"><label class="form-label">Language Id (optional)</label><input class="form-control" id="fLanguageId" value="${escAttr(get('languageId', ''))}"></div>
+                    <div class="mb-3"><label class="form-label">Pipeline YAML</label><textarea class="form-control" id="fContent" rows="8">${esc(get('pipelineYaml', ''))}</textarea></div>`;
+                break;
+            case 'docker':
+                html += `<div class="mb-3"><label class="form-label">Language Id (optional)</label><input class="form-control" id="fLanguageId" value="${escAttr(get('languageId', ''))}"></div>
+                    <div class="mb-3"><label class="form-label">Framework Id (optional)</label><input class="form-control" id="fFrameworkId" value="${escAttr(get('frameworkId', ''))}"></div>
+                    <div class="mb-3"><label class="form-label">Dockerfile Content</label><textarea class="form-control" id="fContent" rows="8">${esc(get('dockerfileContent', ''))}</textarea></div>
+                    <div class="mb-3"><label class="form-label">Compose Content (optional)</label><textarea class="form-control" id="fCompose" rows="5">${esc(get('composeContent', ''))}</textarea></div>`;
+                break;
+            case 'test':
+                html += `<div class="mb-3"><label class="form-label">Test Type</label><input class="form-control" id="fTestType" value="${escAttr(get('testType', 'unit'))}"></div>
+                    <div class="mb-3"><label class="form-label">Framework Id (optional)</label><input class="form-control" id="fFrameworkId" value="${escAttr(get('frameworkId', ''))}"></div>
+                    <div class="mb-3"><label class="form-label">Test Framework</label><input class="form-control" id="fTestFramework" value="${escAttr(get('testFramework', 'xunit'))}"></div>
+                    <div class="mb-3"><label class="form-label">Template Content</label><textarea class="form-control" id="fContent" rows="8">${esc(get('templateContent', ''))}</textarea></div>`;
+                break;
+            case 'iac':
+                html += `<div class="mb-3"><label class="form-label">Cloud Provider Id (optional)</label><input class="form-control" id="fCloudProviderId" value="${escAttr(get('cloudProviderId', ''))}"></div>
+                    <div class="mb-3"><label class="form-label">Tool</label><input class="form-control" id="fTool" value="${escAttr(get('tool', 'terraform'))}"></div>
+                    <div class="mb-3"><label class="form-label">Template Content</label><textarea class="form-control" id="fContent" rows="8">${esc(get('templateContent', ''))}</textarea></div>`;
+                break;
+            case 'documentation':
+                html += `<div class="mb-3"><label class="form-label">Doc Type</label><input class="form-control" id="fDocType" value="${escAttr(get('docType', 'readme'))}"></div>
+                    <div class="mb-3"><label class="form-label">Template Content</label><textarea class="form-control" id="fContent" rows="8">${esc(get('templateContent', ''))}</textarea></div>`;
+                break;
+        }
+        return html;
+    }
+
+    function showAddTemplate() {
+        editing = null;
+        const title = document.getElementById('tmplModalTitle');
+        const body = document.getElementById('tmplModalBody');
+        title.textContent = `Add ${activeTab.replace('-',' ')} Template`;
+        body.innerHTML = renderForm(activeTab);
+        new bootstrap.Modal(document.getElementById('tmplModal')).show();
+    }
+
+    function editTemplate(tab, id) {
+        const item = (data[tab] || []).find(x => x.id === id);
+        if (!item) return;
+
+        editing = { tab, id };
+        const title = document.getElementById('tmplModalTitle');
+        const body = document.getElementById('tmplModalBody');
+        title.textContent = `Edit ${tab.replace('-', ' ')} Template`;
+        body.innerHTML = renderForm(tab, item);
+
+        new bootstrap.Modal(document.getElementById('tmplModal')).show();
+    }
+
+    async function saveTemplate() {
+        const name = document.getElementById('fName')?.value;
+        let payload = { name }, url = `${API}/${activeTab}`, method = 'POST';
+
+        switch(activeTab) {
+            case 'brd':
+                payload.projectType = document.getElementById('fProjectType').value;
+                payload.sectionsJson = document.getElementById('fContent').value;
+                payload.isDefault = document.getElementById('fIsDefault').checked;
+                break;
+            case 'architecture':
+                payload.pattern = document.getElementById('fPattern').value;
+                payload.diagramTemplate = document.getElementById('fContent').value;
+                break;
+            case 'code':
+                payload.languageId = document.getElementById('fLanguageId').value || null;
+                payload.frameworkId = document.getElementById('fFrameworkId').value || null;
+                payload.templateType = document.getElementById('fType').value;
+                payload.content = document.getElementById('fContent').value;
+                payload.variablesJson = document.getElementById('fVars').value;
+                break;
+            case 'file-structure':
+                payload.frameworkId = document.getElementById('fFrameworkId').value || null;
+                payload.treeJson = document.getElementById('fContent').value;
+                break;
+            case 'cicd':
+                payload.provider = document.getElementById('fProvider').value;
+                payload.languageId = document.getElementById('fLanguageId').value || null;
+                payload.pipelineYaml = document.getElementById('fContent').value;
+                break;
+            case 'docker':
+                payload.languageId = document.getElementById('fLanguageId').value || null;
+                payload.frameworkId = document.getElementById('fFrameworkId').value || null;
+                payload.dockerfileContent = document.getElementById('fContent').value;
+                payload.composeContent = document.getElementById('fCompose').value || null;
+                break;
+            case 'test':
+                payload.testType = document.getElementById('fTestType').value;
+                payload.frameworkId = document.getElementById('fFrameworkId').value || null;
+                payload.testFramework = document.getElementById('fTestFramework').value;
+                payload.templateContent = document.getElementById('fContent').value;
+                break;
+            case 'iac':
+                payload.cloudProviderId = document.getElementById('fCloudProviderId').value || null;
+                payload.tool = document.getElementById('fTool').value;
+                payload.templateContent = document.getElementById('fContent').value;
+                break;
+            case 'documentation':
+                payload.docType = document.getElementById('fDocType').value;
+                payload.templateContent = document.getElementById('fContent').value;
+                break;
+        }
+
+        if (editing && editing.tab === activeTab) {
+            url = `${API}/${activeTab}/${editing.id}`;
+            method = 'PUT';
+        }
+
+        await fetch(url, { method, headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+        bootstrap.Modal.getInstance(document.getElementById('tmplModal')).hide();
+        editing = null;
+        loadAll();
+    }
+
+    async function deleteTemplate(tab, id) {
+        if (!confirm('Delete this template?')) return;
+        await fetch(`${API}/${tab}/${id}`, { method: 'DELETE' });
+        loadAll();
+    }
+
+    function esc(s) { const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML; }
+    function escAttr(s) { return esc(s).replace(/"/g, '&quot;'); }
+    function fmtDate(d) { return d ? new Date(d).toLocaleDateString() : '-'; }
+
+    loadAll();
+</script>
+}

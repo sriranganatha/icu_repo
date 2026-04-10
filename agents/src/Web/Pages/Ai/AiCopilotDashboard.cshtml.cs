@@ -1,7 +1,7 @@
 using Microsoft.AspNetCore.Mvc.RazorPages;
-using Hms.Web.ViewModels.Ai;
+using GNex.Studio.ViewModels.Ai;
 
-namespace Hms.Web.Pages.Ai;
+namespace GNex.Studio.Pages.Ai;
 
 public class AiCopilotDashboardModel : PageModel
 {

@@ -1,7 +1,7 @@
-using Hms.Services.Dtos.Inpatient;
+using GNex.Services.Dtos.Inpatient;
 using Microsoft.Extensions.Logging;
 
-namespace Hms.Services.Inpatient;
+namespace GNex.Services.Inpatient;
 
 public sealed class AdmissionService : IAdmissionService
 {

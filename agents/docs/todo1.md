@@ -391,13 +391,13 @@ Cross-cutting concerns that enable platform flexibility and scalability.
 
 ### 7.1 New PlatformDbContext
 
-> Current `HmsDbContext` covers clinical/HMS entities only. Platform metadata needs its own context.
+> Current `GNexDbContext` covers clinical/HMS entities only. Platform metadata needs its own context.
 
-- [ ] **7.1.1** Create `PlatformDbContext` with DbSets for all Phase 1 & Phase 2 entities (separate from clinical `HmsDbContext`)
+- [ ] **7.1.1** Create `PlatformDbContext` with DbSets for all Phase 1 & Phase 2 entities (separate from clinical `GNexDbContext`)
 - [ ] **7.1.2** Configure schema separation: `platform_meta` for master metadata, `platform_project` for project entities, `platform_audit` for execution/metrics
 - [ ] **7.1.3** Add EF Core migrations for initial schema creation
 - [ ] **7.1.4** Add seed data migration: default languages, frameworks, databases, starter kits, SDLC workflows
-- [ ] **7.1.5** Add `PlatformDbContext` registration in `Program.cs` alongside existing `HmsDbContext`
+- [ ] **7.1.5** Add `PlatformDbContext` registration in `Program.cs` alongside existing `GNexDbContext`
 - [ ] **7.1.6** Configure connection string resolution (same PostgreSQL instance, separate schemas — or separate DB via config)
 
 ### 7.2 Repository Layer

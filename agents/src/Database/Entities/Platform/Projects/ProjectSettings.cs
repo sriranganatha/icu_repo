@@ -1,6 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 
-namespace Hms.Database.Entities.Platform.Projects;
+namespace GNex.Database.Entities.Platform.Projects;
 
 public class ProjectSettings : PlatformEntityBase
 {

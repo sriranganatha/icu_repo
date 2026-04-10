@@ -1,7 +1,7 @@
-using Hms.Services.Dtos.Ai;
+using GNex.Services.Dtos.Ai;
 using Microsoft.Extensions.Logging;
 
-namespace Hms.Services.Ai;
+namespace GNex.Services.Ai;
 
 public sealed class AiCopilotService : IAiCopilotService
 {

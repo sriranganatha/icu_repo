@@ -5,14 +5,14 @@ services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: icu_admin
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ICU@1234}
-      POSTGRES_DB: icu_db
+      POSTGRES_USER: gnex_admin
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-GNex@1234}
+      POSTGRES_DB: gnex_db
     volumes:
       - pgdata:/var/lib/postgresql/data
     ports: ["5418:5432"]
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U icu_admin"]
+      test: ["CMD-SHELL", "pg_isready -U gnex_admin"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -57,14 +57,14 @@ services:
     environment:
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
 
-  # ─── HMS Microservices ──────────────────────────────
+  # ─── GenesisNexus Microservices ──────────────────────────────
   patientservice:
     build:
       context: .
-      dockerfile: src/Hms.PatientService/Dockerfile
+      dockerfile: src/GNex.PatientService/Dockerfile
     ports: ["5101:5101"]
     environment:
-      - ConnectionStrings__Default=Host=postgres;Database=icu_db;Username=icu_admin;Password=${POSTGRES_PASSWORD:-ICU@1234}
+      - ConnectionStrings__Default=Host=postgres;Database=gnex_db;Username=gnex_admin;Password=${POSTGRES_PASSWORD:-GNex@1234}
       - Kafka__BootstrapServers=kafka:9092
       - Redis__ConnectionString=redis:6379
     depends_on:
@@ -75,10 +75,10 @@ services:
   encounterservice:
     build:
       context: .
-      dockerfile: src/Hms.EncounterService/Dockerfile
+      dockerfile: src/GNex.EncounterService/Dockerfile
     ports: ["5102:5102"]
     environment:
-      - ConnectionStrings__Default=Host=postgres;Database=icu_db;Username=icu_admin;Password=${POSTGRES_PASSWORD:-ICU@1234}
+      - ConnectionStrings__Default=Host=postgres;Database=gnex_db;Username=gnex_admin;Password=${POSTGRES_PASSWORD:-GNex@1234}
       - Kafka__BootstrapServers=kafka:9092
       - Redis__ConnectionString=redis:6379
     depends_on:
@@ -89,10 +89,10 @@ services:
   inpatientservice:
     build:
       context: .
-      dockerfile: src/Hms.InpatientService/Dockerfile
+      dockerfile: src/GNex.InpatientService/Dockerfile
     ports: ["5103:5103"]
     environment:
-      - ConnectionStrings__Default=Host=postgres;Database=icu_db;Username=icu_admin;Password=${POSTGRES_PASSWORD:-ICU@1234}
+      - ConnectionStrings__Default=Host=postgres;Database=gnex_db;Username=gnex_admin;Password=${POSTGRES_PASSWORD:-GNex@1234}
       - Kafka__BootstrapServers=kafka:9092
       - Redis__ConnectionString=redis:6379
     depends_on:
@@ -103,10 +103,10 @@ services:
   emergencyservice:
     build:
       context: .
-      dockerfile: src/Hms.EmergencyService/Dockerfile
+      dockerfile: src/GNex.EmergencyService/Dockerfile
     ports: ["5104:5104"]
     environment:
-      - ConnectionStrings__Default=Host=postgres;Database=icu_db;Username=icu_admin;Password=${POSTGRES_PASSWORD:-ICU@1234}
+      - ConnectionStrings__Default=Host=postgres;Database=gnex_db;Username=gnex_admin;Password=${POSTGRES_PASSWORD:-GNex@1234}
       - Kafka__BootstrapServers=kafka:9092
       - Redis__ConnectionString=redis:6379
     depends_on:
@@ -117,10 +117,10 @@ services:
   diagnosticsservice:
     build:
       context: .
-      dockerfile: src/Hms.DiagnosticsService/Dockerfile
+      dockerfile: src/GNex.DiagnosticsService/Dockerfile
     ports: ["5105:5105"]
     environment:
-      - ConnectionStrings__Default=Host=postgres;Database=icu_db;Username=icu_admin;Password=${POSTGRES_PASSWORD:-ICU@1234}
+      - ConnectionStrings__Default=Host=postgres;Database=gnex_db;Username=gnex_admin;Password=${POSTGRES_PASSWORD:-GNex@1234}
       - Kafka__BootstrapServers=kafka:9092
       - Redis__ConnectionString=redis:6379
     depends_on:
@@ -131,10 +131,10 @@ services:
   revenueservice:
     build:
       context: .
-      dockerfile: src/Hms.RevenueService/Dockerfile
+      dockerfile: src/GNex.RevenueService/Dockerfile
     ports: ["5106:5106"]
     environment:
-      - ConnectionStrings__Default=Host=postgres;Database=icu_db;Username=icu_admin;Password=${POSTGRES_PASSWORD:-ICU@1234}
+      - ConnectionStrings__Default=Host=postgres;Database=gnex_db;Username=gnex_admin;Password=${POSTGRES_PASSWORD:-GNex@1234}
       - Kafka__BootstrapServers=kafka:9092
       - Redis__ConnectionString=redis:6379
     depends_on:
@@ -145,10 +145,10 @@ services:
   auditservice:
     build:
       context: .
-      dockerfile: src/Hms.AuditService/Dockerfile
+      dockerfile: src/GNex.AuditService/Dockerfile
     ports: ["5107:5107"]
     environment:
-      - ConnectionStrings__Default=Host=postgres;Database=icu_db;Username=icu_admin;Password=${POSTGRES_PASSWORD:-ICU@1234}
+      - ConnectionStrings__Default=Host=postgres;Database=gnex_db;Username=gnex_admin;Password=${POSTGRES_PASSWORD:-GNex@1234}
       - Kafka__BootstrapServers=kafka:9092
       - Redis__ConnectionString=redis:6379
     depends_on:
@@ -159,10 +159,10 @@ services:
   aiservice:
     build:
       context: .
-      dockerfile: src/Hms.AiService/Dockerfile
+      dockerfile: src/GNex.AiService/Dockerfile
     ports: ["5108:5108"]
     environment:
-      - ConnectionStrings__Default=Host=postgres;Database=icu_db;Username=icu_admin;Password=${POSTGRES_PASSWORD:-ICU@1234}
+      - ConnectionStrings__Default=Host=postgres;Database=gnex_db;Username=gnex_admin;Password=${POSTGRES_PASSWORD:-GNex@1234}
       - Kafka__BootstrapServers=kafka:9092
       - Redis__ConnectionString=redis:6379
     depends_on:
@@ -173,10 +173,10 @@ services:
   apigateway:
     build:
       context: .
-      dockerfile: src/Hms.ApiGateway/Dockerfile
+      dockerfile: src/GNex.ApiGateway/Dockerfile
     ports: ["5100:5100"]
     environment:
-      - ConnectionStrings__Default=Host=postgres;Database=icu_db;Username=icu_admin;Password=${POSTGRES_PASSWORD:-ICU@1234}
+      - ConnectionStrings__Default=Host=postgres;Database=gnex_db;Username=gnex_admin;Password=${POSTGRES_PASSWORD:-GNex@1234}
       - Kafka__BootstrapServers=kafka:9092
       - Redis__ConnectionString=redis:6379
     depends_on:

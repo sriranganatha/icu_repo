@@ -1,6 +1,6 @@
-using Hms.Services.Dtos.Governance;
+using GNex.Services.Dtos.Governance;
 
-namespace Hms.Services.Governance;
+namespace GNex.Services.Governance;
 
 public interface IAuditService
 {

@@ -1,7 +1,7 @@
 using Microsoft.EntityFrameworkCore;
-using Hms.Database;
+using GNex.Database;
 
-namespace Hms.Database.Repositories;
+namespace GNex.Database.Repositories;
 
 public interface IAuditRepository
 {
@@ -13,9 +13,9 @@ public interface IAuditRepository
 
 public class AuditRepository : IAuditRepository
 {
-    private readonly HmsDbContext _db;
+    private readonly GNexDbContext _db;
 
-    public AuditRepository(HmsDbContext db) => _db = db;
+    public AuditRepository(GNexDbContext db) => _db = db;
 
     public async Task<AuditEvent?> GetByIdAsync(string id, CancellationToken ct = default)
         => await _db.Set<AuditEvent>().FindAsync([id], ct);

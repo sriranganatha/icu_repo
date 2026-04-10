@@ -1,0 +1,309 @@
+@page
+@{
+    ViewData["Title"] = "BRD File Upload";
+}
+
+<div class="container-fluid px-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2><i class="bi bi-cloud-arrow-up me-2"></i>Upload Files for BRD Generation</h2>
+        <a href="/Brd" class="btn btn-outline-secondary"><i class="bi bi-arrow-left me-1"></i>Back to BRD List</a>
+    </div>
+
+    <!-- Step 1: Active Project -->
+    <div class="card mb-4">
+        <div class="card-header"><i class="bi bi-folder me-1"></i>Step 1: Active Project</div>
+        <div class="card-body">
+            <div id="projectInfo" class="d-flex align-items-center gap-2">
+                <i class="bi bi-exclamation-triangle text-warning"></i>
+                <span class="text-muted">Select a project from the navbar dropdown first.</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Step 2: Choose BRD Template -->
+    <div class="card mb-4" id="templateStep" style="display:none;">
+        <div class="card-header"><i class="bi bi-layout-text-sidebar me-1"></i>Step 2: Choose BRD Template</div>
+        <div class="card-body">
+            <div id="templateCards" class="row g-3"></div>
+        </div>
+    </div>
+
+    <!-- Step 3: Upload Files -->
+    <div class="card mb-4" id="uploadStep" style="display:none;">
+        <div class="card-header"><i class="bi bi-file-earmark-arrow-up me-1"></i>Step 3: Upload Requirements Files</div>
+        <div class="card-body">
+            <div id="dropZone" class="border border-2 border-dashed rounded-3 p-5 text-center"
+                 style="cursor:pointer; background:#f8f9fa; transition:background 0.2s;">
+                <i class="bi bi-cloud-arrow-up display-3 text-primary"></i>
+                <p class="mt-2 mb-1 fw-bold">Drag & drop your files here</p>
+                <p class="text-muted small">or click to browse. Supports: .txt, .md, .csv, .json, .pdf, .docx (max 10 MB each). Select multiple files.</p>
+                <input type="file" id="fileInput" class="d-none"
+                       accept=".txt,.md,.csv,.json,.pdf,.docx" multiple />
+            </div>
+            <div id="fileList" class="mt-3" style="display:none;">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <strong><i class="bi bi-files me-1"></i><span id="fileCount">0</span> file(s) selected</strong>
+                    <button class="btn btn-sm btn-outline-danger" onclick="clearAllFiles()">
+                        <i class="bi bi-x-lg me-1"></i>Remove All
+                    </button>
+                </div>
+                <div id="fileItems" class="list-group"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Step 4: Generate -->
+    <div id="generateStep" style="display:none;">
+        <button id="btnGenerate" class="btn btn-primary btn-lg w-100" onclick="generateDraft()" disabled>
+            <i class="bi bi-magic me-1"></i>Generate BRD Draft
+        </button>
+    </div>
+
+    <!-- Progress -->
+    <div id="progressSection" class="mt-4" style="display:none;">
+        <div class="progress" style="height:24px;">
+            <div id="progressBar" class="progress-bar progress-bar-striped progress-bar-animated"
+                 style="width:0%">Processing...</div>
+        </div>
+    </div>
+
+    <!-- Result -->
+    <div id="resultSection" class="mt-4" style="display:none;">
+        <div class="alert alert-success">
+            <i class="bi bi-check-circle me-2"></i>
+            <strong>BRD Draft Created!</strong>
+            <span id="resultDetails"></span>
+        </div>
+        <div id="sectionsPreview" class="mt-3"></div>
+    </div>
+</div>
+
+@section Scripts {
+<script>
+    let selectedProjectId = null;
+    let selectedTemplateId = null;
+    let selectedFiles = [];
+
+    // Use global project context from navbar
+    function checkProjectContext() {
+        selectedProjectId = window.getActiveProjectId ? window.getActiveProjectId() : null;
+        const name = window.getActiveProjectName ? window.getActiveProjectName() : '';
+        const info = document.getElementById('projectInfo');
+        if (selectedProjectId) {
+            info.innerHTML = `<i class="bi bi-check-circle text-success"></i><strong>${name}</strong>`;
+            document.getElementById('templateStep').style.display = '';
+            loadTemplates();
+        } else {
+            info.innerHTML = '<i class="bi bi-exclamation-triangle text-warning"></i><span class="text-muted">Select a project from the navbar dropdown first.</span>';
+            document.getElementById('templateStep').style.display = 'none';
+            document.getElementById('uploadStep').style.display = 'none';
+            document.getElementById('generateStep').style.display = 'none';
+        }
+        updateGenerateBtn();
+    }
+
+    // Listen for project changes from navbar
+    window.addEventListener('projectChanged', checkProjectContext);
+
+    async function loadTemplates() {
+        try {
+            const res = await fetch('/api/templates/brd');
+            if (!res.ok) return;
+            const templates = await res.json();
+            const container = document.getElementById('templateCards');
+            container.innerHTML = templates.map(t => `
+                <div class="col-md-4">
+                    <div class="card h-100 template-card ${t.isDefault ? 'border-primary' : ''}"
+                         style="cursor:pointer" onclick="selectTemplate('${t.id}', this)">
+                        <div class="card-body">
+                            <h6 class="card-title">${t.name}</h6>
+                            <span class="badge bg-secondary">${t.projectType}</span>
+                            ${t.isDefault ? '<span class="badge bg-primary ms-1">Default</span>' : ''}
+                            <p class="text-muted small mt-2">
+                                ${JSON.parse(t.sectionsJson).length} sections
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+
+            // Auto-select default
+            const def = templates.find(t => t.isDefault);
+            if (def) {
+                selectedTemplateId = def.id;
+                document.querySelector(`.template-card.border-primary`)?.classList.add('bg-primary', 'bg-opacity-10');
+            }
+            document.getElementById('uploadStep').style.display = '';
+            document.getElementById('generateStep').style.display = '';
+        } catch (e) { console.warn('Could not load templates:', e); }
+    }
+
+    function selectTemplate(id, el) {
+        document.querySelectorAll('.template-card').forEach(c => {
+            c.classList.remove('bg-primary', 'bg-opacity-10', 'border-primary');
+        });
+        el.classList.add('bg-primary', 'bg-opacity-10', 'border-primary');
+        selectedTemplateId = id;
+        updateGenerateBtn();
+    }
+
+    // Drag & Drop
+    const dropZone = document.getElementById('dropZone');
+    const fileInput = document.getElementById('fileInput');
+
+    dropZone.addEventListener('click', () => fileInput.click());
+    dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.style.background = '#e3f2fd'; });
+    dropZone.addEventListener('dragleave', () => { dropZone.style.background = '#f8f9fa'; });
+    dropZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dropZone.style.background = '#f8f9fa';
+        if (e.dataTransfer.files.length) addFiles(e.dataTransfer.files);
+    });
+    fileInput.addEventListener('change', () => { if (fileInput.files.length) addFiles(fileInput.files); });
+
+    function addFiles(fileListObj) {
+        for (const file of fileListObj) {
+            if (file.size > 10 * 1024 * 1024) { alert(`${file.name} exceeds 10 MB limit.`); continue; }
+            // Avoid duplicates by name
+            if (selectedFiles.some(f => f.name === file.name)) continue;
+            selectedFiles.push(file);
+        }
+        renderFileList();
+        updateGenerateBtn();
+    }
+
+    function removeFile(index) {
+        selectedFiles.splice(index, 1);
+        renderFileList();
+        updateGenerateBtn();
+    }
+
+    function clearAllFiles() {
+        selectedFiles = [];
+        fileInput.value = '';
+        renderFileList();
+        updateGenerateBtn();
+    }
+
+    function renderFileList() {
+        const list = document.getElementById('fileList');
+        const items = document.getElementById('fileItems');
+        const count = document.getElementById('fileCount');
+
+        if (selectedFiles.length === 0) {
+            list.style.display = 'none';
+            return;
+        }
+
+        list.style.display = '';
+        count.textContent = selectedFiles.length;
+        items.innerHTML = selectedFiles.map((f, i) => `
+            <div class="list-group-item d-flex align-items-center">
+                <i class="bi bi-file-earmark-text text-primary me-2"></i>
+                <div class="flex-grow-1">
+                    <strong>${f.name}</strong>
+                    <span class="text-muted small ms-2">${(f.size / 1024).toFixed(1)} KB</span>
+                </div>
+                <button class="btn btn-sm btn-outline-danger" onclick="removeFile(${i})">
+                    <i class="bi bi-x-lg"></i>
+                </button>
+            </div>
+        `).join('');
+    }
+
+    function updateGenerateBtn() {
+        document.getElementById('btnGenerate').disabled = !(selectedProjectId && selectedFiles.length > 0);
+    }
+
+    async function generateDraft() {
+        if (!selectedProjectId || selectedFiles.length === 0) return;
+
+        document.getElementById('btnGenerate').disabled = true;
+        document.getElementById('progressSection').style.display = '';
+        document.getElementById('resultSection').style.display = 'none';
+        const bar = document.getElementById('progressBar');
+        bar.style.width = '10%';
+        bar.classList.add('progress-bar-animated');
+
+        const formData = new FormData();
+        selectedFiles.forEach(f => formData.append('files', f));
+
+        let url = `/api/brd/upload-batch/${selectedProjectId}`;
+        if (selectedTemplateId) url += `?templateId=${selectedTemplateId}`;
+
+        try {
+            bar.style.width = '40%';
+            const res = await fetch(url, { method: 'POST', body: formData });
+
+            if (!res.ok) {
+                const err = await res.json();
+                throw new Error(err.error || 'Upload failed');
+            }
+
+            bar.style.width = '80%';
+            const data = await res.json();
+            const result = data.result || data;
+
+            bar.style.width = '100%';
+            bar.classList.remove('progress-bar-animated');
+
+            // Show result summary
+            let details = `${result.filesProcessed} file(s) processed, ${result.totalSectionsCreated} total sections generated as ${result.status.toUpperCase()}.`;
+            if (data.skippedFiles && data.skippedFiles.length > 0) {
+                details += ` (${data.skippedFiles.length} file(s) skipped)`;
+            }
+            document.getElementById('resultDetails').textContent = details;
+            document.getElementById('resultSection').style.display = '';
+
+            // Show per-file results
+            if (result.fileResults && result.fileResults.length > 0) {
+                const perFile = result.fileResults.map(fr =>
+                    `<span class="badge ${fr.status === 'draft' ? 'bg-success' : 'bg-warning'} me-1">${fr.fileName}: ${fr.sectionsCreated} sections</span>`
+                ).join('');
+                document.getElementById('resultDetails').innerHTML = details + '<br/>' + perFile;
+            }
+
+            // Load sections preview
+            await loadSections(selectedProjectId);
+
+        } catch (e) {
+            alert('Error: ' + e.message);
+            bar.style.width = '0%';
+        } finally {
+            document.getElementById('btnGenerate').disabled = false;
+        }
+    }
+
+    async function loadSections(projectId) {
+        const res = await fetch(`/api/brd/${projectId}/sections`);
+        if (!res.ok) return;
+        const sections = await res.json();
+        const container = document.getElementById('sectionsPreview');
+        container.innerHTML = `
+            <h5><i class="bi bi-list-ol me-1"></i>Generated BRD Sections</h5>
+            <div class="accordion" id="sectionsAccordion">
+                ${sections.map((s, i) => `
+                    <div class="accordion-item">
+                        <h2 class="accordion-header">
+                            <button class="accordion-button ${i > 0 ? 'collapsed' : ''}" type="button"
+                                    data-bs-toggle="collapse" data-bs-target="#section${i}">
+                                <span class="badge bg-secondary me-2">${s.order}</span>
+                                ${s.sectionType.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}
+                            </button>
+                        </h2>
+                        <div id="section${i}" class="accordion-collapse collapse ${i === 0 ? 'show' : ''}"
+                             data-bs-parent="#sectionsAccordion">
+                            <div class="accordion-body">
+                                <pre class="bg-light p-3 rounded small" style="white-space:pre-wrap">${s.content}</pre>
+                            </div>
+                        </div>
+                    </div>
+                `).join('')}
+            </div>
+        `;
+    }
+
+    // Init
+    checkProjectContext();
+</script>
+}

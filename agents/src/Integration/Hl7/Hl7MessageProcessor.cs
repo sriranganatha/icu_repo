@@ -1,4 +1,4 @@
-namespace Hms.Integration.Hl7;
+namespace GNex.Integration.Hl7;
 
 public interface IHl7MessageProcessor
 {

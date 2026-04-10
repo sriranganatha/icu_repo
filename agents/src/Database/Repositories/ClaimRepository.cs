@@ -1,7 +1,7 @@
 using Microsoft.EntityFrameworkCore;
-using Hms.Database;
+using GNex.Database;
 
-namespace Hms.Database.Repositories;
+namespace GNex.Database.Repositories;
 
 public interface IClaimRepository
 {
@@ -13,9 +13,9 @@ public interface IClaimRepository
 
 public class ClaimRepository : IClaimRepository
 {
-    private readonly HmsDbContext _db;
+    private readonly GNexDbContext _db;
 
-    public ClaimRepository(HmsDbContext db) => _db = db;
+    public ClaimRepository(GNexDbContext db) => _db = db;
 
     public async Task<Claim?> GetByIdAsync(string id, CancellationToken ct = default)
         => await _db.Set<Claim>().FindAsync([id], ct);

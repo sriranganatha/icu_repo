@@ -1,4 +1,4 @@
-namespace Hms.Services.Dtos.Platform;
+namespace GNex.Services.Dtos.Platform;
 
 // ─── Workflow DTOs ──────────────────────────────────────────
 public sealed record SdlcWorkflowDto(

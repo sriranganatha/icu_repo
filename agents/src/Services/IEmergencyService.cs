@@ -1,6 +1,6 @@
-using Hms.Services.Dtos.Emergency;
+using GNex.Services.Dtos.Emergency;
 
-namespace Hms.Services.Emergency;
+namespace GNex.Services.Emergency;
 
 public interface IEmergencyService
 {

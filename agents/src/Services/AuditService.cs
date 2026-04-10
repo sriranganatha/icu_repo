@@ -1,7 +1,7 @@
-using Hms.Services.Dtos.Governance;
+using GNex.Services.Dtos.Governance;
 using Microsoft.Extensions.Logging;
 
-namespace Hms.Services.Governance;
+namespace GNex.Services.Governance;
 
 public sealed class AuditService : IAuditService
 {

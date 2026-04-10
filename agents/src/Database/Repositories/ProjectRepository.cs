@@ -1,7 +1,7 @@
 using Microsoft.EntityFrameworkCore;
-using Hms.Database.Entities.Platform.Projects;
+using GNex.Database.Entities.Platform.Projects;
 
-namespace Hms.Database.Repositories;
+namespace GNex.Database.Repositories;
 
 public interface IProjectRepository : IPlatformRepository<Project>
 {
@@ -12,7 +12,7 @@ public interface IProjectRepository : IPlatformRepository<Project>
 
 public class ProjectRepository : PlatformRepository<Project>, IProjectRepository
 {
-    public ProjectRepository(HmsDbContext db) : base(db) { }
+    public ProjectRepository(GNexDbContext db) : base(db) { }
 
     public async Task<Project?> GetBySlugAsync(string slug, CancellationToken ct = default)
         => await Set.FirstOrDefaultAsync(p => p.Slug == slug && p.IsActive, ct);

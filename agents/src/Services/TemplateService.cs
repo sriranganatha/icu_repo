@@ -1,11 +1,11 @@
-using Hms.Database;
-using Hms.Database.Entities.Platform.Technology;
-using Hms.Database.Repositories;
-using Hms.Services.Dtos.Platform;
+using GNex.Database;
+using GNex.Database.Entities.Platform.Technology;
+using GNex.Database.Repositories;
+using GNex.Services.Dtos.Platform;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
-namespace Hms.Services.Platform;
+namespace GNex.Services.Platform;
 
 public sealed class TemplateService : ITemplateService
 {
@@ -18,7 +18,7 @@ public sealed class TemplateService : ITemplateService
     private readonly IPlatformRepository<TestTemplate> _testRepo;
     private readonly IPlatformRepository<IaCTemplate> _iacRepo;
     private readonly IPlatformRepository<DocumentationTemplate> _docRepo;
-    private readonly HmsDbContext _db;
+    private readonly GNexDbContext _db;
     private readonly ILogger<TemplateService> _logger;
 
     public TemplateService(
@@ -31,7 +31,7 @@ public sealed class TemplateService : ITemplateService
         IPlatformRepository<TestTemplate> testRepo,
         IPlatformRepository<IaCTemplate> iacRepo,
         IPlatformRepository<DocumentationTemplate> docRepo,
-        HmsDbContext db,
+        GNexDbContext db,
         ILogger<TemplateService> logger)
     {
         _brdRepo = brdRepo;
@@ -71,6 +71,23 @@ public sealed class TemplateService : ITemplateService
             entity.SectionsJson, entity.IsDefault, entity.IsActive, entity.CreatedAt, entity.UpdatedAt);
     }
 
+    public async Task<BrdTemplateDto> UpdateBrdTemplateAsync(string id, UpdateBrdTemplateRequest request, CancellationToken ct = default)
+    {
+        var entity = await _brdRepo.GetByIdAsync(id, ct)
+            ?? throw new KeyNotFoundException($"BRD template not found: {id}");
+
+        entity.Name = request.Name;
+        entity.ProjectType = request.ProjectType;
+        entity.SectionsJson = request.SectionsJson;
+        entity.IsDefault = request.IsDefault;
+
+        await _brdRepo.UpdateAsync(entity, ct);
+        _logger.LogInformation("Updated BRD template {Id} '{Name}'", entity.Id, entity.Name);
+
+        return new BrdTemplateDto(entity.Id, entity.Name, entity.ProjectType,
+            entity.SectionsJson, entity.IsDefault, entity.IsActive, entity.CreatedAt, entity.UpdatedAt);
+    }
+
     public async Task DeleteBrdTemplateAsync(string id, CancellationToken ct = default)
         => await _brdRepo.SoftDeleteAsync(id, ct);
 
@@ -92,6 +109,20 @@ public sealed class TemplateService : ITemplateService
             DiagramTemplate = request.DiagramTemplate
         };
         await _archRepo.CreateAsync(entity, ct);
+        return new ArchitectureTemplateDto(entity.Id, entity.Name, entity.Pattern,
+            entity.DiagramTemplate, entity.IsActive, entity.CreatedAt, entity.UpdatedAt);
+    }
+
+    public async Task<ArchitectureTemplateDto> UpdateArchitectureTemplateAsync(string id, UpdateArchitectureTemplateRequest request, CancellationToken ct = default)
+    {
+        var entity = await _archRepo.GetByIdAsync(id, ct)
+            ?? throw new KeyNotFoundException($"Architecture template not found: {id}");
+
+        entity.Name = request.Name;
+        entity.Pattern = request.Pattern;
+        entity.DiagramTemplate = request.DiagramTemplate;
+
+        await _archRepo.UpdateAsync(entity, ct);
         return new ArchitectureTemplateDto(entity.Id, entity.Name, entity.Pattern,
             entity.DiagramTemplate, entity.IsActive, entity.CreatedAt, entity.UpdatedAt);
     }
@@ -126,6 +157,22 @@ public sealed class TemplateService : ITemplateService
         return MapCodeTemplate(entity);
     }
 
+    public async Task<CodeTemplateDto> UpdateCodeTemplateAsync(string id, UpdateCodeTemplateRequest request, CancellationToken ct = default)
+    {
+        var entity = await _codeRepo.GetByIdAsync(id, ct)
+            ?? throw new KeyNotFoundException($"Code template not found: {id}");
+
+        entity.Name = request.Name;
+        entity.LanguageId = request.LanguageId;
+        entity.FrameworkId = request.FrameworkId;
+        entity.TemplateType = request.TemplateType;
+        entity.Content = request.Content;
+        entity.VariablesJson = request.VariablesJson;
+
+        await _codeRepo.UpdateAsync(entity, ct);
+        return MapCodeTemplate(entity);
+    }
+
     public async Task DeleteCodeTemplateAsync(string id, CancellationToken ct = default)
         => await _codeRepo.SoftDeleteAsync(id, ct);
 
@@ -151,6 +198,20 @@ public sealed class TemplateService : ITemplateService
             TreeJson = request.TreeJson
         };
         await _fsRepo.CreateAsync(entity, ct);
+        return new FileStructureTemplateDto(entity.Id, entity.Name, entity.FrameworkId,
+            entity.TreeJson, entity.IsActive, entity.CreatedAt, entity.UpdatedAt);
+    }
+
+    public async Task<FileStructureTemplateDto> UpdateFileStructureTemplateAsync(string id, UpdateFileStructureTemplateRequest request, CancellationToken ct = default)
+    {
+        var entity = await _fsRepo.GetByIdAsync(id, ct)
+            ?? throw new KeyNotFoundException($"File structure template not found: {id}");
+
+        entity.Name = request.Name;
+        entity.FrameworkId = request.FrameworkId;
+        entity.TreeJson = request.TreeJson;
+
+        await _fsRepo.UpdateAsync(entity, ct);
         return new FileStructureTemplateDto(entity.Id, entity.Name, entity.FrameworkId,
             entity.TreeJson, entity.IsActive, entity.CreatedAt, entity.UpdatedAt);
     }
@@ -185,6 +246,21 @@ public sealed class TemplateService : ITemplateService
             entity.LanguageId, entity.PipelineYaml, entity.IsActive, entity.CreatedAt, entity.UpdatedAt);
     }
 
+    public async Task<CiCdTemplateDto> UpdateCiCdTemplateAsync(string id, UpdateCiCdTemplateRequest request, CancellationToken ct = default)
+    {
+        var entity = await _cicdRepo.GetByIdAsync(id, ct)
+            ?? throw new KeyNotFoundException($"CI/CD template not found: {id}");
+
+        entity.Name = request.Name;
+        entity.Provider = request.Provider;
+        entity.LanguageId = request.LanguageId;
+        entity.PipelineYaml = request.PipelineYaml;
+
+        await _cicdRepo.UpdateAsync(entity, ct);
+        return new CiCdTemplateDto(entity.Id, entity.Name, entity.Provider,
+            entity.LanguageId, entity.PipelineYaml, entity.IsActive, entity.CreatedAt, entity.UpdatedAt);
+    }
+
     public async Task DeleteCiCdTemplateAsync(string id, CancellationToken ct = default)
         => await _cicdRepo.SoftDeleteAsync(id, ct);
 
@@ -212,6 +288,23 @@ public sealed class TemplateService : ITemplateService
             ComposeContent = request.ComposeContent
         };
         await _dockerRepo.CreateAsync(entity, ct);
+        return new DockerTemplateDto(entity.Id, entity.Name, entity.LanguageId,
+            entity.FrameworkId, entity.DockerfileContent, entity.ComposeContent,
+            entity.IsActive, entity.CreatedAt, entity.UpdatedAt);
+    }
+
+    public async Task<DockerTemplateDto> UpdateDockerTemplateAsync(string id, UpdateDockerTemplateRequest request, CancellationToken ct = default)
+    {
+        var entity = await _dockerRepo.GetByIdAsync(id, ct)
+            ?? throw new KeyNotFoundException($"Docker template not found: {id}");
+
+        entity.Name = request.Name;
+        entity.LanguageId = request.LanguageId;
+        entity.FrameworkId = request.FrameworkId;
+        entity.DockerfileContent = request.DockerfileContent;
+        entity.ComposeContent = request.ComposeContent;
+
+        await _dockerRepo.UpdateAsync(entity, ct);
         return new DockerTemplateDto(entity.Id, entity.Name, entity.LanguageId,
             entity.FrameworkId, entity.DockerfileContent, entity.ComposeContent,
             entity.IsActive, entity.CreatedAt, entity.UpdatedAt);
@@ -249,6 +342,23 @@ public sealed class TemplateService : ITemplateService
             entity.IsActive, entity.CreatedAt, entity.UpdatedAt);
     }
 
+    public async Task<TestTemplateDto> UpdateTestTemplateAsync(string id, UpdateTestTemplateRequest request, CancellationToken ct = default)
+    {
+        var entity = await _testRepo.GetByIdAsync(id, ct)
+            ?? throw new KeyNotFoundException($"Test template not found: {id}");
+
+        entity.Name = request.Name;
+        entity.TestType = request.TestType;
+        entity.FrameworkId = request.FrameworkId;
+        entity.TestFramework = request.TestFramework;
+        entity.TemplateContent = request.TemplateContent;
+
+        await _testRepo.UpdateAsync(entity, ct);
+        return new TestTemplateDto(entity.Id, entity.Name, entity.TestType,
+            entity.FrameworkId, entity.TestFramework, entity.TemplateContent,
+            entity.IsActive, entity.CreatedAt, entity.UpdatedAt);
+    }
+
     public async Task DeleteTestTemplateAsync(string id, CancellationToken ct = default)
         => await _testRepo.SoftDeleteAsync(id, ct);
 
@@ -279,6 +389,21 @@ public sealed class TemplateService : ITemplateService
             entity.Tool, entity.TemplateContent, entity.IsActive, entity.CreatedAt, entity.UpdatedAt);
     }
 
+    public async Task<IaCTemplateDto> UpdateIaCTemplateAsync(string id, UpdateIaCTemplateRequest request, CancellationToken ct = default)
+    {
+        var entity = await _iacRepo.GetByIdAsync(id, ct)
+            ?? throw new KeyNotFoundException($"IaC template not found: {id}");
+
+        entity.Name = request.Name;
+        entity.CloudProviderId = request.CloudProviderId;
+        entity.Tool = request.Tool;
+        entity.TemplateContent = request.TemplateContent;
+
+        await _iacRepo.UpdateAsync(entity, ct);
+        return new IaCTemplateDto(entity.Id, entity.Name, entity.CloudProviderId,
+            entity.Tool, entity.TemplateContent, entity.IsActive, entity.CreatedAt, entity.UpdatedAt);
+    }
+
     public async Task DeleteIaCTemplateAsync(string id, CancellationToken ct = default)
         => await _iacRepo.SoftDeleteAsync(id, ct);
 
@@ -304,6 +429,20 @@ public sealed class TemplateService : ITemplateService
             TemplateContent = request.TemplateContent
         };
         await _docRepo.CreateAsync(entity, ct);
+        return new DocumentationTemplateDto(entity.Id, entity.Name, entity.DocType,
+            entity.TemplateContent, entity.IsActive, entity.CreatedAt, entity.UpdatedAt);
+    }
+
+    public async Task<DocumentationTemplateDto> UpdateDocumentationTemplateAsync(string id, UpdateDocumentationTemplateRequest request, CancellationToken ct = default)
+    {
+        var entity = await _docRepo.GetByIdAsync(id, ct)
+            ?? throw new KeyNotFoundException($"Documentation template not found: {id}");
+
+        entity.Name = request.Name;
+        entity.DocType = request.DocType;
+        entity.TemplateContent = request.TemplateContent;
+
+        await _docRepo.UpdateAsync(entity, ct);
         return new DocumentationTemplateDto(entity.Id, entity.Name, entity.DocType,
             entity.TemplateContent, entity.IsActive, entity.CreatedAt, entity.UpdatedAt);
     }

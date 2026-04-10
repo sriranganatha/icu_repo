@@ -1,4 +1,4 @@
-namespace Hms.Integration.Fhir;
+namespace GNex.Integration.Fhir;
 
 public interface IFhirPatientAdapter
 {

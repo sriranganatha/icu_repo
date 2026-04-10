@@ -1,7 +1,7 @@
-using Hms.Services.Dtos.Mpi;
+using GNex.Services.Dtos.Mpi;
 using Microsoft.Extensions.Logging;
 
-namespace Hms.Services.Mpi;
+namespace GNex.Services.Mpi;
 
 public sealed class PatientService : IPatientService
 {

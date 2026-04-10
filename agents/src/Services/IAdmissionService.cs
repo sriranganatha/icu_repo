@@ -1,6 +1,6 @@
-using Hms.Services.Dtos.Inpatient;
+using GNex.Services.Dtos.Inpatient;
 
-namespace Hms.Services.Inpatient;
+namespace GNex.Services.Inpatient;
 
 public interface IAdmissionService
 {

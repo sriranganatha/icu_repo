@@ -1,7 +1,7 @@
 using Microsoft.EntityFrameworkCore;
-using Hms.Database;
+using GNex.Database;
 
-namespace Hms.Database.Repositories;
+namespace GNex.Database.Repositories;
 
 public interface IAdmissionRepository
 {
@@ -13,9 +13,9 @@ public interface IAdmissionRepository
 
 public class AdmissionRepository : IAdmissionRepository
 {
-    private readonly HmsDbContext _db;
+    private readonly GNexDbContext _db;
 
-    public AdmissionRepository(HmsDbContext db) => _db = db;
+    public AdmissionRepository(GNexDbContext db) => _db = db;
 
     public async Task<Admission?> GetByIdAsync(string id, CancellationToken ct = default)
         => await _db.Set<Admission>().FindAsync([id], ct);

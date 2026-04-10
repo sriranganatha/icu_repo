@@ -1,7 +1,7 @@
 using Microsoft.EntityFrameworkCore;
-using Hms.Database;
+using GNex.Database;
 
-namespace Hms.Database.Repositories;
+namespace GNex.Database.Repositories;
 
 public interface IAiInteractionRepository
 {
@@ -13,9 +13,9 @@ public interface IAiInteractionRepository
 
 public class AiInteractionRepository : IAiInteractionRepository
 {
-    private readonly HmsDbContext _db;
+    private readonly GNexDbContext _db;
 
-    public AiInteractionRepository(HmsDbContext db) => _db = db;
+    public AiInteractionRepository(GNexDbContext db) => _db = db;
 
     public async Task<AiInteraction?> GetByIdAsync(string id, CancellationToken ct = default)
         => await _db.Set<AiInteraction>().FindAsync([id], ct);

@@ -1,4 +1,4 @@
-namespace Hms.Web.ViewModels.Revenue;
+namespace GNex.Studio.ViewModels.Revenue;
 
 public sealed class BillingDashboardViewModel
 {

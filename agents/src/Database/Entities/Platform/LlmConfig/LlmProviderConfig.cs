@@ -1,6 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 
-namespace Hms.Database.Entities.Platform.LlmConfig;
+namespace GNex.Database.Entities.Platform.LlmConfig;
 
 public class LlmProviderConfig : PlatformEntityBase
 {

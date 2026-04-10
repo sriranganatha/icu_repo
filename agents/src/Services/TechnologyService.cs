@@ -1,10 +1,10 @@
-using Hms.Database;
-using Hms.Database.Entities.Platform.Technology;
-using Hms.Database.Repositories;
-using Hms.Services.Dtos.Platform;
+using GNex.Database;
+using GNex.Database.Entities.Platform.Technology;
+using GNex.Database.Repositories;
+using GNex.Services.Dtos.Platform;
 using Microsoft.Extensions.Logging;
 
-namespace Hms.Services.Platform;
+namespace GNex.Services.Platform;
 
 public sealed class TechnologyService : ITechnologyService
 {

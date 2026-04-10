@@ -1,8 +1,8 @@
 using Microsoft.EntityFrameworkCore;
-using Hms.Database.Entities.Platform;
-using Hms.Database.Entities.Platform.Technology;
+using GNex.Database.Entities.Platform;
+using GNex.Database.Entities.Platform.Technology;
 
-namespace Hms.Database.Repositories;
+namespace GNex.Database.Repositories;
 
 public interface ITemplateRepository
 {
@@ -14,9 +14,9 @@ public interface ITemplateRepository
 
 public class TemplateRepository : ITemplateRepository
 {
-    private readonly HmsDbContext _db;
+    private readonly GNexDbContext _db;
 
-    public TemplateRepository(HmsDbContext db) => _db = db;
+    public TemplateRepository(GNexDbContext db) => _db = db;
 
     public async Task<List<T>> ListTemplatesAsync<T>(int skip = 0, int take = 50, CancellationToken ct = default) where T : PlatformEntityBase
         => await _db.Set<T>().Where(e => e.IsActive)

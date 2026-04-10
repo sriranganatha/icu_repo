@@ -1,6 +1,6 @@
-using Hms.Services.Dtos.Ai;
+using GNex.Services.Dtos.Ai;
 
-namespace Hms.Services.Ai;
+namespace GNex.Services.Ai;
 
 public interface IAiCopilotService
 {

@@ -1,4 +1,4 @@
-namespace Hms.Integration;
+namespace GNex.Integration;
 
 public sealed class IntegrationOptions
 {

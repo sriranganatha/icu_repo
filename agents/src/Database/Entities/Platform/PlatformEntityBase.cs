@@ -1,6 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 
-namespace Hms.Database.Entities.Platform;
+namespace GNex.Database.Entities.Platform;
 
 /// <summary>
 /// Base class for all platform metadata entities.

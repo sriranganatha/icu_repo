@@ -1,12 +1,12 @@
-using Hms.Database;
-using Hms.Database.Entities.Platform.Projects;
-using Hms.Database.Entities.Platform.Configuration;
+using GNex.Database;
+using GNex.Database.Entities.Platform.Projects;
+using GNex.Database.Entities.Platform.Configuration;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace Hms.Services.Platform;
+namespace GNex.Services.Platform;
 
 public record ProjectRecipe
 {
@@ -34,7 +34,7 @@ public interface IProjectRecipeService
 }
 
 public class ProjectRecipeService(
-    HmsDbContext db,
+    GNexDbContext db,
     ILogger<ProjectRecipeService> logger) : IProjectRecipeService
 {
     public async Task<ProjectRecipe> ExportAsync(string projectId, CancellationToken ct = default)
