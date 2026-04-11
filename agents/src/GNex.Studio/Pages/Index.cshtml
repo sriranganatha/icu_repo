@@ -1691,7 +1691,7 @@
 
                 const statusMap = { 'Idle': 0, 'Running': 1, 'Waiting': 2, 'Completed': 3, 'Failed': 4, 'ReviewPending': 5 };
 
-                // Restore agent cards
+                // Restore agent cards and NOC state
                 if (data.agentStatuses) {
                     Object.entries(data.agentStatuses).forEach(([agent, statusStr]) => {
                         const statusNum = typeof statusStr === 'string' ? (statusMap[statusStr] ?? 0) : statusStr;
@@ -1700,7 +1700,16 @@
                         const findings = data.agentFindings ? (data.agentFindings[agent] || 0) : 0;
                         const elapsed = data.agentElapsed ? (data.agentElapsed[agent] || 0) : 0;
                         updateAgentCard(agent, statusNum, msg, artifacts, findings, elapsed);
+                        // Populate nocState so auto-refresh timers detect running agents
+                        nocState.agentStatuses[agent] = statusNum;
                     });
+
+                    // If pipeline is active, enable stop button and disable run button
+                    const anyRunning = Object.values(nocState.agentStatuses).some(s => s === 1);
+                    if (data.status === 'active' || anyRunning) {
+                        document.getElementById('btnRunPipeline').disabled = true;
+                        document.getElementById('btnStopPipeline').disabled = false;
+                    }
                 }
 
                 // Restore summary stats
@@ -2421,6 +2430,48 @@
                 refreshBacklog();
             }
         }, 5000);
+
+        // Auto-poll pipeline status every 4 seconds to keep summary stats + agent cards current
+        setInterval(async () => {
+            const ctx = nocState.agentStatuses;
+            const anyRunning = Object.values(ctx).some(s => s === 1);
+            const noStatus = Object.keys(ctx).length === 0;
+            // Poll if agents are running, or if we have no status yet (page just loaded)
+            if (!anyRunning && !noStatus) return;
+            try {
+                const res = await fetch('/api/pipeline/status');
+                if (!res.ok) return;
+                const data = await res.json();
+                if (!data || data.status === 'no_run') return;
+
+                const statusMap = { 'Idle': 0, 'Running': 1, 'Waiting': 2, 'Completed': 3, 'Failed': 4, 'ReviewPending': 5 };
+
+                if (data.agentStatuses) {
+                    Object.entries(data.agentStatuses).forEach(([agent, statusStr]) => {
+                        const statusNum = typeof statusStr === 'string' ? (statusMap[statusStr] ?? 0) : statusStr;
+                        updateAgentCard(agent, statusNum, '', 0, 0, 0);
+                        nocState.agentStatuses[agent] = statusNum;
+                    });
+                }
+
+                if (data.requirements !== undefined)
+                    document.getElementById('statReqs').textContent = data.requirements;
+                if (data.artifacts !== undefined)
+                    document.getElementById('statArtifacts').textContent = data.artifacts;
+                if (data.findings !== undefined)
+                    document.getElementById('statFindings').textContent = data.findings;
+
+                // Update buttons
+                const stillRunning = Object.values(nocState.agentStatuses).some(s => s === 1);
+                document.getElementById('btnRunPipeline').disabled = stillRunning || data.status === 'active';
+                document.getElementById('btnStopPipeline').disabled = !stillRunning && data.status !== 'active';
+
+                if (data.completed) {
+                    document.getElementById('btnRunPipeline').disabled = false;
+                    document.getElementById('btnStopPipeline').disabled = true;
+                }
+            } catch (e) { /* ignore poll errors */ }
+        }, 4000);
 
         function nocResetCharts() {
             chartTimeline.data.datasets[0].data = new Array(ALL_AGENTS.length).fill(0);

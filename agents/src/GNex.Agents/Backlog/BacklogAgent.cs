@@ -560,7 +560,7 @@ public sealed class BacklogAgent : IAgent
     }
 
     private static bool IsActionableWorkItem(ExpandedRequirement item) =>
-        item.ItemType is WorkItemType.Task or WorkItemType.Bug or WorkItemType.UseCase;
+        item.ItemType is WorkItemType.Task or WorkItemType.Bug;
 
     private static void RollupParentItems(IList<ExpandedRequirement> allItems)
     {
@@ -569,7 +569,7 @@ public sealed class BacklogAgent : IAgent
             .GroupBy(c => c.ParentId, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(g => g.Key, g => g.ToList(), StringComparer.OrdinalIgnoreCase);
 
-        foreach (var parent in allItems.Where(e => e.ItemType is WorkItemType.Epic or WorkItemType.UserStory))
+        foreach (var parent in allItems.Where(e => e.ItemType is WorkItemType.Epic or WorkItemType.UserStory or WorkItemType.UseCase))
         {
             if (!byParent.TryGetValue(parent.Id, out var children) || children.Count == 0)
                 continue;
@@ -582,8 +582,12 @@ public sealed class BacklogAgent : IAgent
                 continue;
             }
 
-            parent.Status = WorkItemStatus.InProgress;
-            parent.CompletedAt = null;
+            // Only promote to InProgress if not already Completed (avoid oscillation)
+            if (parent.Status != WorkItemStatus.Completed)
+            {
+                if (children.Any(c => c.Status is WorkItemStatus.UnderDev or WorkItemStatus.InProgress or WorkItemStatus.Completed))
+                    parent.Status = WorkItemStatus.InProgress;
+            }
             parent.AssignedAgent = string.Empty;
         }
     }
@@ -624,10 +628,10 @@ public sealed class BacklogAgent : IAgent
     };
 
     private static bool ModuleMatch(string ns, string module) =>
-        string.IsNullOrWhiteSpace(module) ||
-        string.Equals(module, "General", StringComparison.OrdinalIgnoreCase) ||
-        ns.Contains(module, StringComparison.OrdinalIgnoreCase) ||
-        ns.Contains(module.Replace("Service", ""), StringComparison.OrdinalIgnoreCase);
+        !string.IsNullOrWhiteSpace(module) &&
+        !string.Equals(module, "General", StringComparison.OrdinalIgnoreCase) &&
+        (ns.Contains(module, StringComparison.OrdinalIgnoreCase) ||
+         ns.Contains(module.Replace("Service", ""), StringComparison.OrdinalIgnoreCase));
 
     private static string ExtractModule(string ns) =>
         ns.Split('.').LastOrDefault() ?? "Unknown";
@@ -689,6 +693,13 @@ public sealed class BacklogAgent : IAgent
             var expected = BuildExpectedResult(finding);
             var actual = BuildActualResult(finding);
 
+            var bugModule = InferModuleFromFinding(finding);
+            var svcDef = InferServiceDefFromFinding(finding);
+            var svcLabel = svcDef?.Name ?? "UnknownService";
+            var schema = svcDef?.Schema ?? "unknown";
+            var entityCsv = svcDef is not null ? string.Join(", ", svcDef.Entities) : "";
+            var svcNs = svcDef?.Namespace ?? $"GNex.{bugModule}";
+
             context.ExpandedRequirements.Add(new ExpandedRequirement
             {
                 Id = bugId,
@@ -696,12 +707,20 @@ public sealed class BacklogAgent : IAgent
                 ItemType = WorkItemType.Bug,
                 Title = title,
                 Severity = severity,
-                Environment = environment,
+                Environment = svcDef is not null
+                    ? $".NET 10, PostgreSQL 16 | Service: {svcLabel}, Schema: {schema}, Entities: {entityCsv} — {environment}"
+                    : environment,
                 StepsToReproduce = steps,
                 ExpectedResult = expected,
                 ActualResult = actual,
-                Description = $"Severity: {severity}\nEnvironment: {environment}\nSteps to Reproduce:\n{string.Join("\n", steps)}\nExpected Result: {expected}\nActual Result: {actual}\nAttachments: [Screenshot/Screen Recording/Log Snippet]",
-                Module = InferModuleFromFinding(finding),
+                Description = svcDef is not null
+                    ? $"[{svcLabel} | {schema}] Severity: {severity}\nEnvironment: .NET 10, PostgreSQL 16, Service: {svcLabel}, Schema: {schema}\nSteps to Reproduce:\n{string.Join("\n", steps)}\nExpected Result: {expected}\nActual Result: {actual}"
+                    : $"Severity: {severity}\nEnvironment: {environment}\nSteps to Reproduce:\n{string.Join("\n", steps)}\nExpected Result: {expected}\nActual Result: {actual}\nAttachments: [Screenshot/Screen Recording/Log Snippet]",
+                TechnicalNotes = svcDef is not null
+                    ? $"Investigate in {svcNs}. Check entities: {entityCsv}. Schema: {schema}."
+                    : null,
+                Module = svcDef is not null ? svcDef.Name.Replace("Service", "") : bugModule,
+                AffectedServices = svcDef is not null ? [svcLabel] : [],
                 Priority = severity is "Blocker" or "Critical" ? 1 : 2,
                 Iteration = context.DevIteration,
                 Tags = ["bugfix", (finding.Category ?? "general").ToLowerInvariant()],
@@ -783,11 +802,28 @@ public sealed class BacklogAgent : IAgent
     private static string InferModuleFromFinding(ReviewFinding finding)
     {
         var path = finding.FilePath ?? string.Empty;
+        // Try to match a known microservice from the file path
+        var svc = InferServiceDefFromFinding(finding);
+        if (svc is not null) return svc.Name.Replace("Service", "");
         if (path.Contains("database", StringComparison.OrdinalIgnoreCase)) return "Database";
         if (path.Contains("service", StringComparison.OrdinalIgnoreCase)) return "ServiceLayer";
         if (path.Contains("api", StringComparison.OrdinalIgnoreCase) || path.Contains("web", StringComparison.OrdinalIgnoreCase)) return "Application";
         if (path.Contains("integration", StringComparison.OrdinalIgnoreCase)) return "Integration";
         return "General";
+    }
+
+    private static MicroserviceDefinition? InferServiceDefFromFinding(ReviewFinding finding)
+    {
+        var combined = $"{finding.FilePath ?? ""} {finding.Message ?? ""} {finding.Category ?? ""}".ToLowerInvariant();
+        foreach (var svc in MicroserviceCatalog.All)
+        {
+            var svcLower = svc.Name.Replace("Service", "").ToLowerInvariant();
+            if (combined.Contains(svcLower) ||
+                combined.Contains(svc.ShortName) ||
+                svc.Entities.Any(e => combined.Contains(e.ToLowerInvariant())))
+                return svc;
+        }
+        return null;
     }
 
     private record BacklogStats

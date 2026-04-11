@@ -535,8 +535,8 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
         // Build the work queue: all agents we want to run
         var pendingAgents = new HashSet<AgentType>(s_dependencies.Keys);
         pendingAgents.Remove(AgentType.Supervisor);  // Supervisor runs at the very end
-        // Build/Deploy/Monitor/LoadTest are post-backlog gates and should not be daemon-dispatched early.
-        pendingAgents.Remove(AgentType.Build);
+        // Deploy/Monitor/LoadTest are post-backlog gates and should not be daemon-dispatched early.
+        // Build is dispatched via normal dependency flow so it runs as soon as code-gen + review + bugfix complete.
         pendingAgents.Remove(AgentType.Deploy);
         pendingAgents.Remove(AgentType.Monitor);
         pendingAgents.Remove(AgentType.LoadTest);
@@ -621,7 +621,16 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                     if (s_feedbackAgents.Contains(agentType))
                         findingCountBeforeAgent[agentType] = context.Findings.Count;
 
-                    var success = await RunAgentWithHealingAsync(context, agent, ct);
+                    bool success;
+                    // Build agent uses the build→fix→rebuild cycle instead of a single run
+                    if (agentType == AgentType.Build)
+                    {
+                        success = await RunBuildFixCycleAsync(context, agent, ct);
+                    }
+                    else
+                    {
+                        success = await RunAgentWithHealingAsync(context, agent, ct);
+                    }
                     completedAgents[agentType] = success;
                     runningAgents.TryRemove(agentType, out _);
 
@@ -888,10 +897,10 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                         await RunAgentWithHealingAsync(context, backlogAgent, ct);
                 }
 
-                // Build → Fix → Rebuild
+                // Build → Fix → Rebuild (skip if Build already ran successfully via normal dispatch)
                 var buildAgent = _agents.FirstOrDefault(a => a.Type == AgentType.Build);
-                var buildPassed = true;
-                if (buildAgent is not null)
+                var buildPassed = completedAgents.TryGetValue(AgentType.Build, out var buildWasSuccess) && buildWasSuccess;
+                if (buildAgent is not null && !buildPassed)
                     buildPassed = await RunBuildFixCycleAsync(context, buildAgent, ct);
 
                 // Deploy → Monitor (only if build passed)
@@ -2062,6 +2071,10 @@ Return exactly 3 sections in markdown:
         ["infrastructure"] = AgentType.Infrastructure,
         ["documentation"]  = AgentType.ApiDocumentation,
         ["gap-analysis"]   = AgentType.GapAnalysis,
+        ["ui"]             = AgentType.UiUx,
+        ["frontend"]       = AgentType.UiUx,
+        ["blazor"]         = AgentType.UiUx,
+        ["razor"]          = AgentType.UiUx,
     };
 
     /// <summary>Maps agent type → the tags it can claim (reverse of s_tagToAgent).</summary>
@@ -2240,15 +2253,12 @@ Return exactly 3 sections in markdown:
             return GetRelevantTaskAgents(item).Contains(agentType.ToString());
         if (item.ItemType == WorkItemType.Bug)
             return agentType == AgentType.BugFix;
-        if (item.ItemType is WorkItemType.Epic or WorkItemType.UserStory)
-            return false;
-        if (item.ItemType == WorkItemType.UseCase && s_agentTags.ContainsKey(agentType))
-            return true;
+        // Epics, UserStories, and UseCases are not directly claimable — they roll up from child tasks
         return false;
     }
 
     private static bool IsActionableWorkItem(ExpandedRequirement item) =>
-        item.ItemType is WorkItemType.Task or WorkItemType.Bug or WorkItemType.UseCase;
+        item.ItemType is WorkItemType.Task or WorkItemType.Bug;
 
     private static bool IsActionableBacklogCompleted(AgentContext context)
     {

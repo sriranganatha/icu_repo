@@ -20,7 +20,8 @@
 
 
 
-the user story is junk,following is one of the USE CASE.
+the user story is junk and there are so many of them there is not context, component service etc,
+following is one of the USE CASE.
  Execute Key Requirements from Source Files Workflow
 Completed P2 Medium UseCase BRD
 ID: UC-BRD-001-01

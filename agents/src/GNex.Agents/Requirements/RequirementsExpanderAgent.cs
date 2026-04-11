@@ -274,13 +274,18 @@ public sealed class RequirementsExpanderAgent : IAgent
                     3. What needs testing beyond unit tests? (integration, E2E, contract tests)
                     4. What are the failure modes? (error handling, retries, observability)
 
-                    For EACH User Story, generate AT LEAST 4-6 Tasks covering:
+                    For EACH User Story, generate AT LEAST 5-7 Tasks covering:
                       - Define API contract (request/response schema, OpenAPI spec)
                       - Implement database entities/migrations/indexes
                       - Build service layer with validation and business logic
                       - Build API endpoint wiring service to HTTP
+                      - Build Razor Page / Blazor UI (list page, detail/edit form, navigation)
                       - Write integration tests for the endpoint
                       - Write E2E test for the full user flow
+
+                    IMPORTANT: This is a FULL-STACK web application. Every user-facing story
+                    MUST include a UI task tagged with "ui". The UI task creates Razor Pages
+                    or Blazor components that call the API endpoints. Do NOT skip the UI layer.
 
                     Tasks should be 2-8 hours of work, assignable to one person, with clear done state.
 
@@ -304,10 +309,11 @@ public sealed class RequirementsExpanderAgent : IAgent
                     - 1 Epic
                     - 3-5 User Stories (each with "As a [persona], I want [action] so that [value]")
                     - 1 Use Case per Epic (actor/system interaction flow)
-                    - 4-6 Tasks per User Story (contract, DB, service, API, integration test, E2E test)
+                    - 5-7 Tasks per User Story (contract, DB, service, API, UI/Razor page, integration test, E2E test)
 
                     That means for a module with 3 requirements, expect ~3 epics, ~12 stories,
-                    ~3 use cases, and ~60 tasks = ~78 items total. DO NOT produce fewer.
+                    ~3 use cases, and ~72 tasks = ~90 items total. DO NOT produce fewer.
+                    Every story MUST have a UI task with tag "ui" that builds the Razor Page or Blazor component.
 
                     ─── OUTPUT FORMAT ──────────────────────────────────────────────
                     Output EXACTLY in this pipe-delimited format — one item per line. NO markdown,
@@ -341,7 +347,7 @@ public sealed class RequirementsExpanderAgent : IAgent
                     - All items: HIPAA implications, multi-tenant isolation, audit trail requirements
 
                     ─── DEPENDENCY RULES ──────────────────────────────────────────
-                    Within a story: Contract → DB → Service → API → Integration Test → E2E Test
+                    Within a story: Contract → DB → Service → API → UI/Razor Page → Integration Test → E2E Test
                     Cross-service: PatientService before EncounterService, etc.
                     Reference specific task IDs in depends_on_ids when ordering matters.
                     """,
@@ -378,13 +384,17 @@ public sealed class RequirementsExpanderAgent : IAgent
                     actor/system interaction flow with numbered steps.
 
                     Step 5 — DECOMPOSE STORIES INTO TASKS:
-                    For each Story, generate 4-6 Tasks:
-                      1. Define API contract/schema (OpenAPI spec, request/response DTOs)
-                      2. Database entity/migration/index
-                      3. Service layer (validation, business logic, domain events)
-                      4. API endpoint (controller, routing, error responses)
-                      5. Integration tests (happy path, validation errors, auth failures)
-                      6. E2E test (full user flow from request to database verification)
+                    For each Story, generate 5-7 Tasks:
+                      1. Define API contract/schema (OpenAPI spec, request/response DTOs) — tag: contract
+                      2. Database entity/migration/index — tag: database
+                      3. Service layer (validation, business logic, domain events) — tag: service
+                      4. API endpoint (controller, routing, error responses) — tag: api
+                      5. Razor Page / Blazor UI (list page, detail view, create/edit forms) — tag: ui
+                      6. Integration tests (happy path, validation errors, auth failures) — tag: testing
+                      7. E2E test (full user flow from request to database verification) — tag: testing
+
+                    CRITICAL: Step 5 is MANDATORY for every user-facing story. This is a full-stack
+                    web application — every story must have a UI task that builds pages/forms/dashboards.
 
                     Step 6 — BUG REPORTS: Only if open findings indicate reproducible failures.
 
@@ -418,18 +428,8 @@ public sealed class RequirementsExpanderAgent : IAgent
                         Suggestion = "Inspect LLM output format for this module and ensure pipe-delimited templates are respected."
                     });
                 }
-                // Enrich items with service mappings from requirements
-                foreach (var item in moduleItems)
-                {
-                    if (item.AffectedServices.Count == 0)
-                    {
-                        var matchingReq = reqs.FirstOrDefault(r =>
-                            item.SourceRequirementId == r.Id ||
-                            item.Title.Contains(r.Title, StringComparison.OrdinalIgnoreCase));
-                        if (matchingReq is not null && reqServiceMap.TryGetValue(matchingReq.Id, out var svcs))
-                            item.AffectedServices.AddRange(svcs);
-                    }
-                }
+                // Enrich ALL items with service/entity/schema context — LLM primary, deterministic fallback
+                await EnrichItemsWithLlmAsync(moduleItems, reqs, module, reqServiceMap, ct);
                 _logger.LogInformation("Expanded {Module}: {Count} work items from LLM", module, moduleItems.Count);
                 if (context.ReportProgress is not null)
                 {
@@ -445,12 +445,12 @@ public sealed class RequirementsExpanderAgent : IAgent
                 moduleItems = CreateFallbackItems(reqs, module, iteration, reqServiceMap, reqDeps);
             }
 
-            var addedUseCases = EnsureUseCasesForModuleItems(moduleItems, module, iteration);
-            if (addedUseCases > 0 && context.ReportProgress is not null)
-                await context.ReportProgress(Type, $"Module '{module}' enforcement: synthesized {addedUseCases} use case(s) to satisfy template coverage");
-
             expanded.AddRange(moduleItems);
         }
+
+        // ── Step 3b: Deduplicate expanded items (same ID can appear from overlapping modules/re-runs) ──
+        var seenIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        expanded = expanded.Where(i => seenIds.Add(i.Id)).ToList();
 
         // ── Step 4: Resolve dependency chains across all expanded items ──
         ResolveExpandedDependencies(expanded, context.DomainModel);
@@ -594,7 +594,10 @@ public sealed class RequirementsExpanderAgent : IAgent
     // ─── Resolve dependencies across expanded items ────────────────────
     private static void ResolveExpandedDependencies(List<ExpandedRequirement> items, ParsedDomainModel? domainModel)
     {
-        var byId = items.ToDictionary(i => i.Id, StringComparer.OrdinalIgnoreCase);
+        // Use first-wins to handle any residual duplicates
+        var byId = new Dictionary<string, ExpandedRequirement>(StringComparer.OrdinalIgnoreCase);
+        foreach (var item in items)
+            byId.TryAdd(item.Id, item);
 
         foreach (var item in items)
         {
@@ -880,212 +883,527 @@ public sealed class RequirementsExpanderAgent : IAgent
         var items = new List<ExpandedRequirement>();
         var seq = 0;
 
-        // Persona-based vertical slices for healthcare ICU context
-        var slices = new[]
-        {
-            (Persona: "nurse", Action: "search and view", Value: "I can quickly find information during care delivery", Pts: 3, Labels: new List<string> { "Frontend", "API", "Database" }),
-            (Persona: "doctor", Action: "create and update", Value: "clinical documentation is accurate and up-to-date", Pts: 5, Labels: new List<string> { "Frontend", "API", "Database", "Validation" }),
-            (Persona: "admin", Action: "manage configuration and permissions for", Value: "the system meets facility operational policies", Pts: 3, Labels: new List<string> { "Frontend", "API", "Security" }),
-            (Persona: "system", Action: "validate data integrity and generate audit trails for", Value: "HIPAA regulatory compliance is maintained", Pts: 2, Labels: new List<string> { "API", "Database", "Security" }),
-            (Persona: "billing clerk", Action: "export and report on", Value: "revenue cycle operations run accurately", Pts: 3, Labels: new List<string> { "Frontend", "API", "Reporting" })
-        };
-
         foreach (var req in reqs)
         {
             seq++;
-            var epicId = $"EPIC-{module}-{seq:D3}";
+
+            // ── Resolve concrete service + entity context ──
             var services = serviceMap.TryGetValue(req.Id, out var sl) ? sl : [];
             var deps = depMap.TryGetValue(req.Id, out var dl) ? dl : [];
             var reqTitleLower = req.Title.ToLowerInvariant();
+
+            // If module is "General", try to infer a proper module from requirement content
+            var resolvedModule = module;
+            if (string.Equals(resolvedModule, "General", StringComparison.OrdinalIgnoreCase))
+            {
+                var inferredSvc = InferServiceFromContent(reqTitleLower, req.Description.ToLowerInvariant());
+                if (inferredSvc is not null)
+                {
+                    resolvedModule = inferredSvc.Replace("Service", "");
+                    if (services.Count == 0) services = [inferredSvc];
+                }
+            }
+
+            // Resolve the primary MicroserviceDefinition for rich context
+            var primarySvcDef = services.Count > 0
+                ? MicroserviceCatalog.ByName(services[0])
+                : null;
+            var svcName = primarySvcDef?.Name ?? (services.Count > 0 ? services[0] : "UnknownService");
+            var svcShort = primarySvcDef?.ShortName ?? resolvedModule.ToLowerInvariant();
+            var schema = primarySvcDef?.Schema ?? $"cl_{svcShort}";
+            var entities = primarySvcDef?.Entities ?? [];
+            var entityCsv = entities.Length > 0 ? string.Join(", ", entities) : req.Title;
+            var primaryEntity = entities.Length > 0 ? entities[0] : SanitizeEntityName(req.Title);
+            var svcNamespace = primarySvcDef?.Namespace ?? $"GNex.{resolvedModule}Service";
+            var svcDeps = primarySvcDef?.DependsOn ?? [];
+            var persona = InferPrimaryPersona(reqTitleLower, resolvedModule);
+
+            var epicId = $"EPIC-{resolvedModule}-{seq:D3}";
 
             // ── Epic ──
             items.Add(new ExpandedRequirement
             {
                 Id = epicId, ItemType = WorkItemType.Epic,
                 SourceRequirementId = req.Id, Title = req.Title,
-                Description = req.Description, Module = module,
+                Description = $"[{svcName}] {req.Description}",
+                Module = resolvedModule,
                 Priority = 2, Iteration = iteration,
-                Summary = req.Description,
-                BusinessValue = "Improves clinical workflow efficiency and patient safety for this module.",
+                Summary = $"Implement {req.Title} in {svcName} (schema: {schema}, entities: {entityCsv}). {req.Description}",
+                BusinessValue = $"Enables {persona} workflows for {req.Title} within the {svcName} bounded context.",
                 SuccessCriteria = req.AcceptanceCriteria.Count > 0
                     ? [.. req.AcceptanceCriteria.Take(5)]
-                    : ["Feature fully operational", "All acceptance criteria verified", "HIPAA compliance validated", "Audit trail complete"],
-                Scope = "Includes all CRUD operations, validation, and audit for this feature; excludes unrelated module refactors.",
+                    : [$"{primaryEntity} CRUD operations functional in {svcName}", "All acceptance criteria verified", "Audit trail entries created for every mutation", "Integration with dependent services ({string.Join(", ", svcDeps)}) verified"],
+                Scope = $"Scope: {svcName} ({schema}) — entities: {entityCsv}. Includes API endpoints, service layer, DB migrations, and tests.",
                 AffectedServices = [.. services],
                 DependsOn = [.. deps],
                 Status = WorkItemStatus.New,
                 ProducedBy = "RequirementsExpander"
             });
 
-            // ── Use Case ──
+            // ── Single User Story (primary persona) ──
+            var storyId = $"US-{resolvedModule}-{seq:D3}-01";
+
             items.Add(new ExpandedRequirement
             {
-                Id = $"UC-{module}-{seq:D3}-01",
-                ParentId = epicId,
-                ItemType = WorkItemType.UseCase,
-                Title = $"Execute {req.Title} Workflow",
-                Actor = "Nurse",
-                Preconditions = "User is authenticated and has appropriate role permissions",
-                MainFlow =
+                Id = storyId, ParentId = epicId,
+                ItemType = WorkItemType.UserStory,
+                SourceRequirementId = req.Id,
+                Title = $"As a {persona}, I want to manage {primaryEntity} records in {svcName} so that {req.Title} is handled correctly",
+                AcceptanceCriteria =
                 [
-                    $"1. User navigates to the {req.Title} screen",
-                    "2. System displays the relevant data list with search/filter",
-                    "3. User selects or creates a record",
-                    "4. System validates input against business rules",
-                    "5. User confirms the action",
-                    "6. System persists changes and creates audit log entry",
-                    "7. System displays confirmation with updated data"
+                    $"Given the {persona} is authenticated with {svcShort}-access role, when they create a {primaryEntity}, then the record is persisted in {schema} schema and an AuditEvent is emitted",
+                    $"Given a {primaryEntity} exists, when the {persona} updates it, then validation rules are enforced and the UpdatedAt timestamp is refreshed",
+                    $"Given the {persona} requests a list, when they call GET /api/{svcShort}/{primaryEntity.ToLowerInvariant()}s, then paginated results filtered by TenantId are returned within 2 seconds"
                 ],
-                AlternativeFlows = "Invalid input shows validation errors; Unauthorized user sees access denied; Network failure shows retry option",
-                Postconditions = "Data is persisted in database; Audit trail entry created; User sees confirmation",
-                Description = $"End-to-end workflow for {req.Title} covering primary and alternative flows",
-                Module = module, Priority = 2, Iteration = iteration,
+                StoryPoints = 5,
+                Labels = ["API", "Database", "Service", "UI"],
+                Description = $"Full CRUD lifecycle for {primaryEntity} in {svcName} ({schema}). Entities: {entityCsv}. Depends on: {(svcDeps.Length > 0 ? string.Join(", ", svcDeps) : "none")}.",
+                Module = resolvedModule, Priority = 2, Iteration = iteration,
                 AffectedServices = [.. services],
                 Status = WorkItemStatus.New,
                 ProducedBy = "RequirementsExpander"
             });
 
-            // ── User Stories (one per persona slice) ──
-            var storySeq = 0;
-            foreach (var slice in slices)
+            // ── 5 Tasks per story (vertical-slice decomposition: DB → SVC → API → UI → TEST) ──
+            var dbTaskId = $"TASK-{resolvedModule}-{seq:D3}-01-DB";
+            var svcTaskId = $"TASK-{resolvedModule}-{seq:D3}-01-SVC";
+            var apiTaskId = $"TASK-{resolvedModule}-{seq:D3}-01-API";
+            var uiTaskId = $"TASK-{resolvedModule}-{seq:D3}-01-UI";
+            var testTaskId = $"TASK-{resolvedModule}-{seq:D3}-01-TEST";
+
+            items.Add(new ExpandedRequirement
             {
-                storySeq++;
-                var storyId = $"US-{module}-{seq:D3}-{storySeq:D2}";
-                var storyAction = $"{slice.Action} {reqTitleLower} records";
+                Id = dbTaskId, ParentId = storyId,
+                ItemType = WorkItemType.Task,
+                Title = $"[{dbTaskId}] Create {primaryEntity} entity and migration in {svcName}",
+                Description = $"Create EF Core entity '{primaryEntity}' in {svcNamespace}.Entities, configure in {primarySvcDef?.DbContextName ?? "DbContext"}, add migration to schema '{schema}'.",
+                Module = resolvedModule, Priority = 2, Iteration = iteration,
+                Tags = ["database"],
+                AffectedServices = [.. services],
+                TechnicalNotes = $"Target schema: {schema}. Entity: {primaryEntity}. Fields: Id (text PK), TenantId (text FK, indexed), CreatedAt (timestamptz), UpdatedAt (timestamptz), IsActive (bool, default true), plus domain-specific fields from requirement. Create indexes on TenantId and primary lookup columns. Use PostgreSQL-friendly types.",
+                DefinitionOfDone = [$"Migration creates {primaryEntity} table in {schema}", "Indexes on TenantId and lookup columns verified", "Seed data present for dev/test", "Rollback migration tested"],
+                DetailedSpec = $"Namespace: {svcNamespace}.Entities. Entity class: {primaryEntity} with Id, TenantId, CreatedAt, UpdatedAt, IsActive. DbContext: {primarySvcDef?.DbContextName ?? resolvedModule + "DbContext"} — add DbSet<{primaryEntity}>. Configure entity in OnModelCreating with schema \"{schema}\". Add index on TenantId. {(svcDeps.Length > 0 ? $"FK relationships to: {string.Join(", ", svcDeps)}." : "")}",
+                Status = WorkItemStatus.New,
+                ProducedBy = "RequirementsExpander"
+            });
 
-                items.Add(new ExpandedRequirement
-                {
-                    Id = storyId, ParentId = epicId,
-                    ItemType = WorkItemType.UserStory,
-                    SourceRequirementId = req.Id,
-                    Title = $"As a {slice.Persona}, I want to {storyAction} so that {slice.Value}",
-                    AcceptanceCriteria =
-                    [
-                        $"Given the {slice.Persona} is authenticated, when they {storyAction}, then the system processes the request and displays results within 2 seconds",
-                        "Given invalid input is submitted, when the system validates, then clear error messages guide the user to correct the issue",
-                        "Given the operation completes, when the audit service records the action, then a complete audit trail entry exists"
-                    ],
-                    StoryPoints = slice.Pts,
-                    Labels = [.. slice.Labels],
-                    Description = $"End-to-end capability for a {slice.Persona} to {storyAction}",
-                    Module = module, Priority = 2, Iteration = iteration,
-                    AffectedServices = [.. services],
-                    Status = WorkItemStatus.New,
-                    ProducedBy = "RequirementsExpander"
-                });
+            items.Add(new ExpandedRequirement
+            {
+                Id = svcTaskId, ParentId = storyId,
+                ItemType = WorkItemType.Task,
+                Title = $"[{svcTaskId}] Implement I{primaryEntity}Service and {primaryEntity}Service in {svcName}",
+                Description = $"Create I{primaryEntity}Service interface and {primaryEntity}Service implementation in {svcNamespace}.Services with CRUD operations, FluentValidation, domain events, and TenantId filtering.",
+                Module = resolvedModule, Priority = 2, Iteration = iteration,
+                Tags = ["service"],
+                AffectedServices = [.. services],
+                DependsOn = [dbTaskId],
+                TechnicalNotes = $"Inject IRepository<{primaryEntity}>. Validator class: {primaryEntity}Validator (FluentValidation). Emit {primaryEntity}Created/{primaryEntity}Updated domain events via MediatR. All queries filtered by TenantId. Service logs every mutation to AuditService.",
+                DefinitionOfDone = [$"I{primaryEntity}Service interface defined", $"{primaryEntity}Service implements all CRUD methods", $"{primaryEntity}Validator enforces required fields", "Domain events emitted on Create/Update/Delete", "Unit tests >80% coverage"],
+                DetailedSpec = $"Interface: I{primaryEntity}Service in {svcNamespace}.Services. Methods: GetByIdAsync(string id, string tenantId), ListAsync(string tenantId, int page, int size), CreateAsync({primaryEntity}CreateDto dto, string tenantId), UpdateAsync(string id, {primaryEntity}UpdateDto dto, string tenantId), SoftDeleteAsync(string id, string tenantId). Each method: validate input → execute → emit domain event → log audit entry.",
+                Status = WorkItemStatus.New,
+                ProducedBy = "RequirementsExpander"
+            });
 
-                // ── 6 Tasks per story (vertical-slice decomposition) ──
-                var contractId = $"TASK-{module}-{seq:D3}-{storySeq:D2}-CONTRACT";
-                var dbTaskId = $"TASK-{module}-{seq:D3}-{storySeq:D2}-DB";
-                var svcTaskId = $"TASK-{module}-{seq:D3}-{storySeq:D2}-SVC";
-                var apiTaskId = $"TASK-{module}-{seq:D3}-{storySeq:D2}-API";
-                var intTestId = $"TASK-{module}-{seq:D3}-{storySeq:D2}-ITEST";
-                var e2eTestId = $"TASK-{module}-{seq:D3}-{storySeq:D2}-E2E";
+            var routeBase = $"api/{svcShort}/{primaryEntity.ToLowerInvariant()}s";
+            items.Add(new ExpandedRequirement
+            {
+                Id = apiTaskId, ParentId = storyId,
+                ItemType = WorkItemType.Task,
+                Title = $"[{apiTaskId}] Build {primaryEntity}Controller and DTOs in {svcName}",
+                Description = $"Create {primaryEntity}Controller at /{routeBase} in {svcNamespace}.Controllers with {primaryEntity}CreateDto, {primaryEntity}UpdateDto, {primaryEntity}ResponseDto. Wire to I{primaryEntity}Service.",
+                Module = resolvedModule, Priority = 2, Iteration = iteration,
+                Tags = ["api", "contract"],
+                AffectedServices = [.. services],
+                DependsOn = [svcTaskId],
+                TechnicalNotes = $"Controller route: [{routeBase}]. Inject I{primaryEntity}Service. Use [Authorize(Policy = \"{svcShort}-access\")]. Map service exceptions to ProblemDetails. Add [ProducesResponseType] for Swagger. X-Tenant-Id header → TenantId parameter.",
+                DefinitionOfDone = [$"GET /{routeBase} returns paginated list", $"GET /{routeBase}/{{id}} returns single record", $"POST /{routeBase} creates with 201 + Location header", $"PUT /{routeBase}/{{id}} updates with 200", $"DELETE /{routeBase}/{{id}} soft-deletes with 204", "Swagger documentation complete"],
+                DetailedSpec = $"DTOs in {svcNamespace}.Contracts: {primaryEntity}CreateDto (required fields + validation attributes), {primaryEntity}UpdateDto (partial update), {primaryEntity}ResponseDto (all fields + links). Controller: {primaryEntity}Controller [ApiController][Route(\"{routeBase}\")]. Endpoints: GET (list, paginated, filterable), GET/{{id}}, POST, PUT/{{id}}, DELETE/{{id}}. Status codes: 200, 201, 204, 400, 401, 403, 404, 422.",
+                Status = WorkItemStatus.New,
+                ProducedBy = "RequirementsExpander"
+            });
 
-                items.Add(new ExpandedRequirement
-                {
-                    Id = contractId, ParentId = storyId,
-                    ItemType = WorkItemType.Task,
-                    Title = $"[{contractId}] Define API contract for {storyAction}",
-                    Description = $"Define OpenAPI specification with request/response DTOs, routes, status codes, and validation schemas for {storyAction}.",
-                    Module = module, Priority = 2, Iteration = iteration,
-                    Tags = ["api", "contract"],
-                    AffectedServices = [.. services],
-                    TechnicalNotes = "Use OpenAPI 3.1 spec; Include X-Tenant-Id header; Define 200, 400, 401, 403, 404, 422 responses.",
-                    DefinitionOfDone = ["OpenAPI spec reviewed and approved", "DTO classes generated", "Contract tests written"],
-                    DetailedSpec = $"Define request DTO with required fields and validation attributes, response DTO with pagination. REST conventions for routes.",
-                    Status = WorkItemStatus.New,
-                    ProducedBy = "RequirementsExpander"
-                });
+            items.Add(new ExpandedRequirement
+            {
+                Id = uiTaskId, ParentId = storyId,
+                ItemType = WorkItemType.Task,
+                Title = $"[{uiTaskId}] Build {primaryEntity} Razor Pages (list, detail, form) in {svcName}",
+                Description = $"Create Razor Pages for {primaryEntity} management: Index (paginated list with search/filter), Detail (read-only view), Create/Edit (form with validation). Call {svcName} API at /{routeBase}. Use shared components (DataTable, FormSection, PatientCard) and hms-theme.css.",
+                Module = resolvedModule, Priority = 2, Iteration = iteration,
+                Tags = ["ui"],
+                AffectedServices = [.. services],
+                DependsOn = [apiTaskId],
+                TechnicalNotes = $"Pages in src/GNex.Web/Pages/{resolvedModule}/{primaryEntity}/. Index.cshtml (list with DataTable component, search, filter by status), Details.cshtml (read-only summary), Create.cshtml and Edit.cshtml (forms with FluentValidation client-side mirrors). Use HttpClient to call {svcName} API at /{routeBase}. Bootstrap 5.3 responsive layout. WCAG 2.1 AA accessible (ARIA labels, keyboard nav, focus management). Include breadcrumb navigation.",
+                DefinitionOfDone = [$"{primaryEntity} list page renders with pagination and search", $"{primaryEntity} create form submits and shows success toast", $"{primaryEntity} edit form loads existing data and saves changes", "Responsive layout works on mobile and desktop", "WCAG 2.1 AA: all form fields have labels, ARIA attributes present", "Navigation menu includes {primaryEntity} link"],
+                DetailedSpec = $"Pages: Pages/{resolvedModule}/{primaryEntity}/Index.cshtml (list), Pages/{resolvedModule}/{primaryEntity}/Details.cshtml (view), Pages/{resolvedModule}/{primaryEntity}/Create.cshtml (form), Pages/{resolvedModule}/{primaryEntity}/Edit.cshtml (form). PageModel classes inject HttpClient configured for {svcName} base URL. Use IHttpClientFactory with named client '{svcShort}-api'. DTOs: reuse {primaryEntity}ResponseDto, {primaryEntity}CreateDto, {primaryEntity}UpdateDto from API contracts. Layout: _Layout.cshtml with sidebar nav. CSS: hms-theme.css variables.",
+                Status = WorkItemStatus.New,
+                ProducedBy = "RequirementsExpander"
+            });
 
-                items.Add(new ExpandedRequirement
-                {
-                    Id = dbTaskId, ParentId = storyId,
-                    ItemType = WorkItemType.Task,
-                    Title = $"[{dbTaskId}] Implement database entities and migrations for {req.Title}",
-                    Description = $"Create EF Core entities, DbContext configuration, indexes, and migration for {req.Title}.",
-                    Module = module, Priority = 2, Iteration = iteration,
-                    Tags = ["database"],
-                    AffectedServices = [.. services],
-                    DependsOn = [contractId],
-                    TechnicalNotes = "PostgreSQL-friendly types; tenant isolation (TenantId FK); index lookup columns; soft-delete support.",
-                    DefinitionOfDone = ["Migration runs without errors", "Indexes verified", "Seed data present", "Rollback tested"],
-                    DetailedSpec = $"Entity with Id (text PK), TenantId, CreatedAt, UpdatedAt, IsActive, plus domain fields. Indexes on TenantId and lookups.",
-                    Status = WorkItemStatus.New,
-                    ProducedBy = "RequirementsExpander"
-                });
-
-                items.Add(new ExpandedRequirement
-                {
-                    Id = svcTaskId, ParentId = storyId,
-                    ItemType = WorkItemType.Task,
-                    Title = $"[{svcTaskId}] Implement service layer with validation for {storyAction}",
-                    Description = $"Build service class with CRUD operations, FluentValidation rules, domain events, and multi-tenant filtering for {storyAction}.",
-                    Module = module, Priority = 2, Iteration = iteration,
-                    Tags = ["service"],
-                    AffectedServices = [.. services],
-                    DependsOn = [dbTaskId],
-                    TechnicalNotes = "Inject IRepository; Use FluentValidation; Emit domain events for audit; All queries filtered by TenantId.",
-                    DefinitionOfDone = ["Unit tests passing (>80% coverage)", "Validation rules tested", "Domain events emitted", "Exception handling complete"],
-                    DetailedSpec = $"Service implements interface. Methods: GetByIdAsync, ListAsync (paginated), CreateAsync, UpdateAsync, SoftDeleteAsync. All operations log to audit trail.",
-                    Status = WorkItemStatus.New,
-                    ProducedBy = "RequirementsExpander"
-                });
-
-                items.Add(new ExpandedRequirement
-                {
-                    Id = apiTaskId, ParentId = storyId,
-                    ItemType = WorkItemType.Task,
-                    Title = $"[{apiTaskId}] Build API endpoint for {storyAction}",
-                    Description = $"Create ASP.NET Core controller with route mapping, model binding, authorization attributes, and error responses for {storyAction}.",
-                    Module = module, Priority = 2, Iteration = iteration,
-                    Tags = ["api"],
-                    AffectedServices = [.. services],
-                    DependsOn = [svcTaskId],
-                    TechnicalNotes = "Use [Authorize] with role policy; Map service exceptions to HTTP status codes; Add response caching for reads.",
-                    DefinitionOfDone = ["All routes return correct status codes", "Authorization tested", "Swagger documentation complete", "Rate limiting configured"],
-                    DetailedSpec = $"Controller with GET (list+detail), POST, PUT, DELETE endpoints. Use ProblemDetails for errors. Add [ProducesResponseType] for Swagger.",
-                    Status = WorkItemStatus.New,
-                    ProducedBy = "RequirementsExpander"
-                });
-
-                items.Add(new ExpandedRequirement
-                {
-                    Id = intTestId, ParentId = storyId,
-                    ItemType = WorkItemType.Task,
-                    Title = $"[{intTestId}] Write integration tests for {storyAction}",
-                    Description = $"Create integration tests covering happy path, validation errors, auth failures, not-found, and concurrent access for {storyAction}.",
-                    Module = module, Priority = 3, Iteration = iteration,
-                    Tags = ["testing"],
-                    AffectedServices = [.. services],
-                    DependsOn = [apiTaskId],
-                    TechnicalNotes = "Use WebApplicationFactory; Test with real DB (in-memory or TestContainers); Cover auth bypass and tenant isolation.",
-                    DefinitionOfDone = ["Happy path tested", "Validation error responses tested", "401/403 tested", "404 tested", "Concurrent writes tested"],
-                    DetailedSpec = $"Test scenarios: create+read round-trip, duplicate prevention, invalid input (422), unauthorized (401), forbidden (403), not found (404), optimistic concurrency.",
-                    Status = WorkItemStatus.New,
-                    ProducedBy = "RequirementsExpander"
-                });
-
-                items.Add(new ExpandedRequirement
-                {
-                    Id = e2eTestId, ParentId = storyId,
-                    ItemType = WorkItemType.Task,
-                    Title = $"[{e2eTestId}] Write E2E test for {slice.Persona} {storyAction} flow",
-                    Description = $"Create end-to-end test simulating the complete {slice.Persona} journey from login through {storyAction} to verification.",
-                    Module = module, Priority = 3, Iteration = iteration,
-                    Tags = ["testing", "e2e"],
-                    AffectedServices = [.. services],
-                    DependsOn = [intTestId],
-                    TechnicalNotes = "Use Playwright or similar; Test against staging-like environment; Verify database state after operations.",
-                    DefinitionOfDone = ["Complete user journey tested", "Data persistence verified", "Audit log entries verified", "Performance within SLA"],
-                    DetailedSpec = $"E2E flow: authenticate as {slice.Persona} -> navigate to feature -> perform {storyAction} -> verify UI feedback -> verify DB records -> verify audit log entry.",
-                    Status = WorkItemStatus.New,
-                    ProducedBy = "RequirementsExpander"
-                });
-            }
+            items.Add(new ExpandedRequirement
+            {
+                Id = testTaskId, ParentId = storyId,
+                ItemType = WorkItemType.Task,
+                Title = $"[{testTaskId}] Write tests for {primaryEntity} in {svcName}",
+                Description = $"Create unit tests for {primaryEntity}Service and {primaryEntity}Validator, plus integration tests for {primaryEntity}Controller using WebApplicationFactory against {schema} schema.",
+                Module = resolvedModule, Priority = 3, Iteration = iteration,
+                Tags = ["testing"],
+                AffectedServices = [.. services],
+                DependsOn = [uiTaskId],
+                TechnicalNotes = $"Unit tests: test {primaryEntity}Service.CreateAsync with valid/invalid data, test {primaryEntity}Validator rules, test TenantId isolation. Integration tests: use WebApplicationFactory<Program>, test against real PostgreSQL (TestContainers) with schema {schema}. Verify audit events emitted.",
+                DefinitionOfDone = [$"Create {primaryEntity} happy-path tested", $"Update {primaryEntity} with validation errors tested", "Unauthorized access (401/403) tested", "Not found (404) tested", "TenantId isolation verified", "Audit trail entry exists after mutation"],
+                DetailedSpec = $"Test project: {svcNamespace}.Tests. Test classes: {primaryEntity}ServiceTests (unit), {primaryEntity}ValidatorTests (unit), {primaryEntity}ControllerTests (integration). Scenarios: create+read round-trip, duplicate prevention, invalid input → 422, unauthorized → 401, forbidden → 403, not found → 404, tenant isolation (user A cannot see user B data), audit event logged after POST/PUT/DELETE.",
+                Status = WorkItemStatus.New,
+                ProducedBy = "RequirementsExpander"
+            });
         }
 
         return items;
+    }
+
+    /// <summary>Infer a service name from requirement title and description content.</summary>
+    private static string? InferServiceFromContent(string titleLower, string descLower)
+    {
+        var combined = $"{titleLower} {descLower}";
+        foreach (var svc in MicroserviceCatalog.All)
+        {
+            var svcLower = svc.Name.Replace("Service", "").ToLowerInvariant();
+            if (combined.Contains(svcLower) ||
+                svc.Entities.Any(e => combined.Contains(e.ToLowerInvariant())))
+                return svc.Name;
+        }
+        return InferServiceFromModule(combined);
+    }
+
+    /// <summary>Derive a PascalCase entity name from a requirement title.</summary>
+    private static string SanitizeEntityName(string title)
+    {
+        // Take the first meaningful words (up to 3) and PascalCase them
+        var words = Regex.Replace(title, @"[^a-zA-Z0-9\s]", "")
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+            .Where(w => w.Length > 2 && !s_stopWords.Contains(w.ToLowerInvariant()))
+            .Take(3)
+            .Select(w => char.ToUpperInvariant(w[0]) + w[1..].ToLowerInvariant())
+            .ToArray();
+        return words.Length > 0 ? string.Join("", words) : "DomainRecord";
+    }
+
+    private static readonly HashSet<string> s_stopWords = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "the", "and", "for", "from", "with", "into", "that", "this", "are", "was",
+        "will", "can", "has", "have", "should", "must", "all", "any", "each", "new",
+        "key", "core", "main", "execute", "process", "workflow", "system", "define"
+    };
+
+    /// <summary>Infer primary persona based on requirement content and module context.</summary>
+    private static string InferPrimaryPersona(string reqTitleLower, string module)
+    {
+        var moduleLower = module.ToLowerInvariant();
+        if (moduleLower.Contains("billing") || moduleLower.Contains("revenue") || moduleLower.Contains("claim"))
+            return "billing clerk";
+        if (moduleLower.Contains("admin") || moduleLower.Contains("config") || moduleLower.Contains("permission"))
+            return "administrator";
+        if (moduleLower.Contains("audit") || moduleLower.Contains("compliance"))
+            return "compliance officer";
+        if (reqTitleLower.Contains("diagnosis") || reqTitleLower.Contains("prescription") || reqTitleLower.Contains("treatment"))
+            return "doctor";
+        if (reqTitleLower.Contains("admin") || reqTitleLower.Contains("config") || reqTitleLower.Contains("permission"))
+            return "administrator";
+        if (reqTitleLower.Contains("billing") || reqTitleLower.Contains("claim") || reqTitleLower.Contains("invoice"))
+            return "billing clerk";
+        return "nurse";
+    }
+
+    /// <summary>
+    /// LLM-powered enrichment: sends work items + microservice catalog to the LLM to resolve
+    /// which service, schema, entity, and namespace each item belongs to. Falls back to the
+    /// deterministic <see cref="EnrichItemsWithServiceContext"/> when the LLM call fails.
+    /// </summary>
+    private async Task EnrichItemsWithLlmAsync(
+        List<ExpandedRequirement> items,
+        List<Requirement> reqs,
+        string module,
+        Dictionary<string, List<string>> reqServiceMap,
+        CancellationToken ct)
+    {
+        if (items.Count == 0) return;
+
+        // Build a compact catalog summary for the prompt
+        var catalogLines = MicroserviceCatalog.All.Select(s =>
+            $"- {s.Name} (schema: {s.Schema}, entities: [{string.Join(", ", s.Entities)}], " +
+            $"ns: {s.Namespace}, port: {s.ApiPort}, depends: [{string.Join(", ", s.DependsOn)}])");
+        var catalogBlock = string.Join("\n", catalogLines);
+
+        // Build compact item summaries: ID | Type | Title | Module | Description (first 120 chars)
+        var itemLines = items.Select(i =>
+        {
+            var desc = (i.Description ?? "").Length > 120 ? (i.Description ?? "")[..120] : (i.Description ?? "");
+            return $"{i.Id}|{i.ItemType}|{i.Title}|{i.Module}|{desc}";
+        });
+        var itemBlock = string.Join("\n", itemLines);
+
+        var prompt = new LlmPrompt
+        {
+            SystemPrompt = """
+                You are a healthcare software architect mapping work items to concrete microservices.
+
+                Given a list of work items and a microservice catalog, determine which service(s)
+                each item belongs to. For EACH item, output a single pipe-delimited line:
+
+                <item_id>|<service_name>|<primary_entity>|<enrichment_note>
+
+                Rules:
+                - service_name: MUST be one of the service names from the catalog (e.g. PatientService)
+                - primary_entity: The main entity this item works with (from the service's entity list)
+                - enrichment_note: One sentence describing what this item does in context of the service
+                - If an item touches multiple services, pick the PRIMARY one
+                - If you cannot determine the service, use "UNKNOWN"
+
+                Output ONLY pipe-delimited lines. NO markdown, NO explanations, NO blank lines.
+                """,
+            UserPrompt = $"""
+                === MICROSERVICE CATALOG ===
+                {catalogBlock}
+
+                === MODULE: {module} ===
+
+                === WORK ITEMS ({items.Count} items) ===
+                Format: ID|Type|Title|Module|Description
+                {itemBlock}
+
+                Map each item to its target microservice and primary entity.
+                """,
+            Temperature = 0.1,
+            MaxTokens = 4096,
+            RequestingAgent = Name
+        };
+
+        var response = await _llm.GenerateAsync(prompt, ct);
+        if (!response.Success || string.IsNullOrWhiteSpace(response.Content))
+        {
+            _logger.LogWarning("LLM enrichment failed for {Module}, using deterministic fallback: {Error}",
+                module, response.Error ?? "empty response");
+            EnrichItemsWithServiceContext(items, reqs, module, reqServiceMap);
+            return;
+        }
+
+        // Parse LLM mapping and build a lookup: itemId → (serviceName, primaryEntity, note)
+        var itemLookup = new Dictionary<string, ExpandedRequirement>(StringComparer.OrdinalIgnoreCase);
+        foreach (var item in items)
+            itemLookup.TryAdd(item.Id, item);
+        var mapped = 0;
+
+        foreach (var line in response.Content.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var parts = line.Split('|');
+            if (parts.Length < 3) continue;
+
+            var itemId = parts[0].Trim();
+            var svcName = parts[1].Trim();
+            var entity = parts[2].Trim();
+            var note = parts.Length > 3 ? parts[3].Trim() : "";
+
+            if (!itemLookup.TryGetValue(itemId, out var item)) continue;
+            if (string.Equals(svcName, "UNKNOWN", StringComparison.OrdinalIgnoreCase)) continue;
+
+            var svcDef = MicroserviceCatalog.ByName(svcName);
+            if (svcDef is null) continue;
+
+            mapped++;
+
+            // Apply service to AffectedServices
+            if (!item.AffectedServices.Contains(svcDef.Name, StringComparer.OrdinalIgnoreCase))
+                item.AffectedServices.Add(svcDef.Name);
+
+            // Fix module from "General"
+            if (string.Equals(item.Module, "General", StringComparison.OrdinalIgnoreCase))
+                item.Module = svcDef.Name.Replace("Service", "");
+
+            var schema = svcDef.Schema;
+            var entityCsv = string.Join(", ", svcDef.Entities);
+            var ns = svcDef.Namespace;
+            var svcShort = svcDef.ShortName;
+            var depsCsv = svcDef.DependsOn.Length > 0 ? string.Join(", ", svcDef.DependsOn) : "none";
+            var primaryEntity = !string.IsNullOrWhiteSpace(entity) && svcDef.Entities.Contains(entity)
+                ? entity
+                : (svcDef.Entities.Length > 0 ? svcDef.Entities[0] : SanitizeEntityName(item.Title));
+
+            // Stamp fields based on item type
+            switch (item.ItemType)
+            {
+                case WorkItemType.Epic:
+                    if (!item.Description.Contains(svcDef.Name))
+                        item.Description = $"[{svcDef.Name}] {item.Description}";
+                    item.Summary = $"Implement in {svcDef.Name} (schema: {schema}, entities: {entityCsv}). {note}".Trim();
+                    item.Scope = $"Scope: {svcDef.Name} ({schema}) — entities: {entityCsv}.";
+                    break;
+
+                case WorkItemType.UserStory:
+                    if (!item.Description.Contains(svcDef.Name))
+                        item.Description = $"[{svcDef.Name} | {entityCsv}] {item.Description}";
+                    item.DetailedSpec = $"Service: {svcDef.Name}, Schema: {schema}, Entities: {entityCsv}, Namespace: {ns}, Dependencies: {depsCsv}. {note}".Trim();
+                    break;
+
+                case WorkItemType.UseCase:
+                    if (!item.Description.Contains(svcDef.Name))
+                        item.Description = $"[{svcDef.Name} | {primaryEntity}] {item.Description}";
+                    item.Postconditions = $"Data persisted in {schema} schema via {svcDef.Name}. {note}".Trim();
+                    break;
+
+                case WorkItemType.Task:
+                    if (!item.Description.Contains(svcDef.Name))
+                        item.Description = $"[{svcDef.Name} | {schema}] {item.Description}";
+                    item.TechnicalNotes = $"Service: {svcDef.Name}, Schema: {schema}, Entities: {entityCsv}, Namespace: {ns}, Port: {svcDef.ApiPort}, Dependencies: {depsCsv}. {note}".Trim();
+                    item.DetailedSpec = $"Target: {svcDef.Name} ({ns}), Schema: {schema}, Primary Entity: {primaryEntity}, Route: api/{svcShort}/{primaryEntity.ToLowerInvariant()}s. {note}".Trim();
+                    break;
+
+                case WorkItemType.Bug:
+                    if (!item.Description.Contains(svcDef.Name))
+                        item.Description = $"[{svcDef.Name} | {schema}] {item.Description}";
+                    item.Environment = $".NET 10, PostgreSQL 16 | Service: {svcDef.Name}, Schema: {schema}, Entities: {entityCsv}";
+                    item.TechnicalNotes = $"Investigate in {ns}. Check {primaryEntity} entity, {schema} schema. Dependencies: {depsCsv}. {note}".Trim();
+                    break;
+            }
+        }
+
+        _logger.LogInformation("LLM enrichment mapped {Mapped}/{Total} items for module {Module}",
+            mapped, items.Count, module);
+
+        // Fallback: deterministic enrichment for items the LLM didn't map
+        if (mapped < items.Count)
+        {
+            var unmappedItems = items.Where(i =>
+                i.AffectedServices.Count == 0 ||
+                string.Equals(i.Module, "General", StringComparison.OrdinalIgnoreCase)).ToList();
+
+            if (unmappedItems.Count > 0)
+            {
+                _logger.LogInformation("Deterministic fallback enriching {Count} unmapped items", unmappedItems.Count);
+                EnrichItemsWithServiceContext(unmappedItems, reqs, module, reqServiceMap);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Post-process enrichment: stamps every item with concrete service, entity, schema,
+    /// namespace, and route context so downstream agents know exactly what to build.
+    /// Works for ALL item types: Epic, UserStory, UseCase, Task, Bug.
+    /// </summary>
+    private static void EnrichItemsWithServiceContext(
+        List<ExpandedRequirement> items,
+        List<Requirement> reqs,
+        string module,
+        Dictionary<string, List<string>> reqServiceMap)
+    {
+        foreach (var item in items)
+        {
+            // ── 1. Resolve AffectedServices if missing ──
+            if (item.AffectedServices.Count == 0)
+            {
+                var matchingReq = reqs.FirstOrDefault(r =>
+                    item.SourceRequirementId == r.Id ||
+                    item.Title.Contains(r.Title, StringComparison.OrdinalIgnoreCase));
+                if (matchingReq is not null && reqServiceMap.TryGetValue(matchingReq.Id, out var svcs))
+                    item.AffectedServices.AddRange(svcs);
+            }
+
+            // ── 2. Resolve module from "General" ──
+            if (string.Equals(item.Module, "General", StringComparison.OrdinalIgnoreCase))
+            {
+                var inferredSvc = InferServiceFromContent(
+                    item.Title.ToLowerInvariant(),
+                    (item.Description ?? "").ToLowerInvariant());
+                if (inferredSvc is not null)
+                    item.Module = inferredSvc.Replace("Service", "");
+            }
+
+            // If still General but we have AffectedServices, derive module from service
+            if (string.Equals(item.Module, "General", StringComparison.OrdinalIgnoreCase)
+                && item.AffectedServices.Count > 0)
+            {
+                item.Module = item.AffectedServices[0].Replace("Service", "");
+            }
+
+            // ── 3. Resolve service definition ──
+            var primarySvcDef = item.AffectedServices.Count > 0
+                ? MicroserviceCatalog.ByName(item.AffectedServices[0])
+                : null;
+
+            // Try to resolve from module if no service matched
+            if (primarySvcDef is null)
+            {
+                var svcName = InferServiceFromModule(item.Module);
+                if (svcName is not null)
+                {
+                    primarySvcDef = MicroserviceCatalog.ByName(svcName);
+                    if (primarySvcDef is not null && item.AffectedServices.Count == 0)
+                        item.AffectedServices.Add(svcName);
+                }
+            }
+
+            if (primarySvcDef is null) continue; // Can't enrich without a service definition
+
+            var svcLabel = primarySvcDef.Name;
+            var schema = primarySvcDef.Schema;
+            var entities = primarySvcDef.Entities;
+            var entityCsv = string.Join(", ", entities);
+            var primaryEntity = entities.Length > 0 ? entities[0] : SanitizeEntityName(item.Title);
+            var ns = primarySvcDef.Namespace;
+            var svcShort = primarySvcDef.ShortName;
+            var depsCsv = primarySvcDef.DependsOn.Length > 0 ? string.Join(", ", primarySvcDef.DependsOn) : "none";
+
+            // ── 4. Enrich by item type ──
+            switch (item.ItemType)
+            {
+                case WorkItemType.Epic:
+                    if (!item.Description.Contains(svcLabel))
+                        item.Description = $"[{svcLabel}] {item.Description}";
+                    if (string.IsNullOrWhiteSpace(item.Summary) || !item.Summary.Contains(svcLabel))
+                        item.Summary = $"Implement in {svcLabel} (schema: {schema}, entities: {entityCsv}). {item.Summary}";
+                    if (string.IsNullOrWhiteSpace(item.Scope) || !item.Scope.Contains(schema))
+                        item.Scope = $"Scope: {svcLabel} ({schema}) — entities: {entityCsv}. {item.Scope}";
+                    break;
+
+                case WorkItemType.UserStory:
+                    if (!item.Description.Contains(svcLabel))
+                        item.Description = $"[{svcLabel} | {entityCsv}] {item.Description}";
+                    if (string.IsNullOrWhiteSpace(item.DetailedSpec) || !item.DetailedSpec.Contains(svcLabel))
+                        item.DetailedSpec = $"Service: {svcLabel}, Schema: {schema}, Entities: {entityCsv}, Dependencies: {depsCsv}. {item.DetailedSpec}";
+                    break;
+
+                case WorkItemType.UseCase:
+                    if (!item.Description.Contains(svcLabel))
+                        item.Description = $"[{svcLabel} | {primaryEntity}] {item.Description}";
+                    if (string.IsNullOrWhiteSpace(item.Postconditions) || !item.Postconditions.Contains(schema))
+                        item.Postconditions = $"{item.Postconditions} Data persisted in {schema} schema via {svcLabel}.";
+                    break;
+
+                case WorkItemType.Task:
+                    if (!item.Description.Contains(svcLabel))
+                        item.Description = $"[{svcLabel} | {schema}] {item.Description}";
+                    // Enrich TechnicalNotes with entity/schema specifics
+                    if (!string.IsNullOrWhiteSpace(item.TechnicalNotes) && !item.TechnicalNotes.Contains(schema))
+                        item.TechnicalNotes = $"Service: {svcLabel}, Schema: {schema}, Entities: {entityCsv}, Namespace: {ns}. {item.TechnicalNotes}";
+                    else if (string.IsNullOrWhiteSpace(item.TechnicalNotes))
+                        item.TechnicalNotes = $"Service: {svcLabel}, Schema: {schema}, Entities: {entityCsv}, Namespace: {ns}, Port: {primarySvcDef.ApiPort}, Dependencies: {depsCsv}.";
+                    // Enrich DetailedSpec
+                    if (!string.IsNullOrWhiteSpace(item.DetailedSpec) && !item.DetailedSpec.Contains(svcLabel))
+                        item.DetailedSpec = $"Target: {svcLabel} ({ns}), Schema: {schema}, Primary Entity: {primaryEntity}. {item.DetailedSpec}";
+                    else if (string.IsNullOrWhiteSpace(item.DetailedSpec))
+                        item.DetailedSpec = $"Target: {svcLabel} ({ns}), Schema: {schema}, Primary Entity: {primaryEntity}, Entities: {entityCsv}, API Port: {primarySvcDef.ApiPort}, Route: api/{svcShort}/{primaryEntity.ToLowerInvariant()}s.";
+                    break;
+
+                case WorkItemType.Bug:
+                    if (!item.Description.Contains(svcLabel))
+                        item.Description = $"[{svcLabel} | {schema}] {item.Description}";
+                    if (!string.IsNullOrWhiteSpace(item.Environment) && !item.Environment.Contains(svcLabel))
+                        item.Environment = $"{item.Environment} | Service: {svcLabel}, Schema: {schema}, Entities: {entityCsv}";
+                    else if (string.IsNullOrWhiteSpace(item.Environment))
+                        item.Environment = $".NET 10, PostgreSQL 16 | Service: {svcLabel}, Schema: {schema}, Entities: {entityCsv}";
+                    if (string.IsNullOrWhiteSpace(item.TechnicalNotes))
+                        item.TechnicalNotes = $"Investigate in {ns}. Check {primaryEntity} entity, {schema} schema. Dependencies: {depsCsv}.";
+                    break;
+            }
+        }
     }
 
     private static string? InferServiceFromModule(string module) => module.ToLowerInvariant() switch
@@ -1337,6 +1655,9 @@ public sealed class RequirementsExpanderAgent : IAgent
         var t = title.ToLowerInvariant();
         if (t.Contains("database") || t.Contains("schema") || t.Contains("migration")) return ["database"];
         if (t.Contains("test")) return ["testing"];
+        if (t.Contains("razor") || t.Contains("blazor") || t.Contains("page") || t.Contains("component") ||
+            t.Contains("form") || t.Contains("dashboard") || t.Contains("layout") || t.Contains("ui ") ||
+            t.Contains("frontend") || t.Contains("view")) return ["ui"];
         if (t.Contains("api") || t.Contains("endpoint")) return ["api", "service"];
         return ["service"];
     }
@@ -1435,7 +1756,9 @@ public sealed class RequirementsExpanderAgent : IAgent
         List<RequirementQualityScore> scores,
         int pass)
     {
-        var scoreById = scores.ToDictionary(s => s.RequirementId, StringComparer.OrdinalIgnoreCase);
+        var scoreById = new Dictionary<string, RequirementQualityScore>(StringComparer.OrdinalIgnoreCase);
+        foreach (var s in scores)
+            scoreById.TryAdd(s.RequirementId, s);
         var improved = new List<Requirement>(requirements.Count);
 
         foreach (var req in requirements)
