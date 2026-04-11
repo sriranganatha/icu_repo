@@ -136,6 +136,22 @@ public sealed class SignalRPipelineEventSink : IPipelineEventSink
                     TechnicalNotes = e.TechnicalNotes,
                     DefinitionOfDone = e.DefinitionOfDone,
                     DetailedSpec = e.DetailedSpec,
+                    // Epic fields
+                    Summary = e.Summary, BusinessValue = e.BusinessValue,
+                    SuccessCriteria = e.SuccessCriteria, Scope = e.Scope,
+                    // Story fields
+                    StoryPoints = e.StoryPoints, Labels = e.Labels,
+                    // Use Case fields
+                    Actor = e.Actor, Preconditions = e.Preconditions,
+                    MainFlow = e.MainFlow, AlternativeFlows = e.AlternativeFlows,
+                    Postconditions = e.Postconditions,
+                    // Bug fields
+                    Severity = e.Severity, Environment = e.Environment,
+                    StepsToReproduce = e.StepsToReproduce,
+                    ExpectedResult = e.ExpectedResult, ActualResult = e.ActualResult,
+                    // Gap-analysis fields
+                    AffectedServices = e.AffectedServices, ProducedBy = e.ProducedBy,
+                    Coverage = e.Coverage.ToString(),
                     CreatedAt = e.CreatedAt, StartedAt = e.StartedAt, CompletedAt = e.CompletedAt,
                     AssignedAgent = e.AssignedAgent
                 }));

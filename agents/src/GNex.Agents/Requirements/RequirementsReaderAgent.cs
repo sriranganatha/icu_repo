@@ -108,11 +108,11 @@ public sealed class RequirementsReaderAgent : IAgent
         var prompt = new LlmPrompt
         {
             SystemPrompt = """
-                You are a requirements classifier for a healthcare HMS.
+                You are a requirements classifier for a software project.
                 Classify each requirement with module and tags.
                 Output ONLY lines in format: REQ_ID|module|tag1,tag2,tag3
-                Modules: Patient, Encounter, Billing, Emergency, Lab, Pharmacy, Admin, Security, Integration
-                Tags: database, api, service, ui, security, hipaa, nfr, integration, fhir, hl7
+                Modules: Infer appropriate module names from the requirement content (e.g. Core, Auth, Data, Reporting, Integration, Admin, API, UI)
+                Tags: database, api, service, ui, security, nfr, integration, compliance, infrastructure, testing
                 """,
             UserPrompt = $"Classify these {untagged.Count} requirements:\n{summary}",
             Temperature = 0.2,

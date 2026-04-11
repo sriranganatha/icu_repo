@@ -121,6 +121,9 @@
                                     <a href="/Brd/Edit?projectId=${p.projectId}" class="btn btn-sm btn-outline-primary flex-fill">
                                         <i class="bi bi-pencil-square me-1"></i>Edit
                                     </a>
+                                    <button class="btn btn-sm btn-outline-danger flex-fill" onclick="event.stopPropagation(); deleteBrd('${p.projectId}', '${(p.projectName || '').replace(/'/g, "\\'")}')">
+                                        <i class="bi bi-trash me-1"></i>Delete
+                                    </button>
                                 </div>
                             </div>
                         </div>
@@ -131,6 +134,21 @@
                 document.getElementById('brdList').innerHTML = '<div class="col-12 text-center text-muted py-5"><i class="bi bi-inbox fs-1"></i><p class="mt-2">No BRD documents yet. <a href="/Brd/Upload">Upload requirements</a> to generate one.</p></div>';
             }
         } catch (e) { console.warn('Could not load BRD projects:', e); }
+    }
+
+    async function deleteBrd(projectId, projectName) {
+        if (!confirm(`Delete BRD "${projectName}"? This will remove all sections and cannot be undone.`)) return;
+        try {
+            const res = await fetch(`/api/brd/${encodeURIComponent(projectId)}/sections`, { method: 'DELETE' });
+            if (res.ok) {
+                loadBrdProjects();
+            } else {
+                const err = await res.json().catch(() => ({}));
+                alert('Failed to delete: ' + (err.error || res.statusText));
+            }
+        } catch (e) {
+            alert('Error deleting BRD: ' + e.message);
+        }
     }
 
     // Tab filtering

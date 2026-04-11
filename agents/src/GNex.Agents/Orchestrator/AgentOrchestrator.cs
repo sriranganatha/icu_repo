@@ -399,12 +399,13 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
     /// <summary>
     /// Core daemon loop extracted for reuse by both <see cref="RunPipelineAsync"/>
     /// and <see cref="RunProjectPipelineAsync"/> (legacy fallback).
+    /// Reuses the pre-built context so project-scoped state (ProjectId, workflow data) is preserved.
     /// </summary>
     private Task<AgentContext> RunDaemonLoopCoreAsync(AgentContext context, PipelineConfig config, CancellationToken ct)
     {
-        // Delegate to the existing RunPipelineAsync logic.
-        // The context is already set on _current, so RunPipelineAsync will use it.
-        return RunPipelineAsync(config, ct);
+        _current = context;
+        _taskCompletedBy.Clear();
+        return RunDaemonLoopAsync(context, config, ct);
     }
 
     // ─── Mid-Pipeline Requirement Injection ────────────────────────
@@ -504,6 +505,12 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
         _taskCompletedBy.Clear();
         _current = context;
 
+        return await RunDaemonLoopAsync(context, config, ct);
+    }
+
+    /// <summary>Shared daemon loop implementation used by both RunPipelineAsync and RunDaemonLoopCoreAsync.</summary>
+    private async Task<AgentContext> RunDaemonLoopAsync(AgentContext context, PipelineConfig config, CancellationToken ct)
+    {
         // Apply WIP limits from config to lifecycle policy
         _lifecycle.MaxQueueItems = config.MaxQueueItems > 0 ? config.MaxQueueItems : 10;
         _lifecycle.MaxInDevItems = config.MaxInDevItems > 0 ? config.MaxInDevItems : 10;

@@ -74,6 +74,11 @@ public sealed class BugFixAgent : IAgent
                     "Implementation" => FixIncompleteImplementation(artifact, finding, context),
                     "MultiTenant" => FixMissingTenantId(artifact, finding),
                     "Audit" => FixMissingAuditColumns(artifact, finding),
+                    // Apply generic fixes for additional categories
+                    "Security" or "Traceability" or "Coverage" or "FeatureCoverage"
+                        or "TestCoverage" or "Conventions" => FixTodoComments(artifact, finding, context),
+                    "Build" or "Deployment" or "Runtime" or "Database"
+                        => FixIncompleteImplementation(artifact, finding, context),
                     _ => false
                 };
 
@@ -123,6 +128,7 @@ public sealed class BugFixAgent : IAgent
 
     private bool FixTodoComments(CodeArtifact artifact, ReviewFinding finding, AgentContext context)
     {
+        var originalContent = artifact.Content;
         var content = artifact.Content;
         var todoPattern = new Regex(@"^\s*//\s*TODO:?.*$", RegexOptions.Multiline);
 
@@ -146,7 +152,7 @@ public sealed class BugFixAgent : IAgent
         }
 
         artifact.Content = content;
-        return content != artifact.Content || !todoPattern.IsMatch(artifact.Content);
+        return content != originalContent || !todoPattern.IsMatch(artifact.Content);
     }
 
     // ─── Fix: Add missing fields to DTOs ────────────────────────────────────

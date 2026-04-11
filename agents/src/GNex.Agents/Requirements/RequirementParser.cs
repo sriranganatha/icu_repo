@@ -60,6 +60,10 @@ public sealed partial class RequirementParser : IRequirementsReader
             requirements.AddRange(parsed);
         }
 
+        // Stamp ProjectId on all parsed requirements so downstream agents and DB persistence can scope them
+        foreach (var req in requirements)
+            req.ProjectId = projectId;
+
         _logger.LogInformation("Parsed {Count} requirements from BRD sections for project {ProjectId}",
             requirements.Count, projectId);
         return requirements;

@@ -262,6 +262,27 @@ public sealed class AgentPipelineDb : IDisposable
             CREATE INDEX IF NOT EXISTS IX_Artifacts_ProjectId ON Artifacts(ProjectId);
             CREATE INDEX IF NOT EXISTS IX_TestDiagnostics_ProjectId ON TestDiagnostics(ProjectId);
 
+            -- v3: Full work-item fields for epic/story/task/use-case/bug templates
+            ALTER TABLE BacklogItems ADD COLUMN IF NOT EXISTS Summary TEXT;
+            ALTER TABLE BacklogItems ADD COLUMN IF NOT EXISTS BusinessValue TEXT;
+            ALTER TABLE BacklogItems ADD COLUMN IF NOT EXISTS SuccessCriteria TEXT;
+            ALTER TABLE BacklogItems ADD COLUMN IF NOT EXISTS Scope TEXT;
+            ALTER TABLE BacklogItems ADD COLUMN IF NOT EXISTS StoryPoints INTEGER DEFAULT 0;
+            ALTER TABLE BacklogItems ADD COLUMN IF NOT EXISTS Labels TEXT;
+            ALTER TABLE BacklogItems ADD COLUMN IF NOT EXISTS Actor TEXT;
+            ALTER TABLE BacklogItems ADD COLUMN IF NOT EXISTS Preconditions TEXT;
+            ALTER TABLE BacklogItems ADD COLUMN IF NOT EXISTS MainFlow TEXT;
+            ALTER TABLE BacklogItems ADD COLUMN IF NOT EXISTS AlternativeFlows TEXT;
+            ALTER TABLE BacklogItems ADD COLUMN IF NOT EXISTS Postconditions TEXT;
+            ALTER TABLE BacklogItems ADD COLUMN IF NOT EXISTS Severity TEXT;
+            ALTER TABLE BacklogItems ADD COLUMN IF NOT EXISTS Environment TEXT;
+            ALTER TABLE BacklogItems ADD COLUMN IF NOT EXISTS StepsToReproduce TEXT;
+            ALTER TABLE BacklogItems ADD COLUMN IF NOT EXISTS ExpectedResult TEXT;
+            ALTER TABLE BacklogItems ADD COLUMN IF NOT EXISTS ActualResult TEXT;
+            ALTER TABLE BacklogItems ADD COLUMN IF NOT EXISTS AffectedServices TEXT;
+            ALTER TABLE BacklogItems ADD COLUMN IF NOT EXISTS ProducedBy TEXT DEFAULT '';
+            ALTER TABLE BacklogItems ADD COLUMN IF NOT EXISTS Coverage TEXT DEFAULT 'NotAssessed';
+
             INSERT INTO WorkItemTemplates (TemplateKey, ItemType, TemplateName, Purpose, TemplateFormat, ExampleContent, Version, IsActive, UpdatedAt)
             VALUES
             (
@@ -574,10 +595,20 @@ public sealed class AgentPipelineDb : IDisposable
                     INSERT INTO BacklogItems (Id, RunId, ProjectId, ParentId, SourceRequirementId, ItemType, Status,
                         Title, Description, Module, Priority, Iteration, AcceptanceCriteria, DependsOn, Tags,
                         TechnicalNotes, DefinitionOfDone, DetailedSpec,
+                        Summary, BusinessValue, SuccessCriteria, Scope,
+                        StoryPoints, Labels,
+                        Actor, Preconditions, MainFlow, AlternativeFlows, Postconditions,
+                        Severity, Environment, StepsToReproduce, ExpectedResult, ActualResult,
+                        AffectedServices, ProducedBy, Coverage,
                         CreatedAt, StartedAt, CompletedAt, AssignedAgent)
                     VALUES (@id, @runId, @projectId, @parentId, @srcReqId, @type, @status,
                         @title, @desc, @module, @priority, @iteration, @ac, @deps, @tags,
                         @technicalNotes, @definitionOfDone, @detailedSpec,
+                        @summary, @businessValue, @successCriteria, @scope,
+                        @storyPoints, @labels,
+                        @actor, @preconditions, @mainFlow, @alternativeFlows, @postconditions,
+                        @severity, @environment, @stepsToReproduce, @expectedResult, @actualResult,
+                        @affectedServices, @producedBy, @coverage,
                         @created, @started, @completed, @assignedAgent)
                 """;
                 cmd.Parameters.AddWithValue("@id", item.Id);
@@ -598,6 +629,31 @@ public sealed class AgentPipelineDb : IDisposable
                 cmd.Parameters.AddWithValue("@technicalNotes", item.TechnicalNotes ?? "");
                 cmd.Parameters.AddWithValue("@definitionOfDone", JsonSerializer.Serialize(item.DefinitionOfDone ?? [], s_json));
                 cmd.Parameters.AddWithValue("@detailedSpec", item.DetailedSpec ?? "");
+                // Epic fields
+                cmd.Parameters.AddWithValue("@summary", item.Summary ?? "");
+                cmd.Parameters.AddWithValue("@businessValue", item.BusinessValue ?? "");
+                cmd.Parameters.AddWithValue("@successCriteria", JsonSerializer.Serialize(item.SuccessCriteria ?? [], s_json));
+                cmd.Parameters.AddWithValue("@scope", item.Scope ?? "");
+                // Story fields
+                cmd.Parameters.AddWithValue("@storyPoints", item.StoryPoints);
+                cmd.Parameters.AddWithValue("@labels", JsonSerializer.Serialize(item.Labels ?? [], s_json));
+                // Use Case fields
+                cmd.Parameters.AddWithValue("@actor", item.Actor ?? "");
+                cmd.Parameters.AddWithValue("@preconditions", item.Preconditions ?? "");
+                cmd.Parameters.AddWithValue("@mainFlow", JsonSerializer.Serialize(item.MainFlow ?? [], s_json));
+                cmd.Parameters.AddWithValue("@alternativeFlows", item.AlternativeFlows ?? "");
+                cmd.Parameters.AddWithValue("@postconditions", item.Postconditions ?? "");
+                // Bug fields
+                cmd.Parameters.AddWithValue("@severity", item.Severity ?? "");
+                cmd.Parameters.AddWithValue("@environment", item.Environment ?? "");
+                cmd.Parameters.AddWithValue("@stepsToReproduce", JsonSerializer.Serialize(item.StepsToReproduce ?? [], s_json));
+                cmd.Parameters.AddWithValue("@expectedResult", item.ExpectedResult ?? "");
+                cmd.Parameters.AddWithValue("@actualResult", item.ActualResult ?? "");
+                // Gap-analysis fields
+                cmd.Parameters.AddWithValue("@affectedServices", JsonSerializer.Serialize(item.AffectedServices ?? [], s_json));
+                cmd.Parameters.AddWithValue("@producedBy", item.ProducedBy ?? "");
+                cmd.Parameters.AddWithValue("@coverage", item.Coverage ?? "NotAssessed");
+                // Timestamps
                 cmd.Parameters.AddWithValue("@created", item.CreatedAt.ToString("o"));
                 cmd.Parameters.AddWithValue("@started", (object?)item.StartedAt?.ToString("o") ?? DBNull.Value);
                 cmd.Parameters.AddWithValue("@completed", (object?)item.CompletedAt?.ToString("o") ?? DBNull.Value);
@@ -820,6 +876,7 @@ public sealed class AgentPipelineDb : IDisposable
             items.Add(new BacklogItemRow
             {
                 Id = r.GetString(r.GetOrdinal("Id")),
+                ProjectId = GetNullableString(r, "ProjectId"),
                 ParentId = GetNullableString(r, "ParentId"),
                 SourceRequirementId = GetNullableString(r, "SourceRequirementId"),
                 ItemType = r.GetString(r.GetOrdinal("ItemType")),
@@ -835,6 +892,31 @@ public sealed class AgentPipelineDb : IDisposable
                 TechnicalNotes = GetNullableString(r, "TechnicalNotes"),
                 DefinitionOfDone = DeserializeList(GetNullableString(r, "DefinitionOfDone")),
                 DetailedSpec = GetNullableString(r, "DetailedSpec"),
+                // Epic fields
+                Summary = GetNullableString(r, "Summary"),
+                BusinessValue = GetNullableString(r, "BusinessValue"),
+                SuccessCriteria = DeserializeList(GetNullableString(r, "SuccessCriteria")),
+                Scope = GetNullableString(r, "Scope"),
+                // Story fields
+                StoryPoints = GetNullableInt(r, "StoryPoints"),
+                Labels = DeserializeList(GetNullableString(r, "Labels")),
+                // Use Case fields
+                Actor = GetNullableString(r, "Actor"),
+                Preconditions = GetNullableString(r, "Preconditions"),
+                MainFlow = DeserializeList(GetNullableString(r, "MainFlow")),
+                AlternativeFlows = GetNullableString(r, "AlternativeFlows"),
+                Postconditions = GetNullableString(r, "Postconditions"),
+                // Bug fields
+                Severity = GetNullableString(r, "Severity"),
+                Environment = GetNullableString(r, "Environment"),
+                StepsToReproduce = DeserializeList(GetNullableString(r, "StepsToReproduce")),
+                ExpectedResult = GetNullableString(r, "ExpectedResult"),
+                ActualResult = GetNullableString(r, "ActualResult"),
+                // Gap-analysis fields
+                AffectedServices = DeserializeList(GetNullableString(r, "AffectedServices")),
+                ProducedBy = GetNullableString(r, "ProducedBy") ?? "",
+                Coverage = GetNullableString(r, "Coverage") ?? "NotAssessed",
+                // Timestamps
                 CreatedAt = DateTimeOffset.Parse(r.GetString(r.GetOrdinal("CreatedAt"))),
                 StartedAt = ParseNullableDateTimeOffset(GetNullableString(r, "StartedAt")),
                 CompletedAt = ParseNullableDateTimeOffset(GetNullableString(r, "CompletedAt")),
@@ -1308,6 +1390,12 @@ public sealed class AgentPipelineDb : IDisposable
         return r.IsDBNull(ord) ? null : r.GetString(ord);
     }
 
+    private static int GetNullableInt(SqliteDataReader r, string col)
+    {
+        var ord = r.GetOrdinal(col);
+        return r.IsDBNull(ord) ? 0 : r.GetInt32(ord);
+    }
+
     private static List<string> DeserializeList(string? json)
     {
         if (string.IsNullOrEmpty(json)) return [];
@@ -1404,6 +1492,26 @@ public sealed class BacklogItemRow
     public List<string>? MatchingArtifactPaths { get; set; }
     public string Coverage { get; set; } = "NotAssessed";
     public string ProducedBy { get; set; } = "";
+    // Epic fields
+    public string? Summary { get; set; }
+    public string? BusinessValue { get; set; }
+    public List<string>? SuccessCriteria { get; set; }
+    public string? Scope { get; set; }
+    // Story fields
+    public int StoryPoints { get; set; }
+    public List<string>? Labels { get; set; }
+    // Use Case fields
+    public string? Actor { get; set; }
+    public string? Preconditions { get; set; }
+    public List<string>? MainFlow { get; set; }
+    public string? AlternativeFlows { get; set; }
+    public string? Postconditions { get; set; }
+    // Bug fields
+    public string? Severity { get; set; }
+    public string? Environment { get; set; }
+    public List<string>? StepsToReproduce { get; set; }
+    public string? ExpectedResult { get; set; }
+    public string? ActualResult { get; set; }
 }
 
 public sealed class RequirementRow

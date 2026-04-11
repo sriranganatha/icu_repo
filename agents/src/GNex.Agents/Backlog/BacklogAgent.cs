@@ -118,15 +118,15 @@ public sealed class BacklogAgent : IAgent
         var prompt = new LlmPrompt
         {
             SystemPrompt = """
-                You are a healthcare project backlog prioritizer. Given a list of backlog items,
+                You are a software project backlog prioritizer. Given a list of backlog items,
                 re-rank them by business value and technical dependency order.
                 Output ONLY the item IDs in priority order (highest first), one per line. No explanations.
                 """,
             UserPrompt = $"""
-                Prioritize these {newItems.Count} backlog items for a Hospital Management System:
+                Prioritize these {newItems.Count} backlog items:
                 {itemSummary}
 
-                Consider: patient safety > compliance > core workflows > enhancements.
+                Consider: critical functionality > compliance > core workflows > enhancements.
                 Output IDs only, one per line, highest priority first.
                 """,
             Temperature = 0.2,
@@ -293,7 +293,7 @@ public sealed class BacklogAgent : IAgent
         if (action.StartsWith("As a ", StringComparison.OrdinalIgnoreCase))
             return action;
 
-        return $"As a clinical user, I want to {ToSentenceFragment(action)} so that {ToSentenceFragment(requirementTitle)} is delivered safely and efficiently.";
+        return $"As a user, I want to {ToSentenceFragment(action)} so that {ToSentenceFragment(requirementTitle)} is delivered safely and efficiently.";
     }
 
     private static List<string> NormalizeAcceptanceCriteria(string ac)

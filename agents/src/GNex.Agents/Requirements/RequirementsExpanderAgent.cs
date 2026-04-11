@@ -18,10 +18,6 @@ public sealed class RequirementsExpanderAgent : IAgent
 {
     private readonly ILlmProvider _llm;
     private readonly ILogger<RequirementsExpanderAgent> _logger;
-    private const int MaxInvestImprovementIterations = 10;
-    private const double MinInvestReadyRatio = 0.35;
-    private const int MinInvestReadyCount = 10;
-
     public AgentType Type => AgentType.RequirementsExpander;
     public string Name => "Requirements Expander";
     public string Description => "Expands high-level requirements into implementation-ready epics, user stories, use cases, and tasks with dependency chains and detailed specs.";
@@ -44,64 +40,14 @@ public sealed class RequirementsExpanderAgent : IAgent
         var expanded = new List<ExpandedRequirement>();
         var iteration = context.DevIteration;
 
-        // ── Step 0: INVEST quality scoring gate ──
-        var workingRequirements = context.Requirements.Select(CloneRequirement).ToList();
-        List<RequirementQualityScore> qualityScores = [];
-        var readyRequirements = new List<Requirement>();
-        var investIterationsUsed = 0;
+        // ── Step 0: LLM-based quality assessment (informational — never blocks expansion) ──
+        var allRequirements = context.Requirements.ToList();
+        var qualityInsights = await RunLlmQualityAssessmentAsync(allRequirements, ct);
 
-        for (var pass = 0; pass <= MaxInvestImprovementIterations; pass++)
-        {
-            qualityScores = RequirementQualityScorer.ScoreAll(workingRequirements);
-            var readyRequirementIds = qualityScores
-                .Where(s => s.IsReady)
-                .Select(s => s.RequirementId)
-                .ToHashSet(StringComparer.OrdinalIgnoreCase);
-            readyRequirements = workingRequirements
-                .Where(r => readyRequirementIds.Contains(r.Id))
-                .ToList();
+        if (context.ReportProgress is not null)
+            await context.ReportProgress(Type, $"LLM quality assessment complete: {allRequirements.Count} requirements evaluated — {qualityInsights.ReadyCount} strong, {qualityInsights.NeedsWorkCount} need enrichment during expansion");
 
-            var readyRatio = workingRequirements.Count == 0
-                ? 0
-                : (double)readyRequirements.Count / workingRequirements.Count;
-            var readyCountThreshold = Math.Min(MinInvestReadyCount, workingRequirements.Count);
-            var gateSatisfied = readyRequirements.Count >= readyCountThreshold && readyRatio >= MinInvestReadyRatio;
-
-            if (gateSatisfied)
-            {
-                investIterationsUsed = pass;
-                break;
-            }
-
-            if (pass == MaxInvestImprovementIterations)
-            {
-                investIterationsUsed = pass;
-                break;
-            }
-
-            workingRequirements = ImproveRequirementsForInvest(workingRequirements, qualityScores, pass + 1);
-            if (context.ReportProgress is not null)
-                await context.ReportProgress(Type, $"INVEST auto-improvement pass {pass + 1}/{MaxInvestImprovementIterations} completed — retrying quality gate");
-        }
-
-        // Persist improved requirement content into context so downstream agents and DB snapshots use it.
-        context.Requirements = workingRequirements;
-
-        var failed = qualityScores.Where(s => !s.IsReady).ToList();
-        foreach (var fail in failed.Take(50))
-        {
-            context.Findings.Add(new ReviewFinding
-            {
-                Category = "RequirementQuality",
-                Severity = ReviewSeverity.Warning,
-                Message = $"Requirement {fail.RequirementId} not INVEST-ready (score {fail.Score}/100): {string.Join(" | ", fail.Notes.Take(3))}",
-                FilePath = "docs/requirements",
-                Suggestion = "Refine this requirement using INVEST and Given/When/Then acceptance criteria before expansion."
-            });
-        }
-
-        var scorecardLines = qualityScores.Select(s =>
-            $"- {s.RequirementId} | Score={s.Score} | Ready={s.IsReady} | I={s.Independent} N={s.Negotiable} V={s.Valuable} E={s.Estimable} S={s.Small} T={s.Testable}");
+        // Emit scorecard artifact for reviewers
         context.Artifacts.Add(new CodeArtifact
         {
             Layer = ArtifactLayer.Documentation,
@@ -109,73 +55,29 @@ public sealed class RequirementsExpanderAgent : IAgent
             FileName = "requirement-quality-scorecard.md",
             Namespace = "GNex.Requirements",
             ProducedBy = Type,
-            Content = "# Requirement Quality Scorecard (INVEST)\n\n"
-                      + $"Total: {qualityScores.Count} | Ready: {qualityScores.Count(s => s.IsReady)} | Blocked: {failed.Count} | Improvement Passes: {investIterationsUsed}\n\n"
-                      + string.Join("\n", scorecardLines)
+            Content = qualityInsights.ScorecardMarkdown
         });
 
-        var ambiguousRequirements = qualityScores
-            .Where(s => s.ClarifyingQuestions.Count > 0)
-            .ToList();
-        if (ambiguousRequirements.Count > 0)
+        // Emit findings for low-quality items (informational only)
+        foreach (var issue in qualityInsights.Issues.Take(50))
         {
-            var clarificationLines = ambiguousRequirements.SelectMany(s =>
-            {
-                var header = $"## {s.RequirementId} - {s.Title}";
-                var questions = s.ClarifyingQuestions.Select((q, i) => $"{i + 1}. {q}");
-                return new[] { header, "" }.Concat(questions).Concat([""]); 
-            });
-
-            context.Artifacts.Add(new CodeArtifact
-            {
-                Layer = ArtifactLayer.Documentation,
-                RelativePath = "Requirements/clarification-questions.md",
-                FileName = "clarification-questions.md",
-                Namespace = "GNex.Requirements",
-                ProducedBy = Type,
-                Content = "# Requirement Clarification Questions\n\n"
-                          + "These requirements contain ambiguous language and need explicit answers before implementation.\n\n"
-                          + string.Join("\n", clarificationLines)
-            });
-
-            foreach (var item in ambiguousRequirements.Take(50))
-            {
-                context.Findings.Add(new ReviewFinding
-                {
-                    Category = "RequirementAmbiguity",
-                    Severity = ReviewSeverity.Warning,
-                    Message = $"Requirement {item.RequirementId} needs clarification before implementation readiness.",
-                    FilePath = "docs/requirements",
-                    Suggestion = item.ClarifyingQuestions.FirstOrDefault()
-                                 ?? "Answer the clarification questions in Requirements/clarification-questions.md."
-                });
-            }
-        }
-
-        if (context.ReportProgress is not null)
-            await context.ReportProgress(Type, $"Requirement quality gate: {qualityScores.Count(s => s.IsReady)}/{qualityScores.Count} ready for expansion");
-
-        var minimumReadyForSelectiveExpansion = Math.Max(5, workingRequirements.Count / 5);
-        if (readyRequirements.Count < minimumReadyForSelectiveExpansion)
-        {
-            readyRequirements = workingRequirements;
             context.Findings.Add(new ReviewFinding
             {
                 Category = "RequirementQuality",
-                Severity = ReviewSeverity.Warning,
-                Message = $"RequirementsExpander produced only {qualityScores.Count(s => s.IsReady)}/{qualityScores.Count} INVEST-ready requirements after {investIterationsUsed} improvement pass(es). Proceeding with improved draft requirements to avoid starvation.",
+                Severity = ReviewSeverity.Info,
+                Message = issue,
                 FilePath = "docs/requirements",
-                Suggestion = "Review requirement-quality-scorecard.md and refine low-scoring requirements for higher-fidelity expansion."
+                Suggestion = "The LLM will enrich this requirement during expansion. Review the expanded output for completeness."
             });
-
-            if (context.ReportProgress is not null)
-                await context.ReportProgress(Type, $"INVEST ready set is too small for selective expansion — proceeding with all improved requirements");
         }
+
+        // ALL requirements proceed to expansion — no blocking gate
+        var readyRequirements = allRequirements;
 
         // ── Step 1: Build requirement→service mapping ──
         var reqServiceMap = BuildRequirementServiceMap(readyRequirements, context.DomainModel);
         if (context.ReportProgress is not null)
-            await context.ReportProgress(Type, $"Mapped {readyRequirements.Count} quality-approved requirements to {reqServiceMap.Values.SelectMany(v => v).Distinct().Count()} microservices");
+            await context.ReportProgress(Type, $"Mapped {readyRequirements.Count} requirements to {reqServiceMap.Values.SelectMany(v => v).Distinct().Count()} microservices");
 
         // ── Step 2: Build requirement dependency graph ──
         var reqDeps = BuildRequirementDependencies(readyRequirements, reqServiceMap);
@@ -205,247 +107,28 @@ public sealed class RequirementsExpanderAgent : IAgent
                 await context.ReportProgress(Type, $"Expanding module '{module}': {reqs.Count} requirements → services: {string.Join(", ", svcNames.Take(5))}");
             }
 
-            // Build context snapshot of what exists
-            var existingArtifacts = context.Artifacts
-                .Where(a => a.Namespace.Contains(module, StringComparison.OrdinalIgnoreCase))
-                .Select(a => $"  - [{a.Layer}] {a.RelativePath} (by {a.ProducedBy})")
-                .Take(25)
-                .ToList();
-
-            var existingFindings = context.Findings
-                .Where(f => f.FilePath?.Contains(module, StringComparison.OrdinalIgnoreCase) ?? false)
-                .Select(f => $"  - [{f.Severity}] {f.Category}: {f.Message}")
-                .Take(15)
-                .ToList();
-
-            // Build rich requirement summaries with service mappings and dependencies
-            var reqSummaries = reqs.Select(r =>
-            {
-                var services = reqServiceMap.TryGetValue(r.Id, out var slist) ? string.Join(", ", slist) : "Unknown";
-                var deps = reqDeps.TryGetValue(r.Id, out var dlist) ? string.Join(", ", dlist) : "None";
-                return $"""
-                    - {r.Id}: {r.Title}
-                      Description: {Truncate(r.Description, 300)}
-                      Acceptance Criteria: {string.Join("; ", r.AcceptanceCriteria)}
-                      Tags: {string.Join(", ", r.Tags)}
-                      Affected Services: {services}
-                      Depends On: {deps}
-                    """;
-            });
-
-            // Domain model context for the LLM
+            // ── Recursive multi-phase expansion ──
+            // Phase 1: Requirements → Epics (batched, 10 per LLM call)
+            // Phase 2: Each Epic → Stories + Use Cases (1-2 per LLM call)
+            // Phase 3: Each Story → Tasks (2-3 per LLM call)
+            // Phase 4: Recursive refinement — split large tasks until atomic
             var domainCtx = BuildDomainContextForModule(module, context.DomainModel);
+            var phaseItems = await ExpandModuleWithPhasesAsync(
+                reqs, module, iteration, reqServiceMap, reqDeps, qualityInsights,
+                domainCtx, context.ReportProgress, ct);
 
-            var prompt = new LlmPrompt
+            await EnrichItemsWithLlmAsync(phaseItems, reqs, module, reqServiceMap, ct);
+
+            if (context.ReportProgress is not null)
             {
-                SystemPrompt = """
-                    You are a senior healthcare software architect expanding requirements for
-                    an ICU Hospital Management System built on .NET 8 microservices.
-
-                    You produce implementation-ready work items that downstream code-generation agents
-                    will use DIRECTLY. Each item must contain enough detail to generate code without
-                    further clarification.
-
-                    ─── DECOMPOSITION PHILOSOPHY ──────────────────────────────────
-                    You MUST use VERTICAL (user-value) slicing, NOT horizontal (technical-layer) slicing.
-
-                    BAD (horizontal — do NOT do this):
-                      "Build the database schema" / "Create the API layer" / "Build the frontend"
-                    GOOD (vertical — each story delivers end-to-end user value):
-                      "As a nurse, I can search patients by MRN" (touches DB + API + UI)
-                      "As a doctor, I can view patient vitals dashboard" (touches DB + API + UI)
-                      "As an admin, I can manage ward bed assignments" (touches DB + API + UI)
-
-                    ─── EPIC → STORIES SPLITTING CHECKLIST ────────────────────────
-                    When splitting an Epic into Stories, ask:
-                    1. Who are the different user personas? (each persona = different stories)
-                    2. What is the smallest thing I can ship that this user would value?
-                    3. Can I demo this story in isolation?
-                    4. Each story must be independently deployable and demo-able
-                    5. A story that touches only one layer (just backend, just UI) is a TASK, not a story
-                    6. Aim for stories completable in 1-3 days by a small team (1-5 story points)
-
-                    For EACH Epic, generate AT LEAST 3-5 User Stories (more for complex epics).
-
-                    ─── STORY → TASKS SPLITTING CHECKLIST ─────────────────────────
-                    When splitting a Story into Tasks, ask:
-                    1. What are the interfaces/contracts? (define these FIRST)
-                    2. What are the independent implementation tracks? (API contract, backend, frontend, infra)
-                    3. What needs testing beyond unit tests? (integration, E2E, contract tests)
-                    4. What are the failure modes? (error handling, retries, observability)
-
-                    For EACH User Story, generate AT LEAST 5-7 Tasks covering:
-                      - Define API contract (request/response schema, OpenAPI spec)
-                      - Implement database entities/migrations/indexes
-                      - Build service layer with validation and business logic
-                      - Build API endpoint wiring service to HTTP
-                      - Build Razor Page / Blazor UI (list page, detail/edit form, navigation)
-                      - Write integration tests for the endpoint
-                      - Write E2E test for the full user flow
-
-                    IMPORTANT: This is a FULL-STACK web application. Every user-facing story
-                    MUST include a UI task tagged with "ui". The UI task creates Razor Pages
-                    or Blazor components that call the API endpoints. Do NOT skip the UI layer.
-
-                    Tasks should be 2-8 hours of work, assignable to one person, with clear done state.
-
-                    ─── ANTI-PATTERNS TO AVOID ────────────────────────────────────
-                    - Stories that are just "implement X service" (no visible user value)
-                    - Tasks with no clear done state ("research caching options")
-                    - Skipping contract/schema tasks (leads to integration pain)
-                    - Putting all testing in one task at the end (test as you go)
-                    - Generating only 1 story per requirement (requirements are broad; split them)
-
-                    ─── INVEST CRITERIA (mandatory for every User Story) ──────────
-                    - Independent: can be developed without waiting on others (except explicit deps)
-                    - Negotiable: detail the WHAT and WHY, not prescriptive HOW
-                    - Valuable: delivers measurable user or business value
-                    - Estimable: enough context for a developer to estimate effort
-                    - Small: fits within one sprint (1-5 story points); split larger work
-                    - Testable: has clear Given/When/Then acceptance criteria
-
-                    ─── MINIMUM OUTPUT EXPECTATIONS ───────────────────────────────
-                    For each high-level requirement, you MUST produce AT MINIMUM:
-                    - 1 Epic
-                    - 3-5 User Stories (each with "As a [persona], I want [action] so that [value]")
-                    - 1 Use Case per Epic (actor/system interaction flow)
-                    - 5-7 Tasks per User Story (contract, DB, service, API, UI/Razor page, integration test, E2E test)
-
-                    That means for a module with 3 requirements, expect ~3 epics, ~12 stories,
-                    ~3 use cases, and ~72 tasks = ~90 items total. DO NOT produce fewer.
-                    Every story MUST have a UI task with tag "ui" that builds the Razor Page or Blazor component.
-
-                    ─── OUTPUT FORMAT ──────────────────────────────────────────────
-                    Output EXACTLY in this pipe-delimited format — one item per line. NO markdown,
-                    NO explanatory text, NO blank lines. ONLY pipe-delimited lines.
-                    Use semicolons to separate list items within a field. Use numbered
-                    prefixes (1. 2. 3.) for ordered steps.
-
-                    EPIC|<id>|<title>|<summary>|<business_value>|<success_criteria_semicolon_sep>|<scope>|<priority 1-3>|<services_csv>|<depends_on_ids_csv>
-                    STORY|<id>|<parent_epic_id>|<title>|<acceptance_criteria_semicolon_sep>|<story_points>|<labels_csv>|<priority 1-3>|<services_csv>|<depends_on_ids_csv>|<detailed_spec>
-                    USECASE|<id>|<parent_epic_id>|<title>|<actor>|<preconditions>|<main_flow_steps_semicolon_sep>|<alt_flows>|<postconditions>|<services_csv>
-                    TASK|<id>|<parent_story_id>|<title>|<description>|<technical_notes>|<definition_of_done_semicolon_sep>|<tags_csv>|<priority 1-3>|<services_csv>|<detailed_spec>
-                    BUG|<id>|<parent_id>|<title>|<severity>|<environment>|<steps_to_reproduce_semicolon_sep>|<expected_result>|<actual_result>|<services_csv>
-
-                    Field rules:
-                    - STORY title: MUST be "As a [Persona], I want to [Action] so that [Value/Benefit]"
-                    - STORY acceptance_criteria: Each in Given/When/Then format, semicolon-separated
-                    - STORY story_points: 1, 2, 3, 5, or 8
-                    - USECASE main_flow: Numbered steps "1. step;2. step;3. step"
-                    - TASK title: "[T-ID] Verb-noun action" e.g. "[T-PAT-001-01-API] Define POST /patients contract"
-                    - TASK definition_of_done: Checklist items, semicolon-separated
-
-                    ─── ID RULES ──────────────────────────────────────────────────
-                    Use module prefixes: E-PAT-001, US-PAT-001-01, UC-PAT-001-01, T-PAT-001-01-DB, BUG-PAT-001.
-                    Stories reference their parent Epic. Tasks reference their parent Story.
-
-                    ─── DETAILED SPEC RULES ───────────────────────────────────────
-                    - Database tasks: entity names, fields with types, indexes, constraints, FK relationships
-                    - Service tasks: method signatures, validation rules, business logic, error handling
-                    - API tasks: HTTP method, route, request/response DTO shapes, status codes
-                    - Test tasks: test scenarios, setup data, expected outcomes, edge cases
-                    - All items: HIPAA implications, multi-tenant isolation, audit trail requirements
-
-                    ─── DEPENDENCY RULES ──────────────────────────────────────────
-                    Within a story: Contract → DB → Service → API → UI/Razor Page → Integration Test → E2E Test
-                    Cross-service: PatientService before EncounterService, etc.
-                    Reference specific task IDs in depends_on_ids when ordering matters.
-                    """,
-                UserPrompt = $"""
-                    Module: {module}
-                    Iteration: {iteration}
-
-                    === DOMAIN MODEL ===
-                    {domainCtx}
-
-                    === HIGH-LEVEL REQUIREMENTS ({reqs.Count} requirements) ===
-                    {string.Join("\n", reqSummaries)}
-
-                    === ALREADY BUILT ({existingArtifacts.Count} artifacts) ===
-                    {string.Join("\n", existingArtifacts)}
-
-                    === OPEN FINDINGS ({existingFindings.Count}) ===
-                    {string.Join("\n", existingFindings)}
-
-                    ─── YOUR TASK ─────────────────────────────────────────────────
-                    Expand the {reqs.Count} requirements above into a COMPREHENSIVE work breakdown.
-
-                    Step 1 — IDENTIFY PERSONAS: List every distinct user type (Nurse, Doctor, Admin,
-                    Lab Technician, Pharmacist, Billing Clerk, System/Integration, etc.)
-
-                    Step 2 — CREATE EPICS: One Epic per high-level requirement.
-
-                    Step 3 — SPLIT EPICS INTO STORIES using vertical slicing:
-                    For each Epic, ask "What are the different things different users need?"
-                    Generate 3-5 User Stories per Epic. Each story should be independently
-                    deployable and demo-able. Use "As a [persona], I want to [action] so that [benefit]".
-
-                    Step 4 — CREATE USE CASES: One Use Case per Epic showing the primary
-                    actor/system interaction flow with numbered steps.
-
-                    Step 5 — DECOMPOSE STORIES INTO TASKS:
-                    For each Story, generate 5-7 Tasks:
-                      1. Define API contract/schema (OpenAPI spec, request/response DTOs) — tag: contract
-                      2. Database entity/migration/index — tag: database
-                      3. Service layer (validation, business logic, domain events) — tag: service
-                      4. API endpoint (controller, routing, error responses) — tag: api
-                      5. Razor Page / Blazor UI (list page, detail view, create/edit forms) — tag: ui
-                      6. Integration tests (happy path, validation errors, auth failures) — tag: testing
-                      7. E2E test (full user flow from request to database verification) — tag: testing
-
-                    CRITICAL: Step 5 is MANDATORY for every user-facing story. This is a full-stack
-                    web application — every story must have a UI task that builds pages/forms/dashboards.
-
-                    Step 6 — BUG REPORTS: Only if open findings indicate reproducible failures.
-
-                    CRITICAL: Generate ALL items as pipe-delimited lines. No markdown. No explanations.
-                    Expect to generate 50-100+ lines for a typical module with 3+ requirements.
-                    Focus on gaps — don't repeat work for existing artifacts.
-                    """,
-                Temperature = 0.3,
-                MaxTokens = 16384,
-                RequestingAgent = Name
-            };
-
-            var response = await _llm.GenerateAsync(prompt, ct);
-            List<ExpandedRequirement> moduleItems;
-            if (response.Success)
-            {
-                _logger.LogInformation("LLM response for module '{Module}': Model={Model}, Len={Len}, Preview={Preview}",
-                    module, response.Model, response.Content.Length,
-                    response.Content.Length > 300 ? response.Content[..300] : response.Content);
-                moduleItems = ParseExpansionResponse(response.Content, module, iteration);
-                if (moduleItems.Count == 0)
-                {
-                    _logger.LogWarning("LLM expansion for {Module} returned unparseable/empty content. Using deterministic fallback.", module);
-                    moduleItems = CreateFallbackItems(reqs, module, iteration, reqServiceMap, reqDeps);
-                    context.Findings.Add(new ReviewFinding
-                    {
-                        Category = "RequirementExpansion",
-                        Severity = ReviewSeverity.Warning,
-                        Message = $"LLM returned 0 parseable work items for module '{module}'. Fallback expansion generated {moduleItems.Count} items.",
-                        FilePath = "Requirements/requirements-expander",
-                        Suggestion = "Inspect LLM output format for this module and ensure pipe-delimited templates are respected."
-                    });
-                }
-                // Enrich ALL items with service/entity/schema context — LLM primary, deterministic fallback
-                await EnrichItemsWithLlmAsync(moduleItems, reqs, module, reqServiceMap, ct);
-                _logger.LogInformation("Expanded {Module}: {Count} work items from LLM", module, moduleItems.Count);
-                if (context.ReportProgress is not null)
-                {
-                    var epics = moduleItems.Count(i => i.ItemType == WorkItemType.Epic);
-                    var stories = moduleItems.Count(i => i.ItemType == WorkItemType.UserStory);
-                    var tasks = moduleItems.Count(i => i.ItemType == WorkItemType.Task);
-                    await context.ReportProgress(Type, $"Module '{module}' expanded: {epics} epics, {stories} stories, {tasks} tasks — LLM generated {moduleItems.Count} work items");
-                }
-            }
-            else
-            {
-                _logger.LogWarning("LLM expansion failed for {Module}: {Error}", module, response.Error);
-                moduleItems = CreateFallbackItems(reqs, module, iteration, reqServiceMap, reqDeps);
+                var ec = phaseItems.Count(i => i.ItemType == WorkItemType.Epic);
+                var sc = phaseItems.Count(i => i.ItemType == WorkItemType.UserStory);
+                var ucc = phaseItems.Count(i => i.ItemType == WorkItemType.UseCase);
+                var tc = phaseItems.Count(i => i.ItemType == WorkItemType.Task);
+                await context.ReportProgress(Type, $"Module '{module}' fully expanded: {ec} epics, {sc} stories, {ucc} use cases, {tc} tasks — {phaseItems.Count} total items");
             }
 
-            expanded.AddRange(moduleItems);
+            expanded.AddRange(phaseItems);
         }
 
         // ── Step 3b: Deduplicate expanded items (same ID can appear from overlapping modules/re-runs) ──
@@ -504,6 +187,863 @@ public sealed class RequirementsExpanderAgent : IAgent
                 Duration = sw.Elapsed
             };
         }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // RECURSIVE MULTI-PHASE EXPANSION
+    // Phase 0: Enrich weak/incomplete requirements using LLM + domain knowledge
+    // Phase 1: Requirements → Epics (batched, ~5 reqs per LLM call)
+    // Phase 2: Epics → Stories + Use Cases (1-3 epics per LLM call)
+    // Phase 3: Stories → Tasks (2-5 stories per LLM call)
+    // Phase 4: Recursive refinement — split any task >8h until atomic
+    // ═══════════════════════════════════════════════════════════════════
+
+    private const int Phase0BatchSize = 10;
+    private const int Phase1BatchSize = 5;
+    private const int Phase2BatchSize = 3;
+    private const int Phase3BatchSize = 5;
+    private const int MaxRefinementDepth = 5;
+
+    private async Task<List<ExpandedRequirement>> ExpandModuleWithPhasesAsync(
+        List<Requirement> reqs,
+        string module,
+        int iteration,
+        Dictionary<string, List<string>> reqServiceMap,
+        Dictionary<string, List<string>> reqDeps,
+        QualityAssessmentResult qualityInsights,
+        string domainCtx,
+        Func<AgentType, string, Task>? reportProgress,
+        CancellationToken ct)
+    {
+        var allItems = new List<ExpandedRequirement>();
+
+        // ── Phase 0: Enrich requirements using LLM + domain knowledge ──
+        if (reportProgress is not null)
+            await reportProgress(Type, $"[Phase 0/5] Enriching {reqs.Count} requirements using domain expertise and quality assessment...");
+
+        var enrichedDescriptions = await Phase0_EnrichRequirementsAsync(
+            reqs, module, qualityInsights, domainCtx, reportProgress, ct);
+        _logger.LogInformation("Phase 0 complete for '{Module}': {Enriched}/{Total} requirements enriched",
+            module, enrichedDescriptions.Count, reqs.Count);
+
+        // ── Phase 1: Requirements → Epics ──
+        if (reportProgress is not null)
+            await reportProgress(Type, $"[Phase 1/5] Generating Epics from {reqs.Count} enriched requirements in module '{module}'...");
+
+        var epics = await Phase1_RequirementsToEpicsAsync(
+            reqs, module, iteration, reqServiceMap, reqDeps, qualityInsights, domainCtx, enrichedDescriptions, reportProgress, ct);
+        allItems.AddRange(epics);
+        _logger.LogInformation("Phase 1 complete for '{Module}': {Count} epics generated", module, epics.Count);
+
+        if (epics.Count == 0)
+        {
+            _logger.LogWarning("Phase 1 produced 0 epics for module '{Module}' — using fallback", module);
+            return CreateFallbackItems(reqs, module, iteration, reqServiceMap, reqDeps);
+        }
+
+        // ── Phase 2: Epics → Stories + Use Cases ──
+        if (reportProgress is not null)
+            await reportProgress(Type, $"[Phase 2/5] Splitting {epics.Count} Epics into User Stories & Use Cases...");
+
+        var storiesAndUseCases = await Phase2_EpicsToStoriesAsync(
+            epics, reqs, module, iteration, domainCtx, reportProgress, ct);
+        allItems.AddRange(storiesAndUseCases);
+
+        var storyCount = storiesAndUseCases.Count(i => i.ItemType == WorkItemType.UserStory);
+        var ucCount = storiesAndUseCases.Count(i => i.ItemType == WorkItemType.UseCase);
+        _logger.LogInformation("Phase 2 complete for '{Module}': {Stories} stories, {UseCases} use cases", module, storyCount, ucCount);
+
+        // ── Phase 3: Stories → Tasks ──
+        var stories = storiesAndUseCases.Where(i => i.ItemType == WorkItemType.UserStory).ToList();
+        if (reportProgress is not null)
+            await reportProgress(Type, $"[Phase 3/5] Decomposing {stories.Count} Stories into implementation Tasks...");
+
+        var tasks = await Phase3_StoriesToTasksAsync(
+            stories, epics, reqs, module, iteration, domainCtx, reportProgress, ct);
+        allItems.AddRange(tasks);
+        _logger.LogInformation("Phase 3 complete for '{Module}': {Count} tasks generated", module, tasks.Count);
+
+        // ── Phase 4: Recursive task refinement — split large/vague tasks ──
+        if (reportProgress is not null)
+            await reportProgress(Type, $"[Phase 4/5] Refining {tasks.Count} tasks — splitting any that are too large or vague...");
+
+        var refined = await Phase4_RecursiveTaskRefinementAsync(
+            tasks, module, iteration, domainCtx, reportProgress, ct, depth: 0);
+
+        // Replace original tasks with refined set
+        allItems.RemoveAll(i => i.ItemType == WorkItemType.Task);
+        allItems.AddRange(refined);
+
+        if (reportProgress is not null)
+        {
+            var finalEpics = allItems.Count(i => i.ItemType == WorkItemType.Epic);
+            var finalStories = allItems.Count(i => i.ItemType == WorkItemType.UserStory);
+            var finalUc = allItems.Count(i => i.ItemType == WorkItemType.UseCase);
+            var finalTasks = allItems.Count(i => i.ItemType == WorkItemType.Task);
+            await reportProgress(Type, $"All phases complete for '{module}': {finalEpics} epics, {finalStories} stories, {finalUc} use cases, {finalTasks} tasks = {allItems.Count} total");
+        }
+
+        return allItems;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // PHASE 0: Requirement Enrichment
+    // Before creating epics, enrich every requirement using the LLM's
+    // domain knowledge. The quality scorecard tells us what each req
+    // is missing (actors, measurable outcomes, acceptance criteria, etc.).
+    // The LLM fills gaps with industry best practices and standards.
+    // Output: Dictionary<reqId, enrichedDescription> fed into Phase 1.
+    // ═══════════════════════════════════════════════════════════════════
+
+    private async Task<Dictionary<string, string>> Phase0_EnrichRequirementsAsync(
+        List<Requirement> reqs,
+        string module,
+        QualityAssessmentResult qualityInsights,
+        string domainCtx,
+        Func<AgentType, string, Task>? reportProgress,
+        CancellationToken ct)
+    {
+        var enriched = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var batches = reqs.Chunk(Phase0BatchSize).ToList();
+
+        for (var b = 0; b < batches.Count; b++)
+        {
+            ct.ThrowIfCancellationRequested();
+            var batch = batches[b].ToList();
+
+            if (reportProgress is not null)
+                await reportProgress(Type, $"  Phase 0 batch {b + 1}/{batches.Count}: enriching {batch.Count} requirements with domain expertise...");
+
+            var reqBlocks = batch.Select(r =>
+            {
+                var qualityNote = qualityInsights.QualityHints.TryGetValue(r.Id, out var hint) ? hint : "No assessment available";
+                return $"""
+                    --- REQUIREMENT [{r.Id}] ---
+                    Title: {r.Title}
+                    Original Description: {Truncate(r.Description, 600)}
+                    Acceptance Criteria: {(r.AcceptanceCriteria.Count > 0 ? string.Join("; ", r.AcceptanceCriteria) : "NONE — must be added")}
+                    Tags: {(r.Tags.Count > 0 ? string.Join(", ", r.Tags) : "None")}
+                    Dependencies: {(r.DependsOn.Count > 0 ? string.Join(", ", r.DependsOn) : "None")}
+                    Quality Assessment: {qualityNote}
+                    """;
+            });
+
+            var prompt = new LlmPrompt
+            {
+                SystemPrompt = """
+                    You are a senior business analyst and domain expert with deep knowledge of
+                    software systems, industry standards, compliance frameworks, and real-world
+                    implementations. Your job is to ENRICH weak or incomplete requirements so
+                    they can become high-quality epics.
+
+                    For each requirement you receive, you will see:
+                    - The original title and description from the BRD
+                    - A quality assessment noting what is missing or weak
+                    - The project's domain model for context
+
+                    YOUR TASK for EACH requirement:
+                    1. ANALYZE what is missing or weak based on the quality assessment
+                    2. USE YOUR DOMAIN EXPERTISE to fill in the gaps:
+                       - Add specific actors/personas (who uses this? who benefits?)
+                       - Add measurable outcomes with specific targets and thresholds
+                       - Add clear, testable acceptance criteria
+                       - Add technology considerations and industry best practices
+                       - Reference relevant standards, protocols, or compliance frameworks
+                       - For GLOSSARY/TERMINOLOGY entries: transform into actionable requirements
+                         about data standards, validation rules, or system configuration
+                       - For RISK DESCRIPTIONS: transform into specific monitoring, alerting,
+                         or control requirements that mitigate the described risk
+                       - For BUSINESS VALUE statements: transform into measurable capability
+                         requirements with KPIs
+                       - For ARCHITECTURE descriptions: transform into specific non-functional
+                         requirements with targets (latency, throughput, availability)
+                    3. OUTPUT an enriched description that is detailed enough to create a
+                       comprehensive, implementation-ready epic
+
+                    ─── OUTPUT FORMAT (strictly enforced) ────────────────────────
+                    For EACH requirement, output exactly ONE block:
+
+                    ENRICHED|<req_id>|<enriched_title>|<enriched_description>
+
+                    Where <enriched_description> is a rich paragraph (200-400 words) containing:
+                    - WHO: Primary and secondary actors
+                    - WHAT: Specific system behaviors and capabilities
+                    - WHY: Business value and measurable outcomes
+                    - HOW: Key technical approach and constraints
+                    - ACCEPTANCE: 3-5 specific, testable acceptance criteria
+                    - STANDARDS: Any relevant industry standards or best practices
+
+                    Use semicolons within the enriched_description to separate sections.
+                    Do NOT use pipe characters (|) inside the description.
+                    Output ONLY ENRICHED lines. No markdown, no explanations.
+                    """,
+                UserPrompt = $"""
+                    Module: {module} | Batch: {b + 1}/{batches.Count} | Requirements: {batch.Count}
+
+                    === PROJECT DOMAIN MODEL ===
+                    {domainCtx}
+
+                    === REQUIREMENTS TO ENRICH ===
+                    {string.Join("\n", reqBlocks)}
+
+                    Enrich ALL {batch.Count} requirements above. Output {batch.Count} ENRICHED lines.
+                    """,
+                Temperature = 0.3,
+                MaxTokens = 16384,
+                RequestingAgent = Name
+            };
+
+            var response = await _llm.GenerateAsync(prompt, ct);
+            if (response.Success && !string.IsNullOrWhiteSpace(response.Content))
+            {
+                var cleaned = response.Content;
+                if (cleaned.Contains("```"))
+                {
+                    cleaned = Regex.Replace(cleaned, @"```[a-zA-Z]*\s*\n?", "");
+                    cleaned = cleaned.Replace("```", "");
+                }
+
+                foreach (var line in cleaned.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                {
+                    if (!line.StartsWith("ENRICHED|", StringComparison.OrdinalIgnoreCase)) continue;
+                    var parts = line.Split('|', 4); // Split into max 4 parts: ENRICHED|id|title|description
+                    if (parts.Length < 4) continue;
+
+                    var reqId = parts[1].Trim();
+                    var enrichedTitle = parts[2].Trim();
+                    var enrichedDesc = parts[3].Trim();
+
+                    if (!string.IsNullOrWhiteSpace(enrichedDesc))
+                    {
+                        enriched[reqId] = $"[Enriched Title]: {enrichedTitle}\n[Enriched Description]: {enrichedDesc}";
+                    }
+                }
+
+                _logger.LogInformation("Phase 0 batch {Batch}/{Total}: enriched {Count} requirements (model={Model})",
+                    b + 1, batches.Count, batch.Count(r => enriched.ContainsKey(r.Id)), response.Model);
+            }
+            else
+            {
+                _logger.LogWarning("Phase 0 batch {Batch} failed: {Error} — using original descriptions", b + 1, response.Error);
+            }
+        }
+
+        return enriched;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // PHASE 1: Requirements → Epics
+    // Batched: ~5 requirements per LLM call. Each requirement becomes
+    // exactly ONE epic with rich business context, success criteria, and
+    // service mappings. Uses Phase 0 enriched content for higher quality.
+    // ═══════════════════════════════════════════════════════════════════
+
+    private async Task<List<ExpandedRequirement>> Phase1_RequirementsToEpicsAsync(
+        List<Requirement> reqs,
+        string module,
+        int iteration,
+        Dictionary<string, List<string>> reqServiceMap,
+        Dictionary<string, List<string>> reqDeps,
+        QualityAssessmentResult qualityInsights,
+        string domainCtx,
+        Dictionary<string, string> enrichedDescriptions,
+        Func<AgentType, string, Task>? reportProgress,
+        CancellationToken ct)
+    {
+        var allEpics = new List<ExpandedRequirement>();
+        var batches = reqs.Chunk(Phase1BatchSize).ToList();
+
+        for (var b = 0; b < batches.Count; b++)
+        {
+            ct.ThrowIfCancellationRequested();
+            var batch = batches[b].ToList();
+
+            if (reportProgress is not null)
+                await reportProgress(Type, $"  Phase 1 batch {b + 1}/{batches.Count}: converting {batch.Count} enriched requirements to Epics...");
+
+            var reqSummaries = batch.Select(r =>
+            {
+                var services = reqServiceMap.TryGetValue(r.Id, out var slist) ? string.Join(", ", slist) : "Unknown";
+                var deps = reqDeps.TryGetValue(r.Id, out var dlist) ? string.Join(", ", dlist) : "None";
+                var hint = qualityInsights.QualityHints.TryGetValue(r.Id, out var h) ? h : "";
+                var enrichedBlock = enrichedDescriptions.TryGetValue(r.Id, out var enrichedText)
+                    ? $"\n    === ENRICHED (domain-expert analysis) ===\n    {enrichedText}"
+                    : "";
+                return $"""
+                      REQ[{r.Id}]: {r.Title}
+                        Original Description: {Truncate(r.Description, 300)}
+                        Acceptance Criteria: {(r.AcceptanceCriteria.Count > 0 ? string.Join("; ", r.AcceptanceCriteria) : "None")}
+                        Tags: {string.Join(", ", r.Tags)}
+                        Services: {services} | Depends: {deps}
+                        Quality Note: {hint}{enrichedBlock}
+                    """;
+            });
+
+            var prompt = new LlmPrompt
+            {
+                SystemPrompt = """
+                    You are a principal software architect creating EPICS from enriched
+                    requirements. Each requirement has been pre-analyzed by a domain expert
+                    (shown as "ENRICHED" block). Use BOTH the original requirement AND the
+                    enriched analysis to create comprehensive, implementation-ready epics.
+
+                    ─── CRITICAL INSTRUCTIONS ─────────────────────────────────────
+                    • You MUST produce EXACTLY one EPIC per requirement — no more, no less
+                    • USE the enriched description as your PRIMARY source — it contains
+                      domain expertise, specific actors, measurable outcomes, and acceptance
+                      criteria that the original requirement was missing
+                    • ADD your own knowledge: industry best practices, relevant standards,
+                      technology considerations, and real-world implementation patterns
+                    • For weak original requirements (glossary, risk descriptions, business
+                      value statements), the enriched version transforms them into actionable
+                      epics — leverage that transformation fully
+                    • Each epic MUST have:
+                      - Clear, measurable success criteria with specific thresholds
+                      - Identified actors/personas who interact with the system
+                      - Concrete scope boundaries (what's in AND what's out)
+                      - Realistic business value that stakeholders can validate
+                      - ALL affected microservices identified
+
+                    ─── WHAT IS AN EPIC? ──────────────────────────────────────────
+                    An Epic is a large body of work that delivers significant business value.
+                    It will later be broken down into User Stories and Tasks.
+                    Each Epic should take 2-8 weeks of team effort to complete.
+
+                    ─── OUTPUT FORMAT (strictly enforced) ─────────────────────────
+                    Output ONLY pipe-delimited lines. NO markdown, NO explanations, NO blank lines.
+
+                    EPIC|<id>|<title>|<summary>|<business_value>|<success_criteria_semicolon_sep>|<scope>|<priority 1-3>|<services_csv>|<depends_on_ids_csv>
+
+                    Field details:
+                    • id: E-<MODULE>-<seq> e.g. E-BRD-001
+                    • title: Concise epic name (5-12 words)
+                    • summary: 2-4 sentences describing the epic's purpose, scope, and key capabilities
+                    • business_value: Why this matters — with measurable impact (1-2 sentences)
+                    • success_criteria: 3-5 specific measurable outcomes separated by semicolons
+                    • scope: What's included AND what's explicitly excluded
+                    • priority: 1=critical path, 2=important, 3=nice-to-have
+                    • services_csv: Which microservices are involved
+                    • depends_on_ids_csv: IDs of other epics this depends on (or empty)
+                    """,
+                UserPrompt = $"""
+                    Module: {module} | Batch: {b + 1}/{batches.Count}
+
+                    === DOMAIN MODEL ===
+                    {domainCtx}
+
+                    === ENRICHED REQUIREMENTS ({batch.Count}) ===
+                    Each requirement below includes its original description AND a domain-expert
+                    enriched analysis. Use BOTH to create comprehensive epics.
+
+                    {string.Join("\n", reqSummaries)}
+
+                    Generate exactly {batch.Count} EPIC lines — one per requirement above.
+                    Use IDs E-{module.ToUpperInvariant().Replace(" ", "")}-{(b * Phase1BatchSize) + 1:D3} through E-{module.ToUpperInvariant().Replace(" ", "")}-{(b * Phase1BatchSize) + batch.Count:D3}.
+                    Every requirement MUST become an epic, even if the original was weak.
+                    The enriched analysis gives you the material to build a great epic.
+                    """,
+                Temperature = 0.2,
+                MaxTokens = 12288,
+                RequestingAgent = Name
+            };
+
+            var response = await _llm.GenerateAsync(prompt, ct);
+            if (response.Success && !string.IsNullOrWhiteSpace(response.Content))
+            {
+                var parsed = ParseExpansionResponse(response.Content, module, iteration);
+                var epicsOnly = parsed.Where(p => p.ItemType == WorkItemType.Epic).ToList();
+                _logger.LogInformation("Phase 1 batch {Batch}/{Total}: {Count} epics from LLM (model={Model})",
+                    b + 1, batches.Count, epicsOnly.Count, response.Model);
+                allEpics.AddRange(epicsOnly);
+            }
+            else
+            {
+                _logger.LogWarning("Phase 1 batch {Batch} failed: {Error}", b + 1, response.Error);
+                // Generate minimal fallback epics for this batch
+                foreach (var req in batch)
+                {
+                    allEpics.Add(new ExpandedRequirement
+                    {
+                        Id = $"E-{module.ToUpperInvariant().Replace(" ", "")}-{allEpics.Count + 1:D3}",
+                        ItemType = WorkItemType.Epic,
+                        Title = req.Title,
+                        Summary = req.Description,
+                        Description = $"Summary: {req.Description}\nBusiness Value: {string.Join("; ", req.AcceptanceCriteria)}",
+                        BusinessValue = string.Join("; ", req.AcceptanceCriteria),
+                        Module = module,
+                        Priority = 2,
+                        Iteration = iteration,
+                        AffectedServices = reqServiceMap.TryGetValue(req.Id, out var sl) ? sl : [],
+                        Status = WorkItemStatus.New,
+                        ProducedBy = "RequirementsExpander"
+                    });
+                }
+            }
+        }
+
+        return allEpics;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // PHASE 2: Epics → User Stories + Use Cases
+    // 1-3 epics per LLM call. For each epic, produce 3-5 vertical-sliced
+    // user stories with INVEST criteria and 1 use case with actor flows.
+    // ═══════════════════════════════════════════════════════════════════
+
+    private async Task<List<ExpandedRequirement>> Phase2_EpicsToStoriesAsync(
+        List<ExpandedRequirement> epics,
+        List<Requirement> originalReqs,
+        string module,
+        int iteration,
+        string domainCtx,
+        Func<AgentType, string, Task>? reportProgress,
+        CancellationToken ct)
+    {
+        var allResults = new List<ExpandedRequirement>();
+        var batches = epics.Chunk(Phase2BatchSize).ToList();
+
+        for (var b = 0; b < batches.Count; b++)
+        {
+            ct.ThrowIfCancellationRequested();
+            var batch = batches[b].ToList();
+
+            if (reportProgress is not null)
+                await reportProgress(Type, $"  Phase 2 batch {b + 1}/{batches.Count}: splitting {batch.Count} epics into Stories & Use Cases...");
+
+            var epicSummaries = batch.Select(e =>
+                $"  EPIC[{e.Id}]: {e.Title}\n    Summary: {Truncate(e.Summary, 300)}\n    Business Value: {Truncate(e.BusinessValue, 200)}\n    Success Criteria: {string.Join("; ", e.SuccessCriteria)}\n    Services: {string.Join(", ", e.AffectedServices)}\n    Depends On: {string.Join(", ", e.DependsOn)}");
+
+            var prompt = new LlmPrompt
+            {
+                SystemPrompt = """
+                    You are a senior product owner decomposing Epics into User Stories and Use Cases.
+                    The project's technology stack and domain context will be provided below.
+
+                    ─── YOUR ONLY JOB ─────────────────────────────────────────────
+                    For EACH epic provided, generate:
+                    • 3-5 User Stories (vertical slices delivering end-to-end user value)
+                    • 1 Use Case (actor-system interaction flow)
+
+                    ─── USER STORY RULES ──────────────────────────────────────────
+                    Title format: "As a [Persona], I want to [Action] so that [Benefit]"
+                    Derive personas from the domain model and requirements context.
+                    Common personas include end users, administrators, operators, and system integrations.
+
+                    INVEST criteria (mandatory):
+                    • Independent: can be developed without blocking on other stories
+                    • Negotiable: describes WHAT, not prescriptive HOW
+                    • Valuable: delivers observable value to a real user
+                    • Estimable: enough detail to size (1-5 story points)
+                    • Small: completable in 1 sprint (1-5 story points)
+                    • Testable: Given/When/Then acceptance criteria
+
+                    VERTICAL SLICING (mandatory):
+                    Each story must touch multiple layers (DB + Service + API + UI).
+                    A story that only touches one layer is a TASK, not a story.
+
+                    Acceptance criteria MUST use Given/When/Then format:
+                    "Given [context], when [action], then [outcome]"
+
+                    ─── USE CASE RULES ────────────────────────────────────────────
+                    Each use case describes the primary actor's interaction with the system.
+                    Include numbered main flow steps, alternative flows, pre/post conditions.
+
+                    ─── OUTPUT FORMAT ─────────────────────────────────────────────
+                    Output ONLY pipe-delimited lines. NO markdown, NO explanations.
+
+                    STORY|<id>|<parent_epic_id>|<title>|<acceptance_criteria_semicolon_sep>|<story_points>|<labels_csv>|<priority 1-3>|<services_csv>|<depends_on_ids_csv>|<detailed_spec>
+                    USECASE|<id>|<parent_epic_id>|<title>|<actor>|<preconditions>|<main_flow_steps_semicolon_sep>|<alt_flows>|<postconditions>|<services_csv>
+
+                    ID rules:
+                    • Story IDs: US-<EPIC_NUM>-<seq> e.g. US-BRD-001-01
+                    • Use Case IDs: UC-<EPIC_NUM>-01 e.g. UC-BRD-001-01
+                    • Parent epic ID must match exactly
+
+                    Story fields:
+                    • acceptance_criteria: 3-5 Given/When/Then items separated by semicolons
+                    • story_points: 1, 2, 3, 5, or 8
+                    • labels: functional area tags derived from the domain (e.g. user-management, reporting)
+                    • detailed_spec: 2-3 sentences about what this story entails technically
+                    """,
+                UserPrompt = $"""
+                    Module: {module}
+
+                    === DOMAIN MODEL ===
+                    {domainCtx}
+
+                    === EPICS TO SPLIT ({batch.Count}) ===
+                    {string.Join("\n\n", epicSummaries)}
+
+                    For each epic above, generate 3-5 User Stories + 1 Use Case.
+                    Total expected: {batch.Count * 4}-{batch.Count * 6} items.
+                    Ensure every story has acceptance criteria in Given/When/Then format.
+                    """,
+                Temperature = 0.3,
+                MaxTokens = 16384,
+                RequestingAgent = Name
+            };
+
+            var response = await _llm.GenerateAsync(prompt, ct);
+            if (response.Success && !string.IsNullOrWhiteSpace(response.Content))
+            {
+                var parsed = ParseExpansionResponse(response.Content, module, iteration);
+                var storiesAndUc = parsed.Where(p =>
+                    p.ItemType == WorkItemType.UserStory || p.ItemType == WorkItemType.UseCase).ToList();
+                _logger.LogInformation("Phase 2 batch {Batch}/{Total}: {Stories} stories + {UC} use cases (model={Model})",
+                    b + 1, batches.Count,
+                    storiesAndUc.Count(s => s.ItemType == WorkItemType.UserStory),
+                    storiesAndUc.Count(s => s.ItemType == WorkItemType.UseCase),
+                    response.Model);
+                allResults.AddRange(storiesAndUc);
+            }
+            else
+            {
+                _logger.LogWarning("Phase 2 batch {Batch} failed: {Error}", b + 1, response.Error);
+            }
+        }
+
+        return allResults;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // PHASE 3: User Stories → Tasks
+    // 2-5 stories per LLM call. For each story, produce 5-7 implementation
+    // tasks spanning the full stack: contract, DB, service, API, UI, tests.
+    // Each task has a clear Definition of Done and dependency chain.
+    // ═══════════════════════════════════════════════════════════════════
+
+    private async Task<List<ExpandedRequirement>> Phase3_StoriesToTasksAsync(
+        List<ExpandedRequirement> stories,
+        List<ExpandedRequirement> epics,
+        List<Requirement> originalReqs,
+        string module,
+        int iteration,
+        string domainCtx,
+        Func<AgentType, string, Task>? reportProgress,
+        CancellationToken ct)
+    {
+        var allTasks = new List<ExpandedRequirement>();
+        var batches = stories.Chunk(Phase3BatchSize).ToList();
+
+        // Build epic lookup for context
+        var epicLookup = epics.ToDictionary(e => e.Id, e => e, StringComparer.OrdinalIgnoreCase);
+
+        for (var b = 0; b < batches.Count; b++)
+        {
+            ct.ThrowIfCancellationRequested();
+            var batch = batches[b].ToList();
+
+            if (reportProgress is not null)
+                await reportProgress(Type, $"  Phase 3 batch {b + 1}/{batches.Count}: decomposing {batch.Count} stories into Tasks...");
+
+            var storySummaries = batch.Select(s =>
+            {
+                var parentEpic = epicLookup.TryGetValue(s.ParentId ?? "", out var ep) ? ep.Title : "Unknown Epic";
+                var ac = string.Join("; ", s.AcceptanceCriteria.Take(5));
+                return $"""
+                      STORY[{s.Id}] (parent: {s.ParentId}, epic: {parentEpic})
+                        Title: {s.Title}
+                        Story Points: {s.StoryPoints}
+                        Acceptance Criteria: {ac}
+                        Services: {string.Join(", ", s.AffectedServices)}
+                        Spec: {Truncate(s.DetailedSpec, 300)}
+                    """;
+            });
+
+            var prompt = new LlmPrompt
+            {
+                SystemPrompt = """
+                    You are a senior full-stack engineer decomposing User Stories into implementation
+                    Tasks. The project's technology stack and domain context will be provided below.
+
+                    ─── YOUR ONLY JOB ─────────────────────────────────────────────
+                    For EACH User Story, generate 5-7 concrete implementation Tasks.
+                    Tasks must follow a strict dependency chain within each story.
+
+                    ─── MANDATORY TASK CATEGORIES (in dependency order) ────────────
+                    1. CONTRACT — Define API contract (OpenAPI spec, request/response DTOs,
+                       validation rules). Tag: contract
+                       DoD: OpenAPI spec committed; DTO classes created; validation attributes defined
+
+                    2. DATABASE — Entity model, EF Core migration, indexes, constraints, seed data.
+                       Tag: database
+                       DoD: Migration created and applied; entity with all fields, FKs, indexes;
+                       seed data script if applicable
+
+                    3. SERVICE — Business logic layer with validation, domain events, error handling.
+                       Tag: service
+                       DoD: Service class with all methods; input validation; business rules enforced;
+                       domain events published; unit tests pass
+
+                    4. API — Controller/endpoint wiring service to HTTP, auth policies, error mapping.
+                       Tag: api
+                       DoD: Endpoint returns correct status codes; auth policy applied; request
+                       validation returns 400; integration test passes
+
+                    5. UI — Razor Page or Blazor component: list page, detail view, forms, navigation.
+                       Tag: ui
+                       DoD: Page renders correctly; form validation works; navigation links added;
+                       responsive layout; accessibility basics
+
+                    6. INTEGRATION TEST — Tests the full API endpoint with real DB.
+                       Tag: testing
+                       DoD: Happy path test passes; validation error test; unauthorized test;
+                       not-found test; all assertions verify response body
+
+                    7. E2E TEST — Full user flow test from UI through API to database verification.
+                       Tag: testing
+                       DoD: Test simulates user flow; verifies database state; cleanup after test
+
+                    ─── TASK QUALITY REQUIREMENTS ─────────────────────────────────
+                    Every task MUST have:
+                    • Clear title: "[T-<STORY_NUM>-<TAG>] Verb-noun action"
+                    • Description: 2-3 sentences of what exactly to build
+                    • Technical notes: Specific classes, methods, routes, table names
+                    • Definition of Done: 3-5 checkable items separated by semicolons
+                    • Effort: 2-8 hours per task (if bigger, it needs splitting later)
+                    • Dependencies: Reference parent story and predecessor task IDs
+
+                    ─── OUTPUT FORMAT ─────────────────────────────────────────────
+                    Output ONLY pipe-delimited lines. NO markdown, NO explanations.
+
+                    TASK|<id>|<parent_story_id>|<title>|<description>|<technical_notes>|<definition_of_done_semicolon_sep>|<tags_csv>|<priority 1-3>|<services_csv>|<detailed_spec>
+
+                    ID format: T-<STORY_NUM>-<SEQ>-<TAG> e.g. T-BRD-001-01-01-CONTRACT
+                    Tags: contract, database, service, api, ui, testing
+                    """,
+                UserPrompt = $"""
+                    Module: {module}
+
+                    === DOMAIN MODEL ===
+                    {domainCtx}
+
+                    === USER STORIES TO DECOMPOSE ({batch.Count}) ===
+                    {string.Join("\n", storySummaries)}
+
+                    Generate 5-7 Tasks per story. Total expected: {batch.Count * 5}-{batch.Count * 7} tasks.
+                    Follow the dependency chain: CONTRACT → DATABASE → SERVICE → API → UI → INTEGRATION TEST → E2E TEST.
+                    Every task must have a concrete Definition of Done with 3-5 checkable items.
+                    """,
+                Temperature = 0.2,
+                MaxTokens = 32768,
+                RequestingAgent = Name
+            };
+
+            var response = await _llm.GenerateAsync(prompt, ct);
+            if (response.Success && !string.IsNullOrWhiteSpace(response.Content))
+            {
+                var parsed = ParseExpansionResponse(response.Content, module, iteration);
+                var tasksOnly = parsed.Where(p => p.ItemType == WorkItemType.Task).ToList();
+                _logger.LogInformation("Phase 3 batch {Batch}/{Total}: {Count} tasks (model={Model})",
+                    b + 1, batches.Count, tasksOnly.Count, response.Model);
+                allTasks.AddRange(tasksOnly);
+            }
+            else
+            {
+                _logger.LogWarning("Phase 3 batch {Batch} failed: {Error}", b + 1, response.Error);
+            }
+        }
+
+        return allTasks;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // PHASE 4: Recursive Task Refinement
+    // Asks the LLM to evaluate each task: is it atomic (2-8 hours, one
+    // person, clear DoD)? If not, split it into sub-tasks. Recurse until
+    // all tasks are indivisible or MaxRefinementDepth is reached.
+    // ═══════════════════════════════════════════════════════════════════
+
+    private async Task<List<ExpandedRequirement>> Phase4_RecursiveTaskRefinementAsync(
+        List<ExpandedRequirement> tasks,
+        string module,
+        int iteration,
+        string domainCtx,
+        Func<AgentType, string, Task>? reportProgress,
+        CancellationToken ct,
+        int depth)
+    {
+        if (depth >= MaxRefinementDepth || tasks.Count == 0)
+        {
+            if (depth >= MaxRefinementDepth)
+                _logger.LogInformation("Phase 4: max refinement depth {Depth} reached for module '{Module}' with {Count} tasks",
+                    depth, module, tasks.Count);
+            return tasks;
+        }
+
+        // Ask LLM to evaluate which tasks need splitting
+        var taskSummaries = tasks.Select(t =>
+            $"  TASK[{t.Id}] parent={t.ParentId}\n    Title: {t.Title}\n    Description: {Truncate(t.Description, 200)}\n    DoD: {string.Join("; ", t.DefinitionOfDone.Take(5))}\n    Tags: {string.Join(", ", t.Tags)}");
+
+        // Batch into groups of 20 for evaluation
+        var evalBatches = tasks.Chunk(20).ToList();
+        var needsSplitting = new List<ExpandedRequirement>();
+        var atomic = new List<ExpandedRequirement>();
+
+        for (var b = 0; b < evalBatches.Count; b++)
+        {
+            ct.ThrowIfCancellationRequested();
+            var batch = evalBatches[b].ToList();
+
+            var batchSummaries = batch.Select(t =>
+                $"TASK[{t.Id}]: {t.Title} | DoD: {string.Join("; ", t.DefinitionOfDone.Take(3))} | Tags: {string.Join(",", t.Tags)}");
+
+            var evalPrompt = new LlmPrompt
+            {
+                SystemPrompt = """
+                    You are a senior engineering lead evaluating whether tasks are atomic enough
+                    for a developer to pick up and complete in 2-8 hours.
+
+                    For EACH task, output exactly one line:
+                    ATOMIC|<task_id>|<reason>
+                    or
+                    SPLIT|<task_id>|<reason>
+
+                    A task needs SPLIT if ANY of these are true:
+                    • It would take more than 8 hours
+                    • It covers multiple distinct technical concerns (e.g., "build API and UI")
+                    • Its Definition of Done has items spanning different layers
+                    • A single developer couldn't complete it without context-switching
+                    • The description is vague or lacks specific technical details
+
+                    A task is ATOMIC if ALL of these are true:
+                    • 2-8 hours of focused work
+                    • Single technical concern (one layer, one component)
+                    • Clear, checkable Definition of Done
+                    • One person can complete it independently
+                    • Specific enough: mentions concrete classes, methods, routes, or table names
+
+                    Output ONLY the evaluation lines. NO markdown, NO explanations.
+                    """,
+                UserPrompt = $"""
+                    Evaluate these {batch.Count} tasks:
+
+                    {string.Join("\n", batchSummaries)}
+                    """,
+                Temperature = 0.1,
+                MaxTokens = 4096,
+                RequestingAgent = Name
+            };
+
+            var evalResponse = await _llm.GenerateAsync(evalPrompt, ct);
+            if (evalResponse.Success && !string.IsNullOrWhiteSpace(evalResponse.Content))
+            {
+                var splitIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var line in evalResponse.Content.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                {
+                    var parts = line.Split('|');
+                    if (parts.Length >= 2 && parts[0].Trim().Equals("SPLIT", StringComparison.OrdinalIgnoreCase))
+                        splitIds.Add(parts[1].Trim());
+                }
+
+                foreach (var task in batch)
+                {
+                    if (splitIds.Contains(task.Id))
+                        needsSplitting.Add(task);
+                    else
+                        atomic.Add(task);
+                }
+            }
+            else
+            {
+                // If evaluation fails, treat all as atomic
+                atomic.AddRange(batch);
+            }
+        }
+
+        if (needsSplitting.Count == 0)
+        {
+            _logger.LogInformation("Phase 4 depth {Depth}: all {Count} tasks are atomic", depth, tasks.Count);
+            return tasks;
+        }
+
+        if (reportProgress is not null)
+            await reportProgress(Type, $"  Phase 4 depth {depth + 1}: splitting {needsSplitting.Count} non-atomic tasks ({atomic.Count} already atomic)...");
+
+        // Split the non-atomic tasks
+        var splitBatches = needsSplitting.Chunk(5).ToList();
+        var newSubTasks = new List<ExpandedRequirement>();
+
+        for (var b = 0; b < splitBatches.Count; b++)
+        {
+            ct.ThrowIfCancellationRequested();
+            var batch = splitBatches[b].ToList();
+
+            var splitSummaries = batch.Select(t => $"""
+                  TASK[{t.Id}] parent={t.ParentId}
+                    Title: {t.Title}
+                    Description: {Truncate(t.Description, 300)}
+                    Technical Notes: {Truncate(t.TechnicalNotes, 200)}
+                    DoD: {string.Join("; ", t.DefinitionOfDone)}
+                    Tags: {string.Join(", ", t.Tags)}
+                    Services: {string.Join(", ", t.AffectedServices)}
+                """);
+
+            var splitPrompt = new LlmPrompt
+            {
+                SystemPrompt = """
+                    You are a senior engineer splitting oversized tasks into smaller sub-tasks.
+
+                    ─── RULES ─────────────────────────────────────────────────────
+                    For EACH task provided, split it into 2-4 smaller sub-tasks where:
+                    • Each sub-task is 2-4 hours of work
+                    • Each sub-task has a single technical concern
+                    • Sub-tasks have clear dependency order between them
+                    • Each sub-task has 3-5 concrete Definition of Done items
+                    • Technical notes mention specific classes, methods, routes, tables
+
+                    ─── OUTPUT FORMAT ─────────────────────────────────────────────
+                    TASK|<id>|<parent_story_id>|<title>|<description>|<technical_notes>|<definition_of_done_semicolon_sep>|<tags_csv>|<priority 1-3>|<services_csv>|<detailed_spec>
+
+                    ID format: <original_task_id>-<sub_seq> e.g. T-BRD-001-01-01-CONTRACT-1
+                    The parent_story_id should be the SAME parent as the original task.
+
+                    Output ONLY pipe-delimited TASK lines. NO markdown, NO explanations.
+                    """,
+                UserPrompt = $"""
+                    Module: {module}
+
+                    === DOMAIN MODEL ===
+                    {domainCtx}
+
+                    === TASKS TO SPLIT ({batch.Count}) ===
+                    {string.Join("\n", splitSummaries)}
+
+                    Split each task into 2-4 atomic sub-tasks. Keep the same parent_story_id.
+                    """,
+                Temperature = 0.2,
+                MaxTokens = 16384,
+                RequestingAgent = Name
+            };
+
+            var splitResponse = await _llm.GenerateAsync(splitPrompt, ct);
+            if (splitResponse.Success && !string.IsNullOrWhiteSpace(splitResponse.Content))
+            {
+                var parsed = ParseExpansionResponse(splitResponse.Content, module, iteration);
+                var subTasks = parsed.Where(p => p.ItemType == WorkItemType.Task).ToList();
+                _logger.LogInformation("Phase 4 depth {Depth} batch {Batch}: split {Original} tasks → {New} sub-tasks",
+                    depth, b + 1, batch.Count, subTasks.Count);
+                newSubTasks.AddRange(subTasks);
+            }
+            else
+            {
+                // If split fails, keep original tasks as-is
+                _logger.LogWarning("Phase 4 depth {Depth} batch {Batch} split failed, keeping originals", depth, b + 1);
+                atomic.AddRange(batch);
+            }
+        }
+
+        // Recurse on the new sub-tasks to check if they're truly atomic
+        if (newSubTasks.Count > 0)
+        {
+            var refinedSubTasks = await Phase4_RecursiveTaskRefinementAsync(
+                newSubTasks, module, iteration, domainCtx, reportProgress, ct, depth + 1);
+            atomic.AddRange(refinedSubTasks);
+        }
+
+        _logger.LogInformation("Phase 4 depth {Depth} complete: {Atomic} atomic tasks total for module '{Module}'",
+            depth, atomic.Count, module);
+        return atomic;
     }
 
     // ─── Requirement→Service Mapping ───────────────────────────────────
@@ -1026,15 +1566,15 @@ public sealed class RequirementsExpanderAgent : IAgent
             {
                 Id = uiTaskId, ParentId = storyId,
                 ItemType = WorkItemType.Task,
-                Title = $"[{uiTaskId}] Build {primaryEntity} Razor Pages (list, detail, form) in {svcName}",
-                Description = $"Create Razor Pages for {primaryEntity} management: Index (paginated list with search/filter), Detail (read-only view), Create/Edit (form with validation). Call {svcName} API at /{routeBase}. Use shared components (DataTable, FormSection, PatientCard) and hms-theme.css.",
+                Title = $"[{uiTaskId}] Build {primaryEntity} UI pages (list, detail, form) in {svcName}",
+                Description = $"Create UI pages for {primaryEntity} management: Index (paginated list with search/filter), Detail (read-only view), Create/Edit (form with validation). Call {svcName} API at /{routeBase}. Use shared UI components and project theme.",
                 Module = resolvedModule, Priority = 2, Iteration = iteration,
                 Tags = ["ui"],
                 AffectedServices = [.. services],
                 DependsOn = [apiTaskId],
                 TechnicalNotes = $"Pages in src/GNex.Web/Pages/{resolvedModule}/{primaryEntity}/. Index.cshtml (list with DataTable component, search, filter by status), Details.cshtml (read-only summary), Create.cshtml and Edit.cshtml (forms with FluentValidation client-side mirrors). Use HttpClient to call {svcName} API at /{routeBase}. Bootstrap 5.3 responsive layout. WCAG 2.1 AA accessible (ARIA labels, keyboard nav, focus management). Include breadcrumb navigation.",
                 DefinitionOfDone = [$"{primaryEntity} list page renders with pagination and search", $"{primaryEntity} create form submits and shows success toast", $"{primaryEntity} edit form loads existing data and saves changes", "Responsive layout works on mobile and desktop", "WCAG 2.1 AA: all form fields have labels, ARIA attributes present", "Navigation menu includes {primaryEntity} link"],
-                DetailedSpec = $"Pages: Pages/{resolvedModule}/{primaryEntity}/Index.cshtml (list), Pages/{resolvedModule}/{primaryEntity}/Details.cshtml (view), Pages/{resolvedModule}/{primaryEntity}/Create.cshtml (form), Pages/{resolvedModule}/{primaryEntity}/Edit.cshtml (form). PageModel classes inject HttpClient configured for {svcName} base URL. Use IHttpClientFactory with named client '{svcShort}-api'. DTOs: reuse {primaryEntity}ResponseDto, {primaryEntity}CreateDto, {primaryEntity}UpdateDto from API contracts. Layout: _Layout.cshtml with sidebar nav. CSS: hms-theme.css variables.",
+                DetailedSpec = $"Pages: Pages/{resolvedModule}/{primaryEntity}/Index.cshtml (list), Pages/{resolvedModule}/{primaryEntity}/Details.cshtml (view), Pages/{resolvedModule}/{primaryEntity}/Create.cshtml (form), Pages/{resolvedModule}/{primaryEntity}/Edit.cshtml (form). PageModel classes inject HttpClient configured for {svcName} base URL. Use IHttpClientFactory with named client '{svcShort}-api'. DTOs: reuse {primaryEntity}ResponseDto, {primaryEntity}CreateDto, {primaryEntity}UpdateDto from API contracts. Layout: _Layout.cshtml with sidebar nav.",
                 Status = WorkItemStatus.New,
                 ProducedBy = "RequirementsExpander"
             });
@@ -1105,12 +1645,12 @@ public sealed class RequirementsExpanderAgent : IAgent
         if (moduleLower.Contains("audit") || moduleLower.Contains("compliance"))
             return "compliance officer";
         if (reqTitleLower.Contains("diagnosis") || reqTitleLower.Contains("prescription") || reqTitleLower.Contains("treatment"))
-            return "doctor";
+            return "domain expert";
         if (reqTitleLower.Contains("admin") || reqTitleLower.Contains("config") || reqTitleLower.Contains("permission"))
             return "administrator";
         if (reqTitleLower.Contains("billing") || reqTitleLower.Contains("claim") || reqTitleLower.Contains("invoice"))
             return "billing clerk";
-        return "nurse";
+        return "user";
     }
 
     /// <summary>
@@ -1144,7 +1684,7 @@ public sealed class RequirementsExpanderAgent : IAgent
         var prompt = new LlmPrompt
         {
             SystemPrompt = """
-                You are a healthcare software architect mapping work items to concrete microservices.
+                You are a software architect mapping work items to concrete microservices.
 
                 Given a list of work items and a microservice catalog, determine which service(s)
                 each item belongs to. For EACH item, output a single pipe-delimited line:
@@ -1152,7 +1692,7 @@ public sealed class RequirementsExpanderAgent : IAgent
                 <item_id>|<service_name>|<primary_entity>|<enrichment_note>
 
                 Rules:
-                - service_name: MUST be one of the service names from the catalog (e.g. PatientService)
+                - service_name: MUST be one of the service names from the catalog
                 - primary_entity: The main entity this item works with (from the service's entity list)
                 - enrichment_note: One sentence describing what this item does in context of the service
                 - If an item touches multiple services, pick the PRIMARY one
@@ -1448,10 +1988,10 @@ public sealed class RequirementsExpanderAgent : IAgent
 
         var action = string.IsNullOrWhiteSpace(t) ? "complete the requested workflow" : ToSentenceFragment(t);
         var value = string.IsNullOrWhiteSpace(fallbackContext)
-            ? "patient care workflows are safe and efficient"
+            ? "the system operates correctly and efficiently"
             : ToSentenceFragment(fallbackContext);
 
-        return $"As a clinical user, I want to {action} so that {value}.";
+        return $"As a user, I want to {action} so that {value}.";
     }
 
     private static List<string> EnsureGivenWhenThenCriteria(List<string> criteria)
@@ -1686,7 +2226,7 @@ public sealed class RequirementsExpanderAgent : IAgent
     private static string EnsureBugEnvironment(string environment)
     {
         var e = environment.Trim();
-        return string.IsNullOrWhiteSpace(e) ? ".NET 8, PostgreSQL 16, Local" : e;
+        return string.IsNullOrWhiteSpace(e) ? "Development, Local" : e;
     }
 
     private static List<string> EnsureBugSteps(List<string> steps)
@@ -1754,70 +2294,117 @@ public sealed class RequirementsExpanderAgent : IAgent
     private static List<Requirement> ImproveRequirementsForInvest(
         List<Requirement> requirements,
         List<RequirementQualityScore> scores,
-        int pass)
+        int pass) => requirements; // Legacy — no longer used; kept for compilation safety
+
+    // ─── LLM-based Quality Assessment ───────────────────────────────────────
+
+    private sealed class QualityAssessmentResult
     {
-        var scoreById = new Dictionary<string, RequirementQualityScore>(StringComparer.OrdinalIgnoreCase);
-        foreach (var s in scores)
-            scoreById.TryAdd(s.RequirementId, s);
-        var improved = new List<Requirement>(requirements.Count);
+        public int ReadyCount { get; init; }
+        public int NeedsWorkCount { get; init; }
+        public string ScorecardMarkdown { get; init; } = string.Empty;
+        public List<string> Issues { get; init; } = [];
+        /// <summary>Per-requirement quality hints the LLM expansion prompt can reference.</summary>
+        public Dictionary<string, string> QualityHints { get; init; } = new(StringComparer.OrdinalIgnoreCase);
+    }
 
-        foreach (var req in requirements)
+    private async Task<QualityAssessmentResult> RunLlmQualityAssessmentAsync(
+        List<Requirement> requirements, CancellationToken ct)
+    {
+        // Process in batches to avoid token limits
+        const int batchSize = 40;
+        var allLines = new List<string>();
+        var allIssues = new List<string>();
+        var hints = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var readyCount = 0;
+        var needsWorkCount = 0;
+
+        for (var i = 0; i < requirements.Count; i += batchSize)
         {
-            if (!scoreById.TryGetValue(req.Id, out var score) || score.IsReady)
+            ct.ThrowIfCancellationRequested();
+            var batch = requirements.Skip(i).Take(batchSize).ToList();
+
+            var reqLines = batch.Select(r =>
+                $"- {r.Id}: \"{r.Title}\" | Desc({r.Description.Length} chars): {Truncate(r.Description, 150)} | AC: {r.AcceptanceCriteria.Count} | Tags: {string.Join(",", r.Tags)} | Deps: {string.Join(",", r.DependsOn)}");
+
+            var prompt = new LlmPrompt
             {
-                improved.Add(req);
-                continue;
-            }
+                SystemPrompt = """
+                    You are a requirements quality analyst. Evaluate each requirement
+                    against INVEST criteria for the project described in the domain context.
 
-            var title = req.Title;
-            if (title.Length < 6)
-                title = $"{req.Module} requirement {req.Id}";
+                    For each requirement, output exactly ONE line in this format:
+                    SCORE|<req_id>|<score 0-100>|<ready YES or NO>|<one-line quality note or improvement hint>
 
-            var description = req.Description;
-            if (description.Length < 40)
+                    Scoring guide:
+                    - 90-100: Excellent — clear actor, specific behavior, measurable outcome, testable criteria
+                    - 70-89: Good — minor gaps in specificity but implementable
+                    - 50-69: Fair — vague language, missing actor or outcome, needs enrichment during expansion
+                    - 0-49: Weak — too abstract, no testable criteria, multiple concerns bundled together
+
+                    Be generous to domain-specific requirements that reference known business
+                    workflows and processes even if they lack formal Given/When/Then formatting.
+                    Real BRD requirements are valuable even without perfect syntax.
+
+                    Output ONLY SCORE lines. No markdown. No explanations.
+                    """,
+                UserPrompt = $"Evaluate these {batch.Count} requirements:\n{string.Join("\n", reqLines)}",
+                Temperature = 0.1,
+                MaxTokens = 4096,
+                RequestingAgent = Name
+            };
+
+            var response = await _llm.GenerateAsync(prompt, ct);
+            if (response.Success && !string.IsNullOrWhiteSpace(response.Content))
             {
-                description = $"{req.Title}. This requirement must deliver measurable value, preserve safety constraints, and support traceable implementation and testing in the {req.Module} module.";
-            }
+                foreach (var line in response.Content.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                {
+                    if (!line.StartsWith("SCORE|", StringComparison.OrdinalIgnoreCase)) continue;
+                    var parts = line.Split('|');
+                    if (parts.Length < 5) continue;
 
-            var criteria = req.AcceptanceCriteria
-                .Where(c => !string.IsNullOrWhiteSpace(c))
-                .Take(7)
-                .ToList();
+                    var reqId = parts[1].Trim();
+                    var scoreStr = parts[2].Trim();
+                    var ready = parts[3].Trim().Equals("YES", StringComparison.OrdinalIgnoreCase);
+                    var note = parts[4].Trim();
 
-            if (criteria.Count == 0)
-            {
-                criteria =
-                [
-                    "Given a valid request context, when the user performs the required action, then the system completes it successfully and persists the result.",
-                    "Given invalid or incomplete input, when the action is attempted, then the system rejects the request with a clear validation message.",
-                    "Given an authorized actor executes the flow, when an update occurs, then an audit record is captured with timestamp and actor identity."
-                ];
+                    if (!int.TryParse(scoreStr, out var score)) score = 50;
+
+                    allLines.Add($"- {reqId} | Score={score} | Ready={ready} | {note}");
+                    if (ready) readyCount++;
+                    else
+                    {
+                        needsWorkCount++;
+                        allIssues.Add($"{reqId}: {note}");
+                    }
+                    hints[reqId] = note;
+                }
             }
             else
             {
-                criteria = criteria.Select(NormalizeGivenWhenThen).ToList();
-                if (criteria.Count < 2)
+                // LLM failed for this batch — mark all as ready (don't block)
+                _logger.LogWarning("LLM quality assessment failed for batch {Start}-{End}: {Error}",
+                    i, i + batch.Count, response.Error);
+                foreach (var r in batch)
                 {
-                    criteria.Add("Given a downstream dependency is unavailable, when the request is processed, then the system returns a deterministic recoverable error and records telemetry.");
+                    allLines.Add($"- {r.Id} | Score=N/A | Ready=Yes | LLM assessment unavailable — proceeding with expansion");
+                    readyCount++;
                 }
             }
-
-            improved.Add(new Requirement
-            {
-                Id = req.Id,
-                SourceFile = req.SourceFile,
-                Section = req.Section,
-                HeadingLevel = req.HeadingLevel,
-                Title = title,
-                Description = description,
-                Module = req.Module,
-                Tags = [.. req.Tags],
-                AcceptanceCriteria = [.. criteria],
-                DependsOn = [.. req.DependsOn]
-            });
         }
 
-        return improved;
+        var scorecard = "# Requirement Quality Scorecard (LLM-assessed)\n\n"
+                        + $"Total: {requirements.Count} | Strong: {readyCount} | Needs enrichment: {needsWorkCount}\n\n"
+                        + string.Join("\n", allLines);
+
+        return new QualityAssessmentResult
+        {
+            ReadyCount = readyCount,
+            NeedsWorkCount = needsWorkCount,
+            ScorecardMarkdown = scorecard,
+            Issues = allIssues,
+            QualityHints = hints
+        };
     }
 
     private static string NormalizeGivenWhenThen(string criterion)

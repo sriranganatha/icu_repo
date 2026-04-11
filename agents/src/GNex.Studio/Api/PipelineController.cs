@@ -139,7 +139,11 @@ public sealed class PipelineController : ControllerBase
             AgentContext? context = null;
             try
             {
-                context = await _orchestrator.RunPipelineAsync(pipelineConfig, appCt);
+                // Use project-scoped pipeline when ProjectId is provided to leverage
+                // DB-backed workflow stages, agent resolution, and project isolation.
+                context = !string.IsNullOrWhiteSpace(pipelineConfig.ProjectId)
+                    ? await _orchestrator.RunProjectPipelineAsync(pipelineConfig.ProjectId, pipelineConfig, appCt)
+                    : await _orchestrator.RunPipelineAsync(pipelineConfig, appCt);
 
                 // ── Persist to JSON snapshot ──
                 stateStore.TrackCompletion(
@@ -175,6 +179,22 @@ public sealed class PipelineController : ControllerBase
                     TechnicalNotes = e.TechnicalNotes,
                     DefinitionOfDone = e.DefinitionOfDone,
                     DetailedSpec = e.DetailedSpec,
+                    // Epic fields
+                    Summary = e.Summary, BusinessValue = e.BusinessValue,
+                    SuccessCriteria = e.SuccessCriteria, Scope = e.Scope,
+                    // Story fields
+                    StoryPoints = e.StoryPoints, Labels = e.Labels,
+                    // Use Case fields
+                    Actor = e.Actor, Preconditions = e.Preconditions,
+                    MainFlow = e.MainFlow, AlternativeFlows = e.AlternativeFlows,
+                    Postconditions = e.Postconditions,
+                    // Bug fields
+                    Severity = e.Severity, Environment = e.Environment,
+                    StepsToReproduce = e.StepsToReproduce,
+                    ExpectedResult = e.ExpectedResult, ActualResult = e.ActualResult,
+                    // Gap-analysis fields
+                    AffectedServices = e.AffectedServices, ProducedBy = e.ProducedBy,
+                    Coverage = e.Coverage.ToString(),
                     CreatedAt = e.CreatedAt, StartedAt = e.StartedAt, CompletedAt = e.CompletedAt,
                     AssignedAgent = e.AssignedAgent
                 }));
