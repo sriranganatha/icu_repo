@@ -693,8 +693,8 @@ public sealed class BacklogAgent : IAgent
             var expected = BuildExpectedResult(finding);
             var actual = BuildActualResult(finding);
 
-            var bugModule = InferModuleFromFinding(finding);
-            var svcDef = InferServiceDefFromFinding(finding);
+            var bugModule = InferModuleFromFinding(finding, context);
+            var svcDef = InferServiceDefFromFinding(finding, context);
             var svcLabel = svcDef?.Name ?? "UnknownService";
             var schema = svcDef?.Schema ?? "unknown";
             var entityCsv = svcDef is not null ? string.Join(", ", svcDef.Entities) : "";
@@ -799,11 +799,11 @@ public sealed class BacklogAgent : IAgent
             ? "The operation fails or produces unstable behavior."
             : finding.Message;
 
-    private static string InferModuleFromFinding(ReviewFinding finding)
+    private static string InferModuleFromFinding(ReviewFinding finding, AgentContext context)
     {
         var path = finding.FilePath ?? string.Empty;
         // Try to match a known microservice from the file path
-        var svc = InferServiceDefFromFinding(finding);
+        var svc = InferServiceDefFromFinding(finding, context);
         if (svc is not null) return svc.Name.Replace("Service", "");
         if (path.Contains("database", StringComparison.OrdinalIgnoreCase)) return "Database";
         if (path.Contains("service", StringComparison.OrdinalIgnoreCase)) return "ServiceLayer";
@@ -812,10 +812,10 @@ public sealed class BacklogAgent : IAgent
         return "General";
     }
 
-    private static MicroserviceDefinition? InferServiceDefFromFinding(ReviewFinding finding)
+    private static MicroserviceDefinition? InferServiceDefFromFinding(ReviewFinding finding, AgentContext context)
     {
         var combined = $"{finding.FilePath ?? ""} {finding.Message ?? ""} {finding.Category ?? ""}".ToLowerInvariant();
-        foreach (var svc in MicroserviceCatalog.All)
+        foreach (var svc in ServiceCatalogResolver.GetServices(context))
         {
             var svcLower = svc.Name.Replace("Service", "").ToLowerInvariant();
             if (combined.Contains(svcLower) ||

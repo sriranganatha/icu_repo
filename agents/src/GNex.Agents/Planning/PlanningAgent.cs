@@ -99,10 +99,10 @@ public sealed class PlanningAgent : IAgent
             if (intResponse.Success)
                 svc.IntegrationContracts = intResponse.Facts;
 
-            // Query compliance constraints
+            // Query compliance constraints (HIPAA, SOC2, or domain-specific)
             var compResponse = await _broker.ResolveAsync(new ContextQuery
             {
-                From = Type, To = AgentType.HipaaCompliance,
+                From = Type, To = AgentType.Soc2Compliance,
                 Intent = QueryIntent.ComplianceConstraints,
                 Module = svc.ServiceName
             }, context, ct);
@@ -341,10 +341,10 @@ public sealed class PlanningAgent : IAgent
             },
             new()
             {
-                Name = "PHI Protection (HIPAA §164.312)",
-                Description = "Protected Health Information must be encrypted at rest, audit-logged on access, and subject to minimum-necessary access rules.",
+                Name = "Sensitive Data Protection",
+                Description = "Sensitive data must be encrypted at rest, audit-logged on access, and subject to minimum-necessary access rules per applicable compliance standards.",
                 AffectsLayers = ["Database", "Service", "Application", "Integration"],
-                EnforcedBy = [AgentType.HipaaCompliance, AgentType.Security, AgentType.AccessControl],
+                EnforcedBy = [AgentType.Security, AgentType.AccessControl, AgentType.Soc2Compliance],
                 Priority = 1
             },
             new()
@@ -381,19 +381,16 @@ public sealed class PlanningAgent : IAgent
             }
         };
 
-        // Add data-classification concern if PHI fields detected
-        if (services.Any(s => s.Entities.Any(e =>
-            e.Contains("Patient", StringComparison.OrdinalIgnoreCase) ||
-            e.Contains("Encounter", StringComparison.OrdinalIgnoreCase) ||
-            e.Contains("Diagnosis", StringComparison.OrdinalIgnoreCase))))
+        // Add data-classification concern when sensitive entities are detected
+        if (services.Any(s => s.Entities.Count > 0))
         {
             concerns.Add(new CrossCuttingConcern
             {
                 Name = "Data Classification",
-                Description = "Entities containing PHI must be classified (Public/Internal/Confidential/Restricted). API responses must redact Restricted fields per role.",
+                Description = "Entities should be classified (Public/Internal/Confidential/Restricted). API responses must redact Restricted fields per role.",
                 AffectsLayers = ["Database", "Service", "Application"],
-                EnforcedBy = [AgentType.Security, AgentType.HipaaCompliance],
-                Priority = 1
+                EnforcedBy = [AgentType.Security, AgentType.Soc2Compliance],
+                Priority = 2
             });
         }
 
@@ -413,7 +410,7 @@ public sealed class PlanningAgent : IAgent
         instructions[AgentType.Application] = FormatAppInstructions(services, plan);
         instructions[AgentType.Integration] = FormatIntegrationInstructions(services, plan);
         instructions[AgentType.Testing] = FormatTestInstructions(services, plan);
-        instructions[AgentType.Security] = $"Scan all generated code for: OWASP Top 10, PHI exposure, missing auth, hardcoded secrets. Services: {serviceList}";
+        instructions[AgentType.Security] = $"Scan all generated code for: OWASP Top 10, sensitive data exposure, missing auth, hardcoded secrets. Services: {serviceList}";
         instructions[AgentType.Review] = $"Full review pass: requirement traceability, code coverage, compliance checks, naming conventions. Focus on: {serviceList}";
 
         return instructions;
@@ -502,16 +499,15 @@ public sealed class PlanningAgent : IAgent
     {
         return
         [
-            "HIPAA §164.312 — Access Control, Audit, PHI Encryption, Minimum Necessary",
             "SOC 2 Type II — CC6 (Access), CC7 (Monitoring), CC8 (Change Management)",
             "OWASP Top 10 2025 — Injection, Broken Access, Cryptographic Failures, SSRF",
-            "HL7 FHIR R4 — Patient, Encounter, Observation, DiagnosticReport resources",
             "Clean Architecture — Domain → Application → Infrastructure → WebAPI",
             "Multi-Tenant — Schema-per-service, TenantId column, EF query filters, RLS",
             "Event-Driven — Kafka with transactional outbox, idempotent consumers",
             "REST API — Minimal APIs, consistent error responses, pagination, HATEOAS links",
             "Observability — OpenTelemetry, Prometheus, structured logging, correlation IDs",
-            "Testing — xUnit + Moq, arrange-act-assert, test coverage > 80%"
+            "Testing — xUnit + Moq, arrange-act-assert, test coverage > 80%",
+            "Data Protection — Encryption at rest, audit logging, role-based access"
         ];
     }
 
@@ -524,7 +520,7 @@ public sealed class PlanningAgent : IAgent
         var prompt = new LlmPrompt
         {
             SystemPrompt = """
-                You are a senior architect reviewing an implementation plan for a healthcare HMS.
+                You are a senior architect reviewing a software implementation plan.
                 Identify any missing concerns, risky execution orderings, or overlooked dependencies.
                 Be concise. Output a numbered list of recommendations (max 10).
                 """,

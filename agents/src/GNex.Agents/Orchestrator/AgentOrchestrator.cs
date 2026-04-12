@@ -41,7 +41,7 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
         [AgentType.RequirementsReader]    = [],
         [AgentType.Architect]             = [AgentType.RequirementsReader],
         [AgentType.PlatformBuilder]       = [AgentType.Architect],
-        [AgentType.RequirementsExpander]  = [AgentType.RequirementsReader],
+        [AgentType.RequirementsExpander]  = [AgentType.RequirementsReader, AgentType.Architect],
         [AgentType.Backlog]               = [AgentType.RequirementsExpander],
         // Code-gen agents depend only on PlatformBuilder (not Backlog) because Backlog
         // cycles continuously. First dispatch is gated by backlogRanAtLeastOnce flag;
@@ -58,7 +58,7 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
         [AgentType.Soc2Compliance]       = [AgentType.RequirementsReader],
         [AgentType.AccessControl]        = [AgentType.RequirementsReader],
         [AgentType.Observability]        = [AgentType.RequirementsReader],
-        [AgentType.Infrastructure]       = [AgentType.RequirementsReader],
+        [AgentType.Infrastructure]       = [AgentType.Architect],
         [AgentType.ApiDocumentation]     = [AgentType.RequirementsReader],
         [AgentType.Performance]          = [AgentType.RequirementsReader],
         // Remediation — after Review

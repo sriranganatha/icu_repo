@@ -50,7 +50,7 @@ public sealed class RequirementAnalyzerAgent : IAgent
         reportSb.AppendLine();
 
         // ─── Step 1: Build service→artifact index ───
-        var artifactIndex = BuildArtifactIndex(artifacts);
+        var artifactIndex = BuildArtifactIndex(artifacts, context);
         if (context.ReportProgress is not null)
             await context.ReportProgress(Type, $"Built artifact index: {artifactIndex.Count} services, {artifacts.Count} total artifacts");
         reportSb.AppendLine("## Artifact Inventory");
@@ -69,7 +69,7 @@ public sealed class RequirementAnalyzerAgent : IAgent
 
         foreach (var req in context.Requirements)
         {
-            var coverage = AnalyzeRequirementCoverage(req, artifacts, findings, context.DomainModel);
+            var coverage = AnalyzeRequirementCoverage(req, artifacts, findings, context.DomainModel, context);
             var module = string.IsNullOrEmpty(req.Module) ? "General" : req.Module;
 
             // Update any expanded requirements linked to this requirement
@@ -106,7 +106,7 @@ public sealed class RequirementAnalyzerAgent : IAgent
 
         // ─── Step 3: Cross-cutting gap detection ───
         reportSb.AppendLine("## Cross-Cutting Gap Detection");
-        var crossCuttingGaps = DetectCrossCuttingGaps(artifacts, findings, context.DomainModel);
+        var crossCuttingGaps = DetectCrossCuttingGaps(artifacts, findings, context.DomainModel, context);
         foreach (var gap in crossCuttingGaps)
             reportSb.AppendLine($"- {gap}");
         reportSb.AppendLine();
@@ -135,7 +135,7 @@ public sealed class RequirementAnalyzerAgent : IAgent
 
         // ─── Step 5: Dependency chain resolution ───
         reportSb.AppendLine("## Dependency Resolution");
-        ResolveDependencyChains(context.ExpandedRequirements, newStories, context.DomainModel);
+        ResolveDependencyChains(context.ExpandedRequirements, newStories, context.DomainModel, context);
         reportSb.AppendLine($"- Resolved dependency chains for {newStories.Count + context.ExpandedRequirements.Count} items");
         reportSb.AppendLine();
 
@@ -202,7 +202,7 @@ public sealed class RequirementAnalyzerAgent : IAgent
         List<string> AffectedServices);
 
     private CoverageResult AnalyzeRequirementCoverage(Requirement req, List<CodeArtifact> artifacts,
-        List<ReviewFinding> findings, ParsedDomainModel? domainModel)
+        List<ReviewFinding> findings, ParsedDomainModel? domainModel, AgentContext context)
     {
         var gaps = new List<string>();
         var matchingPaths = new List<string>();
@@ -213,7 +213,7 @@ public sealed class RequirementAnalyzerAgent : IAgent
         var title = req.Title.ToLowerInvariant();
         var desc = req.Description.ToLowerInvariant();
 
-        foreach (var svc in MicroserviceCatalog.All)
+        foreach (var svc in ServiceCatalogResolver.GetServices(context))
         {
             var svcLower = svc.Name.ToLowerInvariant().Replace("service", "");
             if (tags.Any(t => t.Equals(svc.ShortName, StringComparison.OrdinalIgnoreCase)) ||
@@ -313,14 +313,14 @@ public sealed class RequirementAnalyzerAgent : IAgent
 
     // ─── Cross-Cutting Gap Detection ───────────────────────────────────
     private static List<string> DetectCrossCuttingGaps(List<CodeArtifact> artifacts,
-        List<ReviewFinding> findings, ParsedDomainModel? domainModel)
+        List<ReviewFinding> findings, ParsedDomainModel? domainModel, AgentContext context)
     {
         var gaps = new List<string>();
         var artifactsByLayer = artifacts.GroupBy(a => a.Layer).ToDictionary(g => g.Key, g => g.ToList());
 
         // 1. Missing integration tests
         if (!artifactsByLayer.ContainsKey(ArtifactLayer.Integration) ||
-            artifactsByLayer[ArtifactLayer.Integration].Count < MicroserviceCatalog.All.Length)
+            artifactsByLayer[ArtifactLayer.Integration].Count < ServiceCatalogResolver.GetServices(context).Count)
             gaps.Add("Missing integration layer for some services — inter-service communication may fail");
 
         // 2. Missing security artifacts
@@ -329,7 +329,7 @@ public sealed class RequirementAnalyzerAgent : IAgent
 
         // 3. Missing compliance artifacts
         if (!artifactsByLayer.ContainsKey(ArtifactLayer.Compliance))
-            gaps.Add("No compliance artifacts — HIPAA/SOC2 controls not generated");
+            gaps.Add("No compliance artifacts — regulatory controls not generated");
 
         // 4. Missing observability
         if (!artifactsByLayer.ContainsKey(ArtifactLayer.Observability))
@@ -338,7 +338,7 @@ public sealed class RequirementAnalyzerAgent : IAgent
         // 5. Service-to-service dependency gaps
         if (domainModel is not null)
         {
-            foreach (var svc in MicroserviceCatalog.All)
+            foreach (var svc in ServiceCatalogResolver.GetServices(context))
             {
                 foreach (var dep in svc.DependsOn)
                 {
@@ -386,8 +386,8 @@ public sealed class RequirementAnalyzerAgent : IAgent
         var prompt = new LlmPrompt
         {
             SystemPrompt = """
-                You are a senior healthcare software architect and requirements analyst.
-                You write implementation-ready user stories and use cases for a Hospital Management System.
+                You are a senior software architect and requirements analyst.
+                You write implementation-ready user stories and use cases for enterprise software systems.
                 
                 Each story must be specific enough for a developer to implement:
                 - Include acceptance criteria that map to testable conditions
@@ -395,7 +395,7 @@ public sealed class RequirementAnalyzerAgent : IAgent
                 - Include data model hints (entities, fields, relationships)
                 - Include API contract expectations (method, path, request/response shape)
                 - Specify validation rules and business constraints
-                - Note HIPAA/compliance implications if any
+                - Note compliance/regulatory implications if any
                 - Declare dependencies on other stories/features
                 
                 Output EXACTLY in this format — one item per line:
@@ -416,7 +416,7 @@ public sealed class RequirementAnalyzerAgent : IAgent
                 {existingBlock}
                 
                 === MICROSERVICE CATALOG ===
-                {string.Join("\n", MicroserviceCatalog.All.Select(s => $"  - {s.Name} ({s.Schema}): entities=[{string.Join(",", s.Entities)}], depends=[{string.Join(",", s.DependsOn)}]"))}
+                {string.Join("\n", ServiceCatalogResolver.GetServices(context).Select(s => $"  - {s.Name} ({s.Schema}): entities=[{string.Join(",", s.Entities)}], depends=[{string.Join(",", s.DependsOn)}]"))}
                 
                 Generate user stories, use cases, and tasks to close ALL identified gaps.
                 Be specific — downstream agents will generate code directly from your specifications.
@@ -546,7 +546,7 @@ public sealed class RequirementAnalyzerAgent : IAgent
 
     // ─── Dependency Chain Resolution ───────────────────────────────────
     private static void ResolveDependencyChains(IList<ExpandedRequirement> existing,
-        List<ExpandedRequirement> newItems, ParsedDomainModel? domainModel)
+        List<ExpandedRequirement> newItems, ParsedDomainModel? domainModel, AgentContext context)
     {
         var all = existing.Concat(newItems).ToList();
         var byId = all.ToDictionary(e => e.Id);
@@ -562,7 +562,7 @@ public sealed class RequirementAnalyzerAgent : IAgent
             {
                 foreach (var svcName in item.AffectedServices)
                 {
-                    var svc = MicroserviceCatalog.ByName(svcName);
+                    var svc = ServiceCatalogResolver.ByName(context, svcName);
                     if (svc is null) continue;
 
                     foreach (var dep in svc.DependsOn)
@@ -601,13 +601,13 @@ public sealed class RequirementAnalyzerAgent : IAgent
 
     // ─── Artifact Indexing ─────────────────────────────────────────────
     private static Dictionary<string, Dictionary<ArtifactLayer, List<CodeArtifact>>> BuildArtifactIndex(
-        List<CodeArtifact> artifacts)
+        List<CodeArtifact> artifacts, AgentContext context)
     {
         var index = new Dictionary<string, Dictionary<ArtifactLayer, List<CodeArtifact>>>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var art in artifacts)
         {
-            var svc = ExtractServiceName(art);
+            var svc = ExtractServiceName(art, context);
             if (!index.ContainsKey(svc)) index[svc] = new Dictionary<ArtifactLayer, List<CodeArtifact>>();
             if (!index[svc].ContainsKey(art.Layer)) index[svc][art.Layer] = [];
             index[svc][art.Layer].Add(art);
@@ -616,14 +616,14 @@ public sealed class RequirementAnalyzerAgent : IAgent
         return index;
     }
 
-    private static string ExtractServiceName(CodeArtifact art)
+    private static string ExtractServiceName(CodeArtifact art, AgentContext context)
     {
         // Try namespace first
         var parts = art.Namespace.Split('.');
         if (parts.Length >= 2) return parts[1]; // e.g. GNex.PatientService → PatientService
 
         // Try path
-        foreach (var svc in MicroserviceCatalog.All)
+        foreach (var svc in ServiceCatalogResolver.GetServices(context))
         {
             if (art.RelativePath.Contains(svc.Name, StringComparison.OrdinalIgnoreCase) ||
                 art.RelativePath.Contains(svc.ShortName, StringComparison.OrdinalIgnoreCase))

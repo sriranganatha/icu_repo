@@ -52,7 +52,7 @@ public sealed class SecurityAgent : IAgent
 
             // ── Generate security artifacts ──
             if (context.ReportProgress is not null)
-                await context.ReportProgress(Type, "Generating security middleware — input validation, rate limiting, security headers, API key validator, encryption, PHI redaction");
+                await context.ReportProgress(Type, "Generating security middleware — input validation, rate limiting, security headers, API key validator, encryption, sensitive data redaction");
             artifacts.Add(GenerateInputValidationMiddleware());
             artifacts.Add(GenerateRateLimitingPolicy());
             artifacts.Add(GenerateSecurityHeadersMiddleware());
@@ -76,7 +76,7 @@ public sealed class SecurityAgent : IAgent
                 Artifacts = artifacts, Findings = findings,
                 Messages = [new AgentMessage { From = Type, To = AgentType.Orchestrator,
                     Subject = "Security scan complete",
-                    Body = $"{findings.Count} security findings. Generated: input validation, rate limiting, security headers, API key validation, PHI redaction, encryption helpers." }],
+                    Body = $"{findings.Count} security findings. Generated: input validation, rate limiting, security headers, API key validation, sensitive data redaction, encryption helpers." }],
                 Duration = sw.Elapsed
             };
         }
@@ -210,7 +210,7 @@ public sealed class SecurityAgent : IAgent
         var findings = new List<ReviewFinding>();
         var content = artifact.Content;
 
-        // PHI fields exposed in DTOs without classification
+        // Sensitive fields exposed in DTOs without classification
         var phiPatterns = new[] { "DateOfBirth", "SocialSecurity", "SSN", "MedicalRecordNumber",
             "InsuranceId", "DriversLicense", "Diagnosis", "TreatmentPlan" };
 
@@ -225,15 +225,15 @@ public sealed class SecurityAgent : IAgent
                         ArtifactId = artifact.Id, FilePath = artifact.RelativePath,
                         Severity = ReviewSeverity.Warning,
                         Category = "OWASP-A04-DataExposure",
-                        Message = $"PHI field '{phi}' in DTO '{artifact.FileName}' without classification marker.",
-                        Suggestion = "Add ClassificationCode to DTOs containing PHI for data governance."
+                        Message = $"Sensitive field '{phi}' in DTO '{artifact.FileName}' without classification marker.",
+                        Suggestion = "Add ClassificationCode to DTOs containing sensitive data for data governance."
                     });
                     break; // One finding per DTO
                 }
             }
         }
 
-        // Logging PHI
+        // Logging sensitive data
         if (Regex.IsMatch(content, @"Log(Information|Debug|Warning)\(.*?(Name|Birth|SSN|Medical)", RegexOptions.IgnoreCase))
         {
             findings.Add(new ReviewFinding
@@ -241,8 +241,8 @@ public sealed class SecurityAgent : IAgent
                 ArtifactId = artifact.Id, FilePath = artifact.RelativePath,
                 Severity = ReviewSeverity.SecurityViolation,
                 Category = "OWASP-A04-DataExposure",
-                Message = $"Potential PHI in log statements in '{artifact.FileName}'.",
-                Suggestion = "Never log PHI. Use IDs and correlation tokens instead."
+                Message = $"Potential sensitive data in log statements in '{artifact.FileName}'.",
+                Suggestion = "Never log sensitive data. Use IDs and correlation tokens instead."
             });
         }
 
@@ -491,7 +491,7 @@ public sealed class SecurityAgent : IAgent
         FileName = "DataEncryptionHelper.cs",
         Namespace = "GNex.SharedKernel.Security",
         ProducedBy = AgentType.Security,
-        TracedRequirementIds = ["NFR-SEC-01", "NFR-HIPAA-01"],
+        TracedRequirementIds = ["NFR-SEC-01", "NFR-DATA-01"],
         Content = """
             using System.Security.Cryptography;
             using System.Text;
@@ -499,7 +499,7 @@ public sealed class SecurityAgent : IAgent
             namespace GNex.SharedKernel.Security;
 
             /// <summary>
-            /// AES-256-GCM encryption for PHI fields at rest.
+            /// AES-256-GCM encryption for sensitive fields at rest.
             /// Key management delegates to IKeyProvider (Azure Key Vault / AWS KMS).
             /// </summary>
             public static class DataEncryptionHelper
@@ -549,15 +549,15 @@ public sealed class SecurityAgent : IAgent
         FileName = "PhiRedactionFilter.cs",
         Namespace = "GNex.SharedKernel.Security",
         ProducedBy = AgentType.Security,
-        TracedRequirementIds = ["NFR-HIPAA-01", "OWASP-A04"],
+        TracedRequirementIds = ["NFR-DATA-01", "OWASP-A04"],
         Content = """
             using System.Text.RegularExpressions;
 
             namespace GNex.SharedKernel.Security;
 
             /// <summary>
-            /// Redacts PHI from log messages and API error responses.
-            /// HIPAA Safe Harbor: removes 18 identifier categories.
+            /// Redacts sensitive data from log messages and API error responses.
+            /// Data protection: removes 18 identifier categories.
             /// </summary>
             public static partial class PhiRedactionFilter
             {

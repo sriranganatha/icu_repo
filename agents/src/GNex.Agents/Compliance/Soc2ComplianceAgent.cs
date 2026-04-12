@@ -209,7 +209,7 @@ public sealed class Soc2ComplianceAgent : IAgent
     {
         var response = await _llm.GenerateAsync(new LlmPrompt
         {
-            SystemPrompt = "You are a SOC 2 compliance expert for healthcare. Generate a C# incident response service.",
+            SystemPrompt = "You are a SOC 2 compliance expert for enterprise software. Generate a C# incident response service.",
             UserPrompt = "Generate an IncidentResponseService with: 1) ReportIncident, 2) ClassifySeverity (P1-P4), 3) EscalationPath per severity, 4) PostIncidentReview. Include IncidentRecord entity. Namespace: GNex.SharedKernel.Compliance.Soc2.",
             Temperature = 0.1, RequestingAgent = Name
         }, ct);

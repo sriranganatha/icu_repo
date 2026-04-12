@@ -72,7 +72,7 @@ public sealed class UiUxAgent : IAgent
             {
                 ct.ThrowIfCancellationRequested();
                 var prompt = $"""
-                    Generate a Razor Page partial view (_Components/{name}.cshtml) for a .NET 8 Hospital Management System.
+                    Generate a Razor Page partial view (_Components/{name}.cshtml) for a .NET 8 enterprise application.
                     Component: {desc}
                     
                     Requirements:
@@ -104,7 +104,7 @@ public sealed class UiUxAgent : IAgent
 
             // ── Step 3: Generate CSS theme with accessibility variables ──
             var cssPrompt = """
-                Generate a CSS file (hms-theme.css) for a Hospital Management System with:
+                Generate a CSS file (app-theme.css) for an enterprise application with:
                 - CSS custom properties for colors, spacing, typography
                 - Light and dark theme support via prefers-color-scheme and [data-theme] attribute
                 - WCAG AA contrast ratios for all text/background combinations
@@ -113,7 +113,7 @@ public sealed class UiUxAgent : IAgent
                 - Reduced motion media query support
                 - Print stylesheet section
                 - Variables: --hms-primary, --hms-success, --hms-danger, --hms-warning, --hms-info
-                - Healthcare-appropriate color palette (calming blues/greens)
+                - Professional color palette
                 
                 Return ONLY the CSS, no explanations.
                 """;
@@ -132,7 +132,7 @@ public sealed class UiUxAgent : IAgent
 
             // ── Step 4: Generate _Layout.cshtml with accessibility ──
             var layoutPrompt = """
-                Generate a _Layout.cshtml for a .NET 8 Hospital Management System.
+                Generate a _Layout.cshtml for a .NET 8 enterprise application.
                 Include:
                 - Skip-to-content link
                 - Semantic HTML5 landmarks (header, nav, main, footer)

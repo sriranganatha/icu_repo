@@ -64,13 +64,13 @@ public enum QueryIntent
     /// <summary>Request integration details: events, topics, consumer groups.</summary>
     IntegrationContract,
 
-    /// <summary>Request security requirements: auth rules, data classification, PHI fields.</summary>
+    /// <summary>Request security requirements: auth rules, data classification, sensitive fields.</summary>
     SecurityRequirements,
 
     /// <summary>Request domain rules: business logic, state machines, invariants.</summary>
     DomainRules,
 
-    /// <summary>Request compliance constraints: HIPAA, SOC2, audit requirements for an entity.</summary>
+    /// <summary>Request compliance constraints: regulatory, SOC2, audit requirements for an entity.</summary>
     ComplianceConstraints,
 
     /// <summary>Request current implementation status: what's built, what's missing.</summary>

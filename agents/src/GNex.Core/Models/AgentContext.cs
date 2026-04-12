@@ -25,6 +25,14 @@ public sealed class AgentContext
 
     /// <summary>Resolved workflow stages ordered by execution sequence.</summary>
     public List<ResolvedStage> ResolvedStages { get; set; } = [];
+
+    /// <summary>
+    /// LLM-derived microservices for this pipeline run. Populated by ArchitectAgent
+    /// from requirements analysis. All downstream code-gen agents read from this
+    /// instead of the hardcoded MicroserviceCatalog.
+    /// Use <see cref="ServiceCatalogResolver.GetServices"/> for fallback-safe access.
+    /// </summary>
+    public List<MicroserviceDefinition> DerivedServices { get; set; } = [];
     public List<Requirement> Requirements { get; set; } = [];
     public SynchronizedList<ExpandedRequirement> ExpandedRequirements { get; set; } = new();
     public ConcurrentBag<CodeArtifact> Artifacts { get; set; } = [];

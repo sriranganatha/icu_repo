@@ -55,7 +55,7 @@ public sealed class ServiceLayerAgent : IAgent
         try
         {
             // Re-build domain model now that DatabaseAgent has produced entity artifacts
-            context.DomainModel = EntityFieldExtractor.BuildDomainModel(context.Artifacts.ToList());
+            context.DomainModel = EntityFieldExtractor.BuildDomainModel(context.Artifacts.ToList(), ServiceCatalogResolver.GetServices(context));
             var model = context.DomainModel;
 
             _logger.LogInformation("Domain model loaded: {Count} entities with field definitions",
@@ -129,13 +129,14 @@ public sealed class ServiceLayerAgent : IAgent
 
     private static List<MicroserviceDefinition> ResolveTargetServicesFromClaimed(AgentContext context)
     {
+        var catalog = ServiceCatalogResolver.GetServices(context);
         if (context.CurrentClaimedItems.Count > 0)
         {
             var matched = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var item in context.CurrentClaimedItems)
             {
                 var text = $"{item.Title} {item.Description} {item.Module} {string.Join(" ", item.Tags)}";
-                foreach (var svc in MicroserviceCatalog.All)
+                foreach (var svc in catalog)
                 {
                     if (matched.Contains(svc.Name)) continue;
                     if (text.Contains(svc.ShortName, StringComparison.OrdinalIgnoreCase)
@@ -145,10 +146,10 @@ public sealed class ServiceLayerAgent : IAgent
                 }
             }
             if (matched.Count > 0)
-                return MicroserviceCatalog.All.Where(s => matched.Contains(s.Name)).ToList();
+                return catalog.Where(s => matched.Contains(s.Name)).ToList();
         }
 
-        return MicroserviceCatalog.All.ToList();
+        return catalog.ToList();
     }
 
     private static string GetGuidanceSummary(AgentContext context)

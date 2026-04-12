@@ -7,6 +7,7 @@ using GNex.Agents.Testing;
 using GNex.Agents.BugFix;
 using GNex.Agents.DodVerification;
 using GNex.Core.Enums;
+using GNex.Core.Interfaces;
 using GNex.Core.Models;
 using Microsoft.Extensions.Logging;
 using Moq;
@@ -27,7 +28,7 @@ public class AgentBacklogExecutionTests
     [Fact]
     public async Task DatabaseAgent_CompletesClaimedItems()
     {
-        var agent = new DatabaseAgent(new Mock<ILogger<DatabaseAgent>>().Object);
+        var agent = new DatabaseAgent(new Mock<ILogger<DatabaseAgent>>().Object, new Mock<ILlmProvider>().Object);
         var (context, completed) = CreateContext(
             MakeDbTask("Create patient_profile schema", "Database schema for patient profiles with RLS"),
             MakeDbTask("Create encounter tables", "Database tables for encounter management"));
@@ -42,7 +43,7 @@ public class AgentBacklogExecutionTests
     [Fact]
     public async Task DatabaseAgent_GeneratesArtifactsForMicroservices()
     {
-        var agent = new DatabaseAgent(new Mock<ILogger<DatabaseAgent>>().Object);
+        var agent = new DatabaseAgent(new Mock<ILogger<DatabaseAgent>>().Object, new Mock<ILlmProvider>().Object);
         var (context, _) = CreateContext(
             MakeDbTask("Implement patient DB layer", "Schema, entities, DbContext for patient service"));
 
@@ -223,7 +224,7 @@ public class AgentBacklogExecutionTests
     [Fact]
     public async Task Agent_ReturnsArtifactsInResult()
     {
-        var agent = new DatabaseAgent(new Mock<ILogger<DatabaseAgent>>().Object);
+        var agent = new DatabaseAgent(new Mock<ILogger<DatabaseAgent>>().Object, new Mock<ILlmProvider>().Object);
         var (context, _) = CreateContext(
             MakeDbTask("Create schemas", "All database schemas for the system"));
 

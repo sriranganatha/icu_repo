@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text.RegularExpressions;
 using GNex.Core.Enums;
 using GNex.Core.Interfaces;
 using GNex.Core.Models;
@@ -14,6 +15,7 @@ namespace GNex.Agents.Database;
 public sealed class DatabaseAgent : IAgent
 {
     private readonly ILogger<DatabaseAgent> _logger;
+    private readonly ILlmProvider _llm;
     // Track which artifact paths this agent has already produced in this pipeline run
     private readonly HashSet<string> _generatedPaths = new(StringComparer.OrdinalIgnoreCase);
     // Track whether DDL has been executed this pipeline run
@@ -23,7 +25,7 @@ public sealed class DatabaseAgent : IAgent
     public string Name => "Database Agent";
     public string Description => "Generates per-microservice EF Core entities, DbContext, repositories, migrations, and provisions Docker PostgreSQL.";
 
-    public DatabaseAgent(ILogger<DatabaseAgent> logger) => _logger = logger;
+    public DatabaseAgent(ILogger<DatabaseAgent> logger, ILlmProvider llm) { _logger = logger; _llm = llm; }
 
     public async Task<AgentResult> ExecuteAsync(AgentContext context, CancellationToken ct = default)
     {
@@ -83,15 +85,28 @@ public sealed class DatabaseAgent : IAgent
                 if (context.ReportProgress is not null)
                     await context.ReportProgress(Type, $"Generating DB layer for {svc.Name} — schema: {svc.Schema}, entities: {string.Join(", ", svc.Entities)}");
 
+                // LLM-driven entity generation: one batch call per service
+                var entityBodies = await GenerateServiceEntitiesViaLlmAsync(svc, context, ct);
                 foreach (var entity in svc.Entities)
-                    AddIfNew(artifacts, GenerateEntity(svc, entity));
+                {
+                    var body = entityBodies.GetValueOrDefault(entity) ?? GenerateDefaultEntity(svc, entity);
+                    AddIfNew(artifacts, new CodeArtifact
+                    {
+                        Layer = ArtifactLayer.Database,
+                        RelativePath = $"{svc.ProjectName}/Data/Entities/{entity}.cs",
+                        FileName = $"{entity}.cs",
+                        Namespace = $"{svc.Namespace}.Data.Entities",
+                        ProducedBy = AgentType.Database,
+                        Content = body
+                    });
+                }
 
                 AddIfNew(artifacts, GenerateDbContext(svc));
 
                 foreach (var entity in svc.Entities)
                     AddIfNew(artifacts, GenerateRepository(svc, entity));
 
-                AddIfNew(artifacts, GenerateMigrationScript(svc));
+                AddIfNew(artifacts, await GenerateMigrationScriptAsync(svc, context, ct));
 
                 if (context.ReportProgress is not null)
                     await context.ReportProgress(Type, $"{svc.Name}: Generated {svc.Entities.Length} entities, DbContext, {svc.Entities.Length} repositories, migration script");
@@ -347,32 +362,6 @@ public sealed class DatabaseAgent : IAgent
         };
     }
 
-    // ─── Per-Service Migration Script ───────────────────────────────────────
-
-    private static CodeArtifact GenerateMigrationScript(MicroserviceDefinition svc)
-    {
-        var tables = string.Join("\n\n",
-            svc.Entities.Select(e => GenerateCreateTableSql(svc.Schema, e)));
-
-        return new CodeArtifact
-        {
-            Layer = ArtifactLayer.Migration,
-            RelativePath = $"{svc.ProjectName}/Data/Migrations/V1__{svc.ShortName}_initial.sql",
-            FileName = $"V1__{svc.ShortName}_initial.sql",
-            Namespace = $"{svc.Namespace}.Data.Migrations",
-            ProducedBy = AgentType.Database,
-            Content = $"""
-                -- Migration: {svc.Name} initial schema
-                -- Schema: {svc.Schema}
-                -- Bounded Context: {svc.Description}
-
-                CREATE SCHEMA IF NOT EXISTS {svc.Schema};
-
-                {tables}
-                """
-        };
-    }
-
     // ─── Shared RLS Migration ───────────────────────────────────────────────
 
     private static CodeArtifact GenerateRlsMigration(IEnumerable<MicroserviceDefinition> services)
@@ -504,16 +493,18 @@ public sealed class DatabaseAgent : IAgent
 
     private static List<MicroserviceDefinition> ResolveTargetServices(AgentContext context)
     {
+        var catalog = ServiceCatalogResolver.GetServices(context);
+
         var archInstruction = context.OrchestratorInstructions
             .FirstOrDefault(i => i.StartsWith("[ARCH]", StringComparison.OrdinalIgnoreCase));
 
         if (string.IsNullOrWhiteSpace(archInstruction))
-            return MicroserviceCatalog.All.ToList();
+            return catalog.ToList();
 
         var marker = "TARGET_SERVICES=";
         var start = archInstruction.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
         if (start < 0)
-            return MicroserviceCatalog.All.ToList();
+            return catalog.ToList();
 
         start += marker.Length;
         var end = archInstruction.IndexOf(';', start);
@@ -521,12 +512,12 @@ public sealed class DatabaseAgent : IAgent
 
         var resolved = csv
             .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Select(MicroserviceCatalog.ByName)
+            .Select(name => ServiceCatalogResolver.ByName(context, name))
             .Where(s => s is not null)
             .Cast<MicroserviceDefinition>()
             .ToList();
 
-        return resolved.Count > 0 ? resolved : MicroserviceCatalog.All.ToList();
+        return resolved.Count > 0 ? resolved : catalog.ToList();
     }
 
     /// <summary>
@@ -536,13 +527,14 @@ public sealed class DatabaseAgent : IAgent
     private static List<MicroserviceDefinition> ResolveServicesFromBacklogItems(
         List<ExpandedRequirement> items, AgentContext context)
     {
+        var catalog = ServiceCatalogResolver.GetServices(context);
         var matched = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var item in items)
         {
             var text = $"{item.Title} {item.Description} {item.Module} {string.Join(" ", item.Tags)}";
 
-            foreach (var svc in MicroserviceCatalog.All)
+            foreach (var svc in catalog)
             {
                 if (matched.Contains(svc.Name)) continue;
 
@@ -563,7 +555,7 @@ public sealed class DatabaseAgent : IAgent
             return ResolveTargetServices(context);
         }
 
-        return MicroserviceCatalog.All.Where(s => matched.Contains(s.Name)).ToList();
+        return catalog.Where(s => matched.Contains(s.Name)).ToList();
     }
 
     /// <summary>
@@ -594,322 +586,102 @@ public sealed class DatabaseAgent : IAgent
         return guidance.Count == 0 ? string.Empty : string.Join(" | ", guidance);
     }
 
-    // ─── Entity Generation ──────────────────────────────────────────────────
+    // ─── LLM-Driven Entity Generation ──────────────────────────────────────
 
-    private static CodeArtifact GenerateEntity(MicroserviceDefinition svc, string entity)
+    /// <summary>
+    /// Generates all entity C# classes for a service via a single LLM call.
+    /// Returns a dictionary mapping entity name → C# source code.
+    /// Falls back gracefully — returns empty dict so callers use GenerateDefaultEntity.
+    /// </summary>
+    private async Task<Dictionary<string, string>> GenerateServiceEntitiesViaLlmAsync(
+        MicroserviceDefinition svc, AgentContext context, CancellationToken ct)
     {
-        var body = EntityBodies.TryGetValue(entity, out var gen) ? gen(svc) : GenerateDefaultEntity(svc, entity);
-        return new CodeArtifact
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        var requirementsSummary = string.Join("\n", context.Requirements
+            .Take(80)
+            .Select(r => $"- {r.Title}: {r.Description}"));
+
+        var prompt = new LlmPrompt
         {
-            Layer = ArtifactLayer.Database,
-            RelativePath = $"{svc.ProjectName}/Data/Entities/{entity}.cs",
-            FileName = $"{entity}.cs",
-            Namespace = $"{svc.Namespace}.Data.Entities",
-            ProducedBy = AgentType.Database,
-            Content = body
+            SystemPrompt = """
+                You are a senior .NET developer generating EF Core entity classes.
+                Generate one C# entity class per requested entity for a microservice.
+
+                Every entity MUST have these standard fields:
+                - [Key] public string Id { get; set; } = Guid.NewGuid().ToString("N");
+                - [Required] public string TenantId { get; set; } = null!;
+                - public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+                - [Required] public string CreatedBy { get; set; } = null!;
+                - public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
+                - [Required] public string UpdatedBy { get; set; } = null!;
+                - public int VersionNo { get; set; } = 1;
+
+                Add domain-specific fields based on the entity name and service context.
+                Use [Required] on non-nullable reference types. Use nullable types (?) for optional fields.
+                Include navigation properties where parent-child relationships exist between entities in the SAME service.
+
+                DELIMITER FORMAT: Separate each entity with a line containing exactly:
+                // === EntityName.cs ===
+                Do NOT use markdown code fences. Output raw C# only.
+                """,
+            UserPrompt = $"""
+                Service: {svc.Name} (schema: {svc.Schema})
+                Description: {svc.Description}
+                Namespace: {svc.Namespace}.Data.Entities
+
+                Generate entity classes for: {string.Join(", ", svc.Entities)}
+
+                Project requirements context (use these to infer appropriate domain fields):
+                {requirementsSummary}
+                """,
+            Temperature = 0.2,
+            MaxTokens = 4096,
+            RequestingAgent = "DatabaseAgent"
         };
+
+        try
+        {
+            var response = await _llm.GenerateAsync(prompt, ct);
+            if (!response.Success || string.IsNullOrWhiteSpace(response.Content))
+            {
+                _logger.LogWarning("LLM entity generation failed for {Service}: {Error}", svc.Name, response.Error ?? "empty");
+                return result;
+            }
+
+            // Parse delimited entity classes
+            var content = response.Content.Trim();
+            // Strip markdown fences if present
+            if (content.StartsWith("```"))
+            {
+                var first = content.IndexOf('\n');
+                if (first > 0) content = content[(first + 1)..];
+                if (content.EndsWith("```")) content = content[..^3];
+                content = content.Trim();
+            }
+
+            var sections = Regex.Split(content, @"^// === (\w+)\.cs ===\s*$",
+                RegexOptions.Multiline);
+
+            // sections: [preamble, name1, code1, name2, code2, ...]
+            for (int i = 1; i + 1 < sections.Length; i += 2)
+            {
+                var entityName = sections[i].Trim();
+                var entityCode = sections[i + 1].Trim();
+                if (!string.IsNullOrWhiteSpace(entityCode) && svc.Entities.Contains(entityName, StringComparer.OrdinalIgnoreCase))
+                    result[entityName] = entityCode;
+            }
+
+            _logger.LogInformation("LLM generated {Count}/{Total} entities for {Service}",
+                result.Count, svc.Entities.Length, svc.Name);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "LLM entity generation threw for {Service}", svc.Name);
+        }
+
+        return result;
     }
-
-    // Registry mapping entity name → body generator
-    private static readonly Dictionary<string, Func<MicroserviceDefinition, string>> EntityBodies = new()
-    {
-        ["PatientProfile"] = svc => $$"""
-            using System.ComponentModel.DataAnnotations;
-            namespace {{svc.Namespace}}.Data.Entities;
-
-            public class PatientProfile
-            {
-                [Key] public string Id { get; set; } = Guid.NewGuid().ToString("N");
-                [Required] public string TenantId { get; set; } = null!;
-                [Required] public string RegionId { get; set; } = null!;
-                public string? FacilityId { get; set; }
-                [Required] public string EnterprisePersonKey { get; set; } = null!;
-                [Required] public string LegalGivenName { get; set; } = null!;
-                [Required] public string LegalFamilyName { get; set; } = null!;
-                public string? PreferredName { get; set; }
-                public DateOnly DateOfBirth { get; set; }
-                public string? SexAtBirth { get; set; }
-                public string? PrimaryLanguage { get; set; }
-                [Required] public string StatusCode { get; set; } = "active";
-                [Required] public string ClassificationCode { get; set; } = "clinical_restricted";
-                public bool LegalHoldFlag { get; set; }
-                public string? SourceSystem { get; set; }
-                public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
-                [Required] public string CreatedBy { get; set; } = null!;
-                public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
-                [Required] public string UpdatedBy { get; set; } = null!;
-                public int VersionNo { get; set; } = 1;
-                public ICollection<PatientIdentifier> Identifiers { get; set; } = [];
-            }
-            """,
-
-        ["PatientIdentifier"] = svc => $$"""
-            using System.ComponentModel.DataAnnotations;
-            namespace {{svc.Namespace}}.Data.Entities;
-
-            public class PatientIdentifier
-            {
-                [Key] public string Id { get; set; } = Guid.NewGuid().ToString("N");
-                [Required] public string TenantId { get; set; } = null!;
-                [Required] public string PatientId { get; set; } = null!;
-                [Required] public string IdentifierType { get; set; } = null!;
-                [Required] public string IdentifierValueHash { get; set; } = null!;
-                public string? Issuer { get; set; }
-                [Required] public string StatusCode { get; set; } = "active";
-                public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
-                public PatientProfile Patient { get; set; } = null!;
-            }
-            """,
-
-        ["Encounter"] = svc => $$"""
-            using System.ComponentModel.DataAnnotations;
-            namespace {{svc.Namespace}}.Data.Entities;
-
-            public class Encounter
-            {
-                [Key] public string Id { get; set; } = Guid.NewGuid().ToString("N");
-                [Required] public string TenantId { get; set; } = null!;
-                [Required] public string RegionId { get; set; } = null!;
-                [Required] public string FacilityId { get; set; } = null!;
-                [Required] public string PatientId { get; set; } = null!;
-                [Required] public string EncounterType { get; set; } = null!;
-                public string? SourcePathway { get; set; }
-                public string? AttendingProviderRef { get; set; }
-                public DateTimeOffset StartAt { get; set; }
-                public DateTimeOffset? EndAt { get; set; }
-                [Required] public string StatusCode { get; set; } = "active";
-                [Required] public string ClassificationCode { get; set; } = "clinical_restricted";
-                public bool LegalHoldFlag { get; set; }
-                public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
-                [Required] public string CreatedBy { get; set; } = null!;
-                public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
-                [Required] public string UpdatedBy { get; set; } = null!;
-                public int VersionNo { get; set; } = 1;
-                public ICollection<ClinicalNote> Notes { get; set; } = [];
-            }
-            """,
-
-        ["ClinicalNote"] = svc => $$"""
-            using System.ComponentModel.DataAnnotations;
-            namespace {{svc.Namespace}}.Data.Entities;
-
-            public class ClinicalNote
-            {
-                [Key] public string Id { get; set; } = Guid.NewGuid().ToString("N");
-                [Required] public string TenantId { get; set; } = null!;
-                [Required] public string EncounterId { get; set; } = null!;
-                [Required] public string PatientId { get; set; } = null!;
-                [Required] public string NoteType { get; set; } = null!;
-                public string? NoteClassificationCode { get; set; }
-                [Required] public string ContentJson { get; set; } = "{}";
-                public string? AiInteractionId { get; set; }
-                public DateTimeOffset AuthoredAt { get; set; } = DateTimeOffset.UtcNow;
-                [Required] public string AuthoredBy { get; set; } = null!;
-                public string? AmendedFromNoteId { get; set; }
-                public int VersionNo { get; set; } = 1;
-                public bool LegalHoldFlag { get; set; }
-                public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
-                public Encounter Encounter { get; set; } = null!;
-            }
-            """,
-
-        ["Admission"] = svc => $$"""
-            using System.ComponentModel.DataAnnotations;
-            namespace {{svc.Namespace}}.Data.Entities;
-
-            public class Admission
-            {
-                [Key] public string Id { get; set; } = Guid.NewGuid().ToString("N");
-                [Required] public string TenantId { get; set; } = null!;
-                [Required] public string RegionId { get; set; } = null!;
-                [Required] public string FacilityId { get; set; } = null!;
-                [Required] public string PatientId { get; set; } = null!;
-                [Required] public string EncounterId { get; set; } = null!;
-                [Required] public string AdmitClass { get; set; } = null!;
-                public string? AdmitSource { get; set; }
-                [Required] public string StatusCode { get; set; } = "active";
-                public DateTimeOffset? ExpectedDischargeAt { get; set; }
-                public string? UtilizationStatusCode { get; set; }
-                [Required] public string ClassificationCode { get; set; } = "clinical_restricted";
-                public bool LegalHoldFlag { get; set; }
-                public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
-                [Required] public string CreatedBy { get; set; } = null!;
-                public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
-                [Required] public string UpdatedBy { get; set; } = null!;
-                public int VersionNo { get; set; } = 1;
-            }
-            """,
-
-        ["AdmissionEligibility"] = svc => $$"""
-            using System.ComponentModel.DataAnnotations;
-            namespace {{svc.Namespace}}.Data.Entities;
-
-            public class AdmissionEligibility
-            {
-                [Key] public string Id { get; set; } = Guid.NewGuid().ToString("N");
-                [Required] public string TenantId { get; set; } = null!;
-                [Required] public string FacilityId { get; set; } = null!;
-                [Required] public string PatientId { get; set; } = null!;
-                [Required] public string EncounterId { get; set; } = null!;
-                public string? CandidateClass { get; set; }
-                [Required] public string DecisionCode { get; set; } = null!;
-                public string? RationaleJson { get; set; }
-                public string? PayerAuthorizationStatus { get; set; }
-                public bool OverrideFlag { get; set; }
-                public string? ApprovedBy { get; set; }
-                public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
-                [Required] public string CreatedBy { get; set; } = null!;
-            }
-            """,
-
-        ["EmergencyArrival"] = svc => $$"""
-            using System.ComponentModel.DataAnnotations;
-            namespace {{svc.Namespace}}.Data.Entities;
-
-            public class EmergencyArrival
-            {
-                [Key] public string Id { get; set; } = Guid.NewGuid().ToString("N");
-                [Required] public string TenantId { get; set; } = null!;
-                [Required] public string RegionId { get; set; } = null!;
-                [Required] public string FacilityId { get; set; } = null!;
-                public string? PatientId { get; set; }
-                public string? TemporaryIdentityAlias { get; set; }
-                public string? ArrivalMode { get; set; }
-                public string? ChiefComplaint { get; set; }
-                public string? HandoffSource { get; set; }
-                public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
-                [Required] public string CreatedBy { get; set; } = null!;
-                public ICollection<TriageAssessment> Triages { get; set; } = [];
-            }
-            """,
-
-        ["TriageAssessment"] = svc => $$"""
-            using System.ComponentModel.DataAnnotations;
-            namespace {{svc.Namespace}}.Data.Entities;
-
-            public class TriageAssessment
-            {
-                [Key] public string Id { get; set; } = Guid.NewGuid().ToString("N");
-                [Required] public string TenantId { get; set; } = null!;
-                [Required] public string ArrivalId { get; set; } = null!;
-                public string? PatientId { get; set; }
-                [Required] public string AcuityLevel { get; set; } = null!;
-                public string? ChiefComplaint { get; set; }
-                public string VitalSnapshotJson { get; set; } = "{}";
-                public bool ReTriageFlag { get; set; }
-                public string? PathwayRecommendation { get; set; }
-                public DateTimeOffset PerformedAt { get; set; } = DateTimeOffset.UtcNow;
-                [Required] public string PerformedBy { get; set; } = null!;
-                public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
-                public EmergencyArrival Arrival { get; set; } = null!;
-            }
-            """,
-
-        ["ResultRecord"] = svc => $$"""
-            using System.ComponentModel.DataAnnotations;
-            namespace {{svc.Namespace}}.Data.Entities;
-
-            public class ResultRecord
-            {
-                [Key] public string Id { get; set; } = Guid.NewGuid().ToString("N");
-                [Required] public string TenantId { get; set; } = null!;
-                [Required] public string RegionId { get; set; } = null!;
-                [Required] public string FacilityId { get; set; } = null!;
-                [Required] public string PatientId { get; set; } = null!;
-                [Required] public string OrderId { get; set; } = null!;
-                [Required] public string AnalyteCode { get; set; } = null!;
-                public string? MeasuredValue { get; set; }
-                public string? UnitCode { get; set; }
-                public string? AbnormalFlag { get; set; }
-                public bool CriticalFlag { get; set; }
-                public DateTimeOffset ResultAt { get; set; }
-                [Required] public string RecordedBy { get; set; } = null!;
-                [Required] public string ClassificationCode { get; set; } = "clinical_restricted";
-                public bool LegalHoldFlag { get; set; }
-                public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
-                [Required] public string CreatedBy { get; set; } = null!;
-                public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
-                [Required] public string UpdatedBy { get; set; } = null!;
-                public int VersionNo { get; set; } = 1;
-            }
-            """,
-
-        ["Claim"] = svc => $$"""
-            using System.ComponentModel.DataAnnotations;
-            namespace {{svc.Namespace}}.Data.Entities;
-
-            public class Claim
-            {
-                [Key] public string Id { get; set; } = Guid.NewGuid().ToString("N");
-                [Required] public string TenantId { get; set; } = null!;
-                [Required] public string RegionId { get; set; } = null!;
-                [Required] public string FacilityId { get; set; } = null!;
-                [Required] public string PatientId { get; set; } = null!;
-                [Required] public string EncounterRef { get; set; } = null!;
-                [Required] public string PayerRef { get; set; } = null!;
-                [Required] public string ClaimStatus { get; set; } = null!;
-                public decimal BilledAmount { get; set; }
-                public decimal? AllowedAmount { get; set; }
-                [Required] public string ClassificationCode { get; set; } = "financial_sensitive";
-                public bool LegalHoldFlag { get; set; }
-                public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
-                [Required] public string CreatedBy { get; set; } = null!;
-                public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
-                [Required] public string UpdatedBy { get; set; } = null!;
-                public int VersionNo { get; set; } = 1;
-            }
-            """,
-
-        ["AuditEvent"] = svc => $$"""
-            using System.ComponentModel.DataAnnotations;
-            namespace {{svc.Namespace}}.Data.Entities;
-
-            public class AuditEvent
-            {
-                [Key] public string Id { get; set; } = Guid.NewGuid().ToString("N");
-                [Required] public string TenantId { get; set; } = null!;
-                [Required] public string RegionId { get; set; } = null!;
-                public string? FacilityId { get; set; }
-                [Required] public string EventType { get; set; } = null!;
-                [Required] public string EntityType { get; set; } = null!;
-                [Required] public string EntityId { get; set; } = null!;
-                [Required] public string ActorType { get; set; } = null!;
-                [Required] public string ActorId { get; set; } = null!;
-                [Required] public string CorrelationId { get; set; } = null!;
-                [Required] public string ClassificationCode { get; set; } = null!;
-                public DateTimeOffset OccurredAt { get; set; } = DateTimeOffset.UtcNow;
-                [Required] public string PayloadJson { get; set; } = "{}";
-                public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
-            }
-            """,
-
-        ["AiInteraction"] = svc => $$"""
-            using System.ComponentModel.DataAnnotations;
-            namespace {{svc.Namespace}}.Data.Entities;
-
-            public class AiInteraction
-            {
-                [Key] public string Id { get; set; } = Guid.NewGuid().ToString("N");
-                [Required] public string TenantId { get; set; } = null!;
-                [Required] public string RegionId { get; set; } = null!;
-                public string? FacilityId { get; set; }
-                [Required] public string InteractionType { get; set; } = null!;
-                public string? EncounterId { get; set; }
-                public string? PatientId { get; set; }
-                [Required] public string ModelVersion { get; set; } = null!;
-                [Required] public string PromptVersion { get; set; } = null!;
-                public string? InputSummaryJson { get; set; }
-                public string? OutputSummaryJson { get; set; }
-                [Required] public string OutcomeCode { get; set; } = null!;
-                public string? AcceptedBy { get; set; }
-                public string? RejectedBy { get; set; }
-                public string? OverrideReason { get; set; }
-                [Required] public string ClassificationCode { get; set; } = "ai_evidence";
-                public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
-                [Required] public string CreatedBy { get; set; } = null!;
-            }
-            """
-    };
 
     private static string GenerateDefaultEntity(MicroserviceDefinition svc, string entity) => $$"""
         using System.ComponentModel.DataAnnotations;
@@ -919,280 +691,143 @@ public sealed class DatabaseAgent : IAgent
         {
             [Key] public string Id { get; set; } = Guid.NewGuid().ToString("N");
             [Required] public string TenantId { get; set; } = null!;
+            [Required] public string CreatedBy { get; set; } = null!;
             public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+            public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
+            [Required] public string UpdatedBy { get; set; } = null!;
+            public int VersionNo { get; set; } = 1;
         }
         """;
 
-    // ─── SQL Generation ─────────────────────────────────────────────────────
+    // ─── LLM-Driven Migration Script ────────────────────────────────────────
 
-    private static string GenerateCreateTableSql(string schema, string entity)
+    /// <summary>
+    /// Generates migration SQL for a service via LLM. Falls back to default skeleton.
+    /// </summary>
+    private async Task<CodeArtifact> GenerateMigrationScriptAsync(
+        MicroserviceDefinition svc, AgentContext context, CancellationToken ct)
     {
-        var table = ToSnakeCase(entity);
-        return TableSql.TryGetValue(entity, out var sql) ? sql(schema) : $$"""
-            CREATE TABLE IF NOT EXISTS {{schema}}.{{table}} (
-                id          VARCHAR(32) PRIMARY KEY DEFAULT replace(gen_random_uuid()::text, '-', ''),
-                tenant_id   VARCHAR(64) NOT NULL,
-                created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
-            );
-            """;
+        var migrationSql = await GenerateServiceMigrationViaLlmAsync(svc, context, ct);
+        var sql = migrationSql ?? GenerateDefaultMigrationSql(svc);
+
+        return new CodeArtifact
+        {
+            Layer = ArtifactLayer.Migration,
+            RelativePath = $"{svc.ProjectName}/Data/Migrations/V1__{svc.ShortName}_initial.sql",
+            FileName = $"V1__{svc.ShortName}_initial.sql",
+            Namespace = $"{svc.Namespace}.Data.Migrations",
+            ProducedBy = AgentType.Database,
+            Content = sql
+        };
     }
 
-    private static readonly Dictionary<string, Func<string, string>> TableSql = new()
+    private async Task<string?> GenerateServiceMigrationViaLlmAsync(
+        MicroserviceDefinition svc, AgentContext context, CancellationToken ct)
     {
-        ["PatientProfile"] = s => $"""
-            CREATE TABLE IF NOT EXISTS {s}.patient_profile (
-                id                      VARCHAR(32) PRIMARY KEY DEFAULT replace(gen_random_uuid()::text, '-', ''),
-                tenant_id               VARCHAR(64) NOT NULL,
-                region_id               VARCHAR(64) NOT NULL,
-                facility_id             VARCHAR(64),
-                enterprise_person_key   VARCHAR(128) NOT NULL,
-                legal_given_name        VARCHAR(256) NOT NULL,
-                legal_family_name       VARCHAR(256) NOT NULL,
-                preferred_name          VARCHAR(256),
-                date_of_birth           DATE NOT NULL,
-                sex_at_birth            VARCHAR(16),
-                primary_language        VARCHAR(16),
-                status_code             VARCHAR(32) NOT NULL DEFAULT 'active',
-                classification_code     VARCHAR(64) NOT NULL DEFAULT 'clinical_restricted',
-                legal_hold_flag         BOOLEAN NOT NULL DEFAULT FALSE,
-                source_system           VARCHAR(64),
-                created_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
-                created_by              VARCHAR(128) NOT NULL,
-                updated_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
-                updated_by              VARCHAR(128) NOT NULL,
-                version_no              INTEGER NOT NULL DEFAULT 1
-            );
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_{s}_patient_tenant_epk ON {s}.patient_profile (tenant_id, enterprise_person_key);
-            """,
+        var requirementsSummary = string.Join("\n", context.Requirements
+            .Take(50)
+            .Select(r => $"- {r.Title}: {r.Description}"));
 
-        ["PatientIdentifier"] = s => $"""
-            CREATE TABLE IF NOT EXISTS {s}.patient_identifier (
-                id                      VARCHAR(32) PRIMARY KEY DEFAULT replace(gen_random_uuid()::text, '-', ''),
-                tenant_id               VARCHAR(64) NOT NULL,
-                patient_id              VARCHAR(32) NOT NULL REFERENCES {s}.patient_profile(id),
-                identifier_type         VARCHAR(64) NOT NULL,
-                identifier_value_hash   VARCHAR(256) NOT NULL,
-                issuer                  VARCHAR(128),
-                status_code             VARCHAR(32) NOT NULL DEFAULT 'active',
-                created_at              TIMESTAMPTZ NOT NULL DEFAULT now()
-            );
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_{s}_pid_type_hash ON {s}.patient_identifier (tenant_id, identifier_type, identifier_value_hash);
-            """,
+        var prompt = new LlmPrompt
+        {
+            SystemPrompt = """
+                You are a senior PostgreSQL DBA generating migration DDL scripts.
+                Generate CREATE TABLE statements for all entities in a microservice.
 
-        ["Encounter"] = s => $"""
-            CREATE TABLE IF NOT EXISTS {s}.encounter (
-                id                      VARCHAR(32) PRIMARY KEY DEFAULT replace(gen_random_uuid()::text, '-', ''),
-                tenant_id               VARCHAR(64) NOT NULL,
-                region_id               VARCHAR(64) NOT NULL,
-                facility_id             VARCHAR(64) NOT NULL,
-                patient_id              VARCHAR(32) NOT NULL,
-                encounter_type          VARCHAR(64) NOT NULL,
-                source_pathway          VARCHAR(64),
-                attending_provider_ref  VARCHAR(128),
-                start_at                TIMESTAMPTZ NOT NULL,
-                end_at                  TIMESTAMPTZ,
-                status_code             VARCHAR(32) NOT NULL DEFAULT 'active',
-                classification_code     VARCHAR(64) NOT NULL DEFAULT 'clinical_restricted',
-                legal_hold_flag         BOOLEAN NOT NULL DEFAULT FALSE,
-                created_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
-                created_by              VARCHAR(128) NOT NULL,
-                updated_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
-                updated_by              VARCHAR(128) NOT NULL,
-                version_no              INTEGER NOT NULL DEFAULT 1
-            );
-            CREATE INDEX IF NOT EXISTS idx_{s}_enc_tenant_patient ON {s}.encounter (tenant_id, patient_id);
-            """,
+                Every table MUST have these standard columns:
+                - id VARCHAR(32) PRIMARY KEY DEFAULT replace(gen_random_uuid()::text, '-', '')
+                - tenant_id VARCHAR(64) NOT NULL
+                - created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                - created_by VARCHAR(128) NOT NULL
 
-        ["ClinicalNote"] = s => $$"""
-            CREATE TABLE IF NOT EXISTS {{s}}.clinical_note (
-                id                      VARCHAR(32) PRIMARY KEY DEFAULT replace(gen_random_uuid()::text, '-', ''),
-                tenant_id               VARCHAR(64) NOT NULL,
-                encounter_id            VARCHAR(32) NOT NULL,
-                patient_id              VARCHAR(32) NOT NULL,
-                note_type               VARCHAR(64) NOT NULL,
-                note_classification_code VARCHAR(64),
-                content_json            JSONB NOT NULL DEFAULT '{}'::jsonb,
-                ai_interaction_id       VARCHAR(32),
-                authored_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
-                authored_by             VARCHAR(128) NOT NULL,
-                amended_from_note_id    VARCHAR(32),
-                version_no              INTEGER NOT NULL DEFAULT 1,
-                legal_hold_flag         BOOLEAN NOT NULL DEFAULT FALSE,
-                created_at              TIMESTAMPTZ NOT NULL DEFAULT now()
-            );
-            CREATE INDEX IF NOT EXISTS idx_{{s}}_note_encounter ON {{s}}.clinical_note (tenant_id, encounter_id);
-            """,
+                Add domain-specific columns based on entity name and context.
+                Use snake_case for all column and table names.
+                Include appropriate indexes (at minimum tenant_id).
+                Include foreign key constraints where appropriate within the same schema.
 
-        ["Admission"] = s => $"""
-            CREATE TABLE IF NOT EXISTS {s}.admission (
-                id                      VARCHAR(32) PRIMARY KEY DEFAULT replace(gen_random_uuid()::text, '-', ''),
-                tenant_id               VARCHAR(64) NOT NULL,
-                region_id               VARCHAR(64) NOT NULL,
-                facility_id             VARCHAR(64) NOT NULL,
-                patient_id              VARCHAR(32) NOT NULL,
-                encounter_id            VARCHAR(32) NOT NULL,
-                admit_class             VARCHAR(64) NOT NULL,
-                admit_source            VARCHAR(64),
-                status_code             VARCHAR(32) NOT NULL DEFAULT 'active',
-                expected_discharge_at   TIMESTAMPTZ,
-                utilization_status_code VARCHAR(32),
-                classification_code     VARCHAR(64) NOT NULL DEFAULT 'clinical_restricted',
-                legal_hold_flag         BOOLEAN NOT NULL DEFAULT FALSE,
-                created_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
-                created_by              VARCHAR(128) NOT NULL,
-                updated_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
-                updated_by              VARCHAR(128) NOT NULL,
-                version_no              INTEGER NOT NULL DEFAULT 1
-            );
-            CREATE INDEX IF NOT EXISTS idx_{s}_adm_tenant_patient ON {s}.admission (tenant_id, patient_id);
-            """,
+                Output raw SQL only — no markdown fences, no commentary.
+                Start with: CREATE SCHEMA IF NOT EXISTS {schema};
+                """,
+            UserPrompt = $"""
+                Service: {svc.Name}
+                Schema: {svc.Schema}
+                Description: {svc.Description}
+                Entities: {string.Join(", ", svc.Entities)}
 
-        ["AdmissionEligibility"] = s => $"""
-            CREATE TABLE IF NOT EXISTS {s}.admission_eligibility (
-                id                      VARCHAR(32) PRIMARY KEY DEFAULT replace(gen_random_uuid()::text, '-', ''),
-                tenant_id               VARCHAR(64) NOT NULL,
-                facility_id             VARCHAR(64) NOT NULL,
-                patient_id              VARCHAR(32) NOT NULL,
-                encounter_id            VARCHAR(32) NOT NULL,
-                candidate_class         VARCHAR(64),
-                decision_code           VARCHAR(32) NOT NULL,
-                rationale_json          JSONB,
-                payer_authorization_status VARCHAR(32),
-                override_flag           BOOLEAN NOT NULL DEFAULT FALSE,
-                approved_by             VARCHAR(128),
-                created_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
-                created_by              VARCHAR(128) NOT NULL
-            );
-            """,
+                Project requirements context:
+                {requirementsSummary}
 
-        ["EmergencyArrival"] = s => $"""
-            CREATE TABLE IF NOT EXISTS {s}.emergency_arrival (
-                id                      VARCHAR(32) PRIMARY KEY DEFAULT replace(gen_random_uuid()::text, '-', ''),
-                tenant_id               VARCHAR(64) NOT NULL,
-                region_id               VARCHAR(64) NOT NULL,
-                facility_id             VARCHAR(64) NOT NULL,
-                patient_id              VARCHAR(32),
-                temporary_identity_alias VARCHAR(128),
-                arrival_mode            VARCHAR(64),
-                chief_complaint         TEXT,
-                handoff_source          VARCHAR(128),
-                created_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
-                created_by              VARCHAR(128) NOT NULL
-            );
-            CREATE INDEX IF NOT EXISTS idx_{s}_ea_tenant_facility ON {s}.emergency_arrival (tenant_id, facility_id);
-            """,
+                Generate the complete migration SQL for all entities.
+                """,
+            Temperature = 0.2,
+            MaxTokens = 4096,
+            RequestingAgent = "DatabaseAgent"
+        };
 
-        ["TriageAssessment"] = s => $$"""
-            CREATE TABLE IF NOT EXISTS {{s}}.triage_assessment (
-                id                      VARCHAR(32) PRIMARY KEY DEFAULT replace(gen_random_uuid()::text, '-', ''),
-                tenant_id               VARCHAR(64) NOT NULL,
-                arrival_id              VARCHAR(32) NOT NULL REFERENCES {{s}}.emergency_arrival(id),
-                patient_id              VARCHAR(32),
-                acuity_level            VARCHAR(16) NOT NULL,
-                chief_complaint         TEXT,
-                vital_snapshot_json     JSONB NOT NULL DEFAULT '{}'::jsonb,
-                re_triage_flag          BOOLEAN NOT NULL DEFAULT FALSE,
-                pathway_recommendation  VARCHAR(64),
-                performed_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
-                performed_by            VARCHAR(128) NOT NULL,
-                created_at              TIMESTAMPTZ NOT NULL DEFAULT now()
-            );
-            """,
+        try
+        {
+            var response = await _llm.GenerateAsync(prompt, ct);
+            if (!response.Success || string.IsNullOrWhiteSpace(response.Content))
+            {
+                _logger.LogWarning("LLM migration generation failed for {Service}: {Error}", svc.Name, response.Error ?? "empty");
+                return null;
+            }
 
-        ["ResultRecord"] = s => $"""
-            CREATE TABLE IF NOT EXISTS {s}.result_record (
-                id                      VARCHAR(32) PRIMARY KEY DEFAULT replace(gen_random_uuid()::text, '-', ''),
-                tenant_id               VARCHAR(64) NOT NULL,
-                region_id               VARCHAR(64) NOT NULL,
-                facility_id             VARCHAR(64) NOT NULL,
-                patient_id              VARCHAR(32) NOT NULL,
-                order_id                VARCHAR(32) NOT NULL,
-                analyte_code            VARCHAR(64) NOT NULL,
-                measured_value          VARCHAR(256),
-                unit_code               VARCHAR(32),
-                abnormal_flag           VARCHAR(16),
-                critical_flag           BOOLEAN NOT NULL DEFAULT FALSE,
-                result_at               TIMESTAMPTZ NOT NULL,
-                recorded_by             VARCHAR(128) NOT NULL,
-                classification_code     VARCHAR(64) NOT NULL DEFAULT 'clinical_restricted',
-                legal_hold_flag         BOOLEAN NOT NULL DEFAULT FALSE,
-                created_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
-                created_by              VARCHAR(128) NOT NULL,
-                updated_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
-                updated_by              VARCHAR(128) NOT NULL,
-                version_no              INTEGER NOT NULL DEFAULT 1
-            );
-            CREATE INDEX IF NOT EXISTS idx_{s}_rr_tenant_patient ON {s}.result_record (tenant_id, patient_id);
-            """,
+            var sql = response.Content.Trim();
+            // Strip markdown fences
+            if (sql.StartsWith("```"))
+            {
+                var first = sql.IndexOf('\n');
+                if (first > 0) sql = sql[(first + 1)..];
+                if (sql.EndsWith("```")) sql = sql[..^3];
+                sql = sql.Trim();
+            }
 
-        ["Claim"] = s => $"""
-            CREATE TABLE IF NOT EXISTS {s}.claim (
-                id                      VARCHAR(32) PRIMARY KEY DEFAULT replace(gen_random_uuid()::text, '-', ''),
-                tenant_id               VARCHAR(64) NOT NULL,
-                region_id               VARCHAR(64) NOT NULL,
-                facility_id             VARCHAR(64) NOT NULL,
-                patient_id              VARCHAR(32) NOT NULL,
-                encounter_ref           VARCHAR(32) NOT NULL,
-                payer_ref               VARCHAR(128) NOT NULL,
-                claim_status            VARCHAR(32) NOT NULL,
-                billed_amount           NUMERIC(14,2) NOT NULL DEFAULT 0,
-                allowed_amount          NUMERIC(14,2),
-                classification_code     VARCHAR(64) NOT NULL DEFAULT 'financial_sensitive',
-                legal_hold_flag         BOOLEAN NOT NULL DEFAULT FALSE,
-                created_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
-                created_by              VARCHAR(128) NOT NULL,
-                updated_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
-                updated_by              VARCHAR(128) NOT NULL,
-                version_no              INTEGER NOT NULL DEFAULT 1
-            );
-            CREATE INDEX IF NOT EXISTS idx_{s}_claim_tenant_patient ON {s}.claim (tenant_id, patient_id);
-            """,
+            // Prepend header comment
+            return $"""
+                -- Migration: {svc.Name} initial schema (LLM-generated)
+                -- Schema: {svc.Schema}
+                -- Bounded Context: {svc.Description}
 
-        ["AuditEvent"] = s => $$"""
-            CREATE TABLE IF NOT EXISTS {{s}}.audit_event (
-                id                      VARCHAR(32) PRIMARY KEY DEFAULT replace(gen_random_uuid()::text, '-', ''),
-                tenant_id               VARCHAR(64) NOT NULL,
-                region_id               VARCHAR(64) NOT NULL,
-                facility_id             VARCHAR(64),
-                event_type              VARCHAR(64) NOT NULL,
-                entity_type             VARCHAR(64) NOT NULL,
-                entity_id               VARCHAR(128) NOT NULL,
-                actor_type              VARCHAR(32) NOT NULL,
-                actor_id                VARCHAR(128) NOT NULL,
-                correlation_id          VARCHAR(128) NOT NULL,
-                classification_code     VARCHAR(64) NOT NULL,
-                occurred_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
-                payload_json            JSONB NOT NULL DEFAULT '{}'::jsonb,
-                created_at              TIMESTAMPTZ NOT NULL DEFAULT now()
-            );
-            CREATE INDEX IF NOT EXISTS idx_{{s}}_audit_tenant_entity ON {{s}}.audit_event (tenant_id, entity_type, entity_id);
-            CREATE INDEX IF NOT EXISTS idx_{{s}}_audit_correlation ON {{s}}.audit_event (correlation_id);
-            """,
+                {sql}
+                """;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "LLM migration generation threw for {Service}", svc.Name);
+            return null;
+        }
+    }
 
-        ["AiInteraction"] = s => $"""
-            CREATE TABLE IF NOT EXISTS {s}.ai_interaction (
-                id                      VARCHAR(32) PRIMARY KEY DEFAULT replace(gen_random_uuid()::text, '-', ''),
-                tenant_id               VARCHAR(64) NOT NULL,
-                region_id               VARCHAR(64) NOT NULL,
-                facility_id             VARCHAR(64),
-                interaction_type        VARCHAR(64) NOT NULL,
-                encounter_id            VARCHAR(32),
-                patient_id              VARCHAR(32),
-                model_version           VARCHAR(64) NOT NULL,
-                prompt_version          VARCHAR(64) NOT NULL,
-                input_summary_json      JSONB,
-                output_summary_json     JSONB,
-                outcome_code            VARCHAR(32) NOT NULL,
-                accepted_by             VARCHAR(128),
-                rejected_by             VARCHAR(128),
-                override_reason         TEXT,
-                classification_code     VARCHAR(64) NOT NULL DEFAULT 'ai_evidence',
-                created_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
-                created_by              VARCHAR(128) NOT NULL
-            );
-            CREATE INDEX IF NOT EXISTS idx_{s}_ai_tenant_encounter ON {s}.ai_interaction (tenant_id, encounter_id);
-            """
-    };
+    private static string GenerateDefaultMigrationSql(MicroserviceDefinition svc)
+    {
+        var tables = string.Join("\n\n", svc.Entities.Select(e =>
+        {
+            var table = ToSnakeCase(e);
+            return $"""
+                CREATE TABLE IF NOT EXISTS {svc.Schema}.{table} (
+                    id          VARCHAR(32) PRIMARY KEY DEFAULT replace(gen_random_uuid()::text, '-', ''),
+                    tenant_id   VARCHAR(64) NOT NULL,
+                    created_by  VARCHAR(128) NOT NULL,
+                    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    updated_by  VARCHAR(128) NOT NULL,
+                    version_no  INTEGER NOT NULL DEFAULT 1
+                );
+                CREATE INDEX IF NOT EXISTS idx_{svc.Schema}_{table}_tenant ON {svc.Schema}.{table} (tenant_id);
+                """;
+        }));
+
+        return $"""
+            -- Migration: {svc.Name} initial schema
+            -- Schema: {svc.Schema}
+            -- Bounded Context: {svc.Description}
+
+            CREATE SCHEMA IF NOT EXISTS {svc.Schema};
+
+            {tables}
+            """;
+    }
 
     // ─── Helpers ────────────────────────────────────────────────────────────
 

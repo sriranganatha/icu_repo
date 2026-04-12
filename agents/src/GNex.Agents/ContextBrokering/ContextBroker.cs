@@ -226,7 +226,7 @@ public sealed class ContextBroker : IContextBroker
         };
     }
 
-    // ─── Security Requirements: PHI fields, auth rules, data classification ──
+    // ─── Security Requirements: sensitive fields, auth rules, data classification ──
 
     private static ContextResponse ResolveSecurityRequirements(ContextQuery query, AgentContext context)
     {
@@ -238,7 +238,7 @@ public sealed class ContextBroker : IContextBroker
         var secFindings = context.Findings
             .Where(f => f.Category.Contains("Security", StringComparison.OrdinalIgnoreCase) ||
                         f.Category.Contains("OWASP", StringComparison.OrdinalIgnoreCase) ||
-                        f.Category.Contains("HIPAA", StringComparison.OrdinalIgnoreCase))
+                        f.Category.Contains("Compliance", StringComparison.OrdinalIgnoreCase))
             .ToList();
 
         if (secFindings.Count > 0)
@@ -253,7 +253,7 @@ public sealed class ContextBroker : IContextBroker
         foreach (var art in secArtifacts.Take(5))
             snippets.Add(art.Content);
 
-        // PHI field detection from entity schema
+        // Sensitive field detection from entity schema
         var phiFields = new[] { "SSN", "DateOfBirth", "MedicalRecord", "Insurance", "Diagnosis", "Medication",
             "LabResult", "VitalSign", "Allergy", "PatientName", "Email", "Phone", "Address" };
 
@@ -281,7 +281,7 @@ public sealed class ContextBroker : IContextBroker
             QueryId = query.Id,
             RespondedBy = AgentType.Security,
             Success = true,
-            Answer = $"Security: {secFindings.Count} findings, PHI fields: {facts.GetValueOrDefault("PHI_Fields", "none detected")}",
+            Answer = $"Security: {secFindings.Count} findings, Sensitive fields: {facts.GetValueOrDefault("PHI_Fields", "none detected")}",
             CodeSnippets = snippets,
             Facts = facts
         };
@@ -345,25 +345,25 @@ public sealed class ContextBroker : IContextBroker
         };
     }
 
-    // ─── Compliance Constraints: HIPAA, SOC2, audit requirements ──
+    // ─── Compliance Constraints: SOC2, regulatory, audit requirements ──
 
     private static ContextResponse ResolveComplianceConstraints(ContextQuery query, AgentContext context)
     {
         var facts = new Dictionary<string, string>
         {
-            ["HIPAA_Required"] = "true",
+            ["ComplianceRequired"] = "true",
             ["SOC2_Required"] = "true",
             ["AuditColumns"] = "CreatedAt, CreatedBy, UpdatedAt, UpdatedBy",
             ["TenantIsolation"] = "RLS + EF query filter on TenantId",
-            ["EncryptionAtRest"] = "AES-256 for PHI columns",
-            ["BreachNotification"] = "72-hour HIPAA notification requirement",
-            ["MinimumNecessary"] = "Limit PHI exposure to role-based minimum",
-            ["AccessAudit"] = "Log all PHI read/write with user, timestamp, IP"
+            ["EncryptionAtRest"] = "AES-256 for sensitive columns",
+            ["BreachNotification"] = "72-hour regulatory notification requirement",
+            ["MinimumNecessary"] = "Limit sensitive data exposure to role-based minimum",
+            ["AccessAudit"] = "Log all sensitive data read/write with user, timestamp, IP"
         };
 
         // Add any existing compliance findings
         var compFindings = context.Findings
-            .Where(f => f.Category.Contains("HIPAA", StringComparison.OrdinalIgnoreCase) ||
+            .Where(f => f.Category.Contains("Compliance", StringComparison.OrdinalIgnoreCase) ||
                         f.Category.Contains("SOC2", StringComparison.OrdinalIgnoreCase) ||
                         f.Category.Contains("Compliance", StringComparison.OrdinalIgnoreCase))
             .ToList();
@@ -380,9 +380,9 @@ public sealed class ContextBroker : IContextBroker
         return new ContextResponse
         {
             QueryId = query.Id,
-            RespondedBy = AgentType.HipaaCompliance,
+            RespondedBy = AgentType.Soc2Compliance,
             Success = true,
-            Answer = $"Compliance: HIPAA + SOC2 required, {compFindings.Count} open findings",
+            Answer = $"Compliance: SOC2 + regulatory required, {compFindings.Count} open findings",
             CodeSnippets = compArtifacts,
             Facts = facts
         };

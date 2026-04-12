@@ -10,7 +10,7 @@ namespace GNex.Agents.Infrastructure;
 /// AI-powered infrastructure-as-code agent. Generates multi-stage Dockerfiles,
 /// Kubernetes manifests (Deployment, Service, HPA, PDB, NetworkPolicy),
 /// Helm charts, docker-compose, CI/CD pipelines, and database migration runners
-/// for all 9 HMS microservices.
+/// for all derived project microservices.
 /// </summary>
 public sealed class InfrastructureAgent : IAgent
 {
@@ -19,16 +19,7 @@ public sealed class InfrastructureAgent : IAgent
 
     public AgentType Type => AgentType.Infrastructure;
     public string Name => "Infrastructure Agent";
-    public string Description => "Generates Dockerfiles, Kubernetes manifests, Helm charts, docker-compose, CI/CD pipelines, and DB migration runners for all HMS services.";
-
-    private static readonly (string Name, int Port)[] Services =
-    [
-        ("PatientService",     5101), ("EncounterService",   5102),
-        ("InpatientService",   5103), ("EmergencyService",   5104),
-        ("DiagnosticsService", 5105), ("RevenueService",     5106),
-        ("AuditService",       5107), ("AiService",          5108),
-        ("ApiGateway",         5100),
-    ];
+    public string Description => "Generates Dockerfiles, Kubernetes manifests, Helm charts, docker-compose, CI/CD pipelines, and DB migration runners for all project services.";
 
     public InfrastructureAgent(ILlmProvider llm, ILogger<InfrastructureAgent> logger)
     {
@@ -43,36 +34,39 @@ public sealed class InfrastructureAgent : IAgent
         _logger.LogInformation("InfrastructureAgent starting — AI-powered IaC generation");
 
         var artifacts = new List<CodeArtifact>();
+        var services = ServiceCatalogResolver.GetServices(context);
+        var solutionNs = context.PipelineConfig?.SolutionNamespace ?? "GNex";
+        var nsLower = solutionNs.ToLowerInvariant();
 
         try
         {
             // Per-service Dockerfiles
             if (context.ReportProgress is not null)
-                await context.ReportProgress(Type, $"Generating multi-stage Dockerfiles for {Services.Length} services");
-            foreach (var (name, port) in Services)
+                await context.ReportProgress(Type, $"Generating multi-stage Dockerfiles for {services.Count} services");
+            foreach (var svc in services)
             {
                 ct.ThrowIfCancellationRequested();
-                artifacts.Add(GenerateDockerfile(name, port));
+                artifacts.Add(GenerateDockerfile(svc, solutionNs));
             }
 
             if (context.ReportProgress is not null)
                 await context.ReportProgress(Type, "Generating docker-compose.yml — all services, PostgreSQL, Kafka, Redis, networking");
-            artifacts.Add(GenerateDockerCompose());
+            artifacts.Add(GenerateDockerCompose(services, solutionNs));
 
             if (context.ReportProgress is not null)
                 await context.ReportProgress(Type, "AI-generating Kubernetes manifests — Deployment, Service, HPA, PDB, NetworkPolicy");
-            artifacts.Add(await GenerateKubernetesManifests(ct));
+            artifacts.Add(await GenerateKubernetesManifests(services, solutionNs, ct));
 
             if (context.ReportProgress is not null)
                 await context.ReportProgress(Type, "AI-generating Helm values.yaml — configurable replicas, resource limits, secrets, ingress");
-            artifacts.Add(await GenerateHelmValues(ct));
+            artifacts.Add(await GenerateHelmValues(services, solutionNs, ct));
 
             if (context.ReportProgress is not null)
                 await context.ReportProgress(Type, "Generating CI/CD pipeline — GitHub Actions with build, test, security scan, deploy stages");
-            artifacts.Add(GenerateCiCdPipeline());
+            artifacts.Add(GenerateCiCdPipeline(services, solutionNs));
 
             if (context.ReportProgress is not null)
-                await context.ReportProgress(Type, "Generating database migration runner — FluentMigrator host with rollback support");
+                await context.ReportProgress(Type, "Generating database migration runner — EF Core host with rollback support");
             artifacts.Add(GenerateDatabaseMigrationRunner());
 
             context.Artifacts.AddRange(artifacts);
@@ -85,11 +79,11 @@ public sealed class InfrastructureAgent : IAgent
             return new AgentResult
             {
                 Agent = Type, Success = true,
-                Summary = $"Infrastructure Agent: {artifacts.Count} IaC artifacts for {Services.Length} services (AI: {_llm.ProviderName})",
+                Summary = $"Infrastructure Agent: {artifacts.Count} IaC artifacts for {services.Count} services (AI: {_llm.ProviderName})",
                 Artifacts = artifacts,
                 Messages = [new AgentMessage { From = Type, To = AgentType.Orchestrator,
                     Subject = "Infrastructure artifacts generated",
-                    Body = $"{Services.Length} Dockerfiles, docker-compose, K8s manifests, Helm chart, CI/CD pipeline, DB migration runner." }],
+                    Body = $"{services.Count} Dockerfiles, docker-compose, K8s manifests, Helm chart, CI/CD pipeline, DB migration runner." }],
                 Duration = sw.Elapsed
             };
         }
@@ -101,9 +95,9 @@ public sealed class InfrastructureAgent : IAgent
         }
     }
 
-    private static CodeArtifact GenerateDockerfile(string serviceName, int port)
+    private static CodeArtifact GenerateDockerfile(MicroserviceDefinition svc, string solutionNs)
     {
-        var projectDir = serviceName == "ApiGateway" ? "GNex.ApiGateway" : $"GNex.{serviceName}";
+        var projectDir = $"{solutionNs}.{svc.Name}";
         return new CodeArtifact
         {
             Layer = ArtifactLayer.Infrastructure,
@@ -113,12 +107,12 @@ public sealed class InfrastructureAgent : IAgent
             ProducedBy = AgentType.Infrastructure,
             TracedRequirementIds = ["NFR-INFRA-01"],
             Content = $"""
-                # Multi-stage Dockerfile for {serviceName}
+                # Multi-stage Dockerfile for {svc.Name}
                 # Stage 1: Build
                 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
                 WORKDIR /src
                 COPY ["{projectDir}/{projectDir}.csproj", "{projectDir}/"]
-                COPY ["GNex.SharedKernel/GNex.SharedKernel.csproj", "GNex.SharedKernel/"]
+                COPY ["{solutionNs}.SharedKernel/{solutionNs}.SharedKernel.csproj", "{solutionNs}.SharedKernel/"]
                 RUN dotnet restore "{projectDir}/{projectDir}.csproj"
                 COPY . .
                 WORKDIR "/src/{projectDir}"
@@ -133,36 +127,37 @@ public sealed class InfrastructureAgent : IAgent
                 WORKDIR /app
 
                 # Security: non-root user
-                RUN addgroup -S hms && adduser -S hmsuser -G hms
-                USER hmsuser
+                RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+                USER appuser
 
                 COPY --from=publish /app/publish .
-                EXPOSE {port}
-                ENV ASPNETCORE_URLS=http://+:{port}
+                EXPOSE {svc.ApiPort}
+                ENV ASPNETCORE_URLS=http://+:{svc.ApiPort}
                 ENV ASPNETCORE_ENVIRONMENT=Production
 
                 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
-                  CMD wget -qO- http://localhost:{port}/healthz || exit 1
+                  CMD wget -qO- http://localhost:{svc.ApiPort}/healthz || exit 1
 
                 ENTRYPOINT ["dotnet", "{projectDir}.dll"]
                 """
         };
     }
 
-    private static CodeArtifact GenerateDockerCompose()
+    private static CodeArtifact GenerateDockerCompose(IReadOnlyList<MicroserviceDefinition> services, string solutionNs)
     {
-        var serviceEntries = string.Join("\n", Services.Select(s =>
+        var nsLower = solutionNs.ToLowerInvariant();
+        var serviceEntries = string.Join("\n", services.Select(s =>
         {
-            var dockerfile = s.Name == "ApiGateway" ? "GNex.ApiGateway" : $"GNex.{s.Name}";
-            var lower = s.Name.ToLowerInvariant();
+            var dockerfile = $"{solutionNs}.{s.Name}";
+            var lower = s.ShortName;
             return
                 $"  {lower}:\n" +
                 $"    build:\n" +
                 $"      context: ./src\n" +
                 $"      dockerfile: {dockerfile}/Dockerfile\n" +
-                $"    ports: [\"{s.Port}:{s.Port}\"]\n" +
+                $"    ports: [\"{s.ApiPort}:{s.ApiPort}\"]\n" +
                  "    environment:\n" +
-                 "      - ConnectionStrings__Default=Host=postgres;Database=hms;Username=hms;Password=${POSTGRES_PASSWORD:-gnex_dev_pw}\n" +
+                $"      - ConnectionStrings__Default=Host=postgres;Database={nsLower};Username={nsLower}_admin;Password=${{POSTGRES_PASSWORD:-gnex_dev_pw}}\n" +
                  "      - Kafka__BootstrapServers=kafka:9092\n" +
                  "      - Redis__ConnectionString=redis:6379\n" +
                  "    depends_on:\n" +
@@ -179,14 +174,14 @@ public sealed class InfrastructureAgent : IAgent
             "  postgres:\n" +
             "    image: postgres:16-alpine\n" +
             "    environment:\n" +
-            "      POSTGRES_USER: hms\n" +
+            $"      POSTGRES_USER: {nsLower}_admin\n" +
             "      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-gnex_dev_pw}\n" +
-            "      POSTGRES_DB: hms\n" +
+            $"      POSTGRES_DB: {nsLower}\n" +
             "    volumes:\n" +
             "      - pgdata:/var/lib/postgresql/data\n" +
             "    ports: [\"5432:5432\"]\n" +
             "    healthcheck:\n" +
-            "      test: [\"CMD-SHELL\", \"pg_isready -U hms\"]\n" +
+            $"      test: [\"CMD-SHELL\", \"pg_isready -U {nsLower}_admin\"]\n" +
             "      interval: 10s\n" +
             "      timeout: 5s\n" +
             "      retries: 5\n\n" +
@@ -224,7 +219,7 @@ public sealed class InfrastructureAgent : IAgent
             "    ports: [\"3000:3000\"]\n" +
             "    environment:\n" +
             "      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}\n\n" +
-            "  # ─── GenesisNexus Microservices ──────────────────────────────\n" +
+            $"  # ─── {solutionNs} Microservices ──────────────────────────────\n" +
             serviceEntries + "\n\n" +
             "volumes:\n" +
             "  pgdata:";
@@ -241,33 +236,35 @@ public sealed class InfrastructureAgent : IAgent
         };
     }
 
-    private async Task<CodeArtifact> GenerateKubernetesManifests(CancellationToken ct)
+    private async Task<CodeArtifact> GenerateKubernetesManifests(IReadOnlyList<MicroserviceDefinition> services, string solutionNs, CancellationToken ct)
     {
+        var serviceList = string.Join(", ", services.Select(s => $"{s.Name}:{s.ApiPort}"));
         var response = await _llm.GenerateAsync(new LlmPrompt
         {
-            SystemPrompt = "You are a Kubernetes expert for healthcare platforms. Generate production-grade K8s manifests.",
-            UserPrompt = $"Generate Kubernetes manifests for these HMS services: {string.Join(", ", Services.Select(s => $"{s.Name}:{s.Port}"))}. Include: Deployment (2 replicas, resource limits, liveness/readiness probes), Service (ClusterIP), HPA (2-10 replicas, 70% CPU), PDB (maxUnavailable: 1), NetworkPolicy (only allow ingress from API Gateway). Output as a single multi-document YAML.",
+            SystemPrompt = "You are a Kubernetes expert for microservices platforms. Generate production-grade K8s manifests.",
+            UserPrompt = $"Generate Kubernetes manifests for these services: {serviceList}. Include: Deployment (2 replicas, resource limits, liveness/readiness probes), Service (ClusterIP), HPA (2-10 replicas, 70% CPU), PDB (maxUnavailable: 1), NetworkPolicy (only allow ingress from API Gateway). Use namespace: {solutionNs.ToLowerInvariant()}. Output as a single multi-document YAML.",
             Temperature = 0.1, RequestingAgent = Name
         }, ct);
 
         return new CodeArtifact
         {
             Layer = ArtifactLayer.Infrastructure,
-            RelativePath = "infrastructure/k8s/hms-services.yaml",
-            FileName = "hms-services.yaml",
+            RelativePath = $"infrastructure/k8s/{solutionNs.ToLowerInvariant()}-services.yaml",
+            FileName = $"{solutionNs.ToLowerInvariant()}-services.yaml",
             Namespace = string.Empty,
             ProducedBy = AgentType.Infrastructure,
             TracedRequirementIds = ["NFR-INFRA-01"],
-            Content = response.Success ? response.Content : GenerateK8sFallback()
+            Content = response.Success ? response.Content : GenerateK8sFallback(services, solutionNs)
         };
     }
 
-    private async Task<CodeArtifact> GenerateHelmValues(CancellationToken ct)
+    private async Task<CodeArtifact> GenerateHelmValues(IReadOnlyList<MicroserviceDefinition> services, string solutionNs, CancellationToken ct)
     {
+        var serviceNames = string.Join(", ", services.Select(s => s.Name));
         var response = await _llm.GenerateAsync(new LlmPrompt
         {
-            SystemPrompt = "You are a Helm chart expert. Generate values.yaml for a healthcare microservices platform.",
-            UserPrompt = $"Generate a Helm values.yaml for HMS with global settings (image registry, namespace, TLS), per-service overrides ({string.Join(", ", Services.Select(s => s.Name))}), database config, Kafka config, Redis config, and monitoring config. Include healthcare-specific settings: HIPAA encryption key ref, PHI audit retention days, break-the-glass timeout.",
+            SystemPrompt = "You are a Helm chart expert. Generate values.yaml for a microservices platform.",
+            UserPrompt = $"Generate a Helm values.yaml for {solutionNs} with global settings (image registry, namespace: {solutionNs.ToLowerInvariant()}, TLS), per-service overrides ({serviceNames}), database config, Kafka config, Redis config, and monitoring config. Include security settings: encryption key ref, audit retention days.",
             Temperature = 0.1, RequestingAgent = Name
         }, ct);
 
@@ -279,20 +276,25 @@ public sealed class InfrastructureAgent : IAgent
             Namespace = string.Empty,
             ProducedBy = AgentType.Infrastructure,
             TracedRequirementIds = ["NFR-INFRA-01"],
-            Content = response.Success ? response.Content : GenerateHelmFallback()
+            Content = response.Success ? response.Content : GenerateHelmFallback(services, solutionNs)
         };
     }
 
-    private static CodeArtifact GenerateCiCdPipeline() => new()
+    private static CodeArtifact GenerateCiCdPipeline(IReadOnlyList<MicroserviceDefinition> services, string solutionNs)
     {
-        Layer = ArtifactLayer.Infrastructure,
-        RelativePath = ".github/workflows/hms-ci-cd.yml",
-        FileName = "hms-ci-cd.yml",
-        Namespace = string.Empty,
-        ProducedBy = AgentType.Infrastructure,
-        TracedRequirementIds = ["NFR-INFRA-01", "SOC2-CC8"],
-        Content = """
-            name: HMS CI/CD Pipeline
+        var nsLower = solutionNs.ToLowerInvariant();
+        var serviceMatrix = string.Join("\n", services.Select(s => $"                      - {s.Name}"));
+
+        return new CodeArtifact
+        {
+            Layer = ArtifactLayer.Infrastructure,
+            RelativePath = ".github/workflows/ci-cd.yml",
+            FileName = "ci-cd.yml",
+            Namespace = string.Empty,
+            ProducedBy = AgentType.Infrastructure,
+            TracedRequirementIds = ["NFR-INFRA-01", "SOC2-CC8"],
+            Content = $$$"""
+            name: {{{solutionNs}}} CI/CD Pipeline
 
             on:
               push:
@@ -303,7 +305,7 @@ public sealed class InfrastructureAgent : IAgent
             env:
               DOTNET_VERSION: '8.0.x'
               REGISTRY: ghcr.io
-              IMAGE_PREFIX: ${{ github.repository_owner }}/hms
+              IMAGE_PREFIX: ${{ github.repository_owner }}/{{{nsLower}}}
 
             jobs:
               build-and-test:
@@ -311,15 +313,7 @@ public sealed class InfrastructureAgent : IAgent
                 strategy:
                   matrix:
                     service:
-                      - PatientService
-                      - EncounterService
-                      - InpatientService
-                      - EmergencyService
-                      - DiagnosticsService
-                      - RevenueService
-                      - AuditService
-                      - AiService
-                      - ApiGateway
+            {{{serviceMatrix}}}
                 steps:
                   - uses: actions/checkout@v4
                   - uses: actions/setup-dotnet@v4
@@ -327,20 +321,20 @@ public sealed class InfrastructureAgent : IAgent
                       dotnet-version: ${{ env.DOTNET_VERSION }}
 
                   - name: Restore dependencies
-                    run: dotnet restore src/GNex.${{ matrix.service }}/GNex.${{ matrix.service }}.csproj
+                    run: dotnet restore src/{{{solutionNs}}}.${{ matrix.service }}/{{{solutionNs}}}.${{ matrix.service }}.csproj
 
                   - name: Build
-                    run: dotnet build src/GNex.${{ matrix.service }}/GNex.${{ matrix.service }}.csproj -c Release --no-restore
+                    run: dotnet build src/{{{solutionNs}}}.${{ matrix.service }}/{{{solutionNs}}}.${{ matrix.service }}.csproj -c Release --no-restore
 
                   - name: Run unit tests
-                    run: dotnet test src/GNex.Tests/GNex.Tests.csproj --filter Category=${{ matrix.service }} --no-build -c Release
+                    run: dotnet test src/{{{solutionNs}}}.Tests/{{{solutionNs}}}.Tests.csproj --filter Category=${{ matrix.service }} --no-build -c Release
 
               security-scan:
                 runs-on: ubuntu-latest
                 needs: build-and-test
                 steps:
                   - uses: actions/checkout@v4
-                  - name: Run security scan (dotnet-security)
+                  - name: Run security scan
                     run: |
                       dotnet tool install --global security-scan
                       security-scan src/
@@ -352,15 +346,7 @@ public sealed class InfrastructureAgent : IAgent
                 strategy:
                   matrix:
                     service:
-                      - PatientService
-                      - EncounterService
-                      - InpatientService
-                      - EmergencyService
-                      - DiagnosticsService
-                      - RevenueService
-                      - AuditService
-                      - AiService
-                      - ApiGateway
+            {{{serviceMatrix}}}
                 steps:
                   - uses: actions/checkout@v4
                   - name: Log in to GHCR
@@ -374,7 +360,7 @@ public sealed class InfrastructureAgent : IAgent
                     uses: docker/build-push-action@v5
                     with:
                       context: ./src
-                      file: ./src/GNex.${{ matrix.service }}/Dockerfile
+                      file: ./src/{{{solutionNs}}}.${{ matrix.service }}/Dockerfile
                       push: true
                       tags: |
                         ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-${{ matrix.service }}:${{ github.sha }}
@@ -389,8 +375,8 @@ public sealed class InfrastructureAgent : IAgent
                   - uses: actions/checkout@v4
                   - name: Deploy to staging
                     run: |
-                      helm upgrade --install hms-staging infrastructure/helm/ \
-                        --namespace hms-staging \
+                      helm upgrade --install {{{nsLower}}}-staging infrastructure/helm/ \
+                        --namespace {{{nsLower}}}-staging \
                         --set global.image.tag=${{ github.sha }} \
                         --values infrastructure/helm/values-staging.yaml
 
@@ -403,12 +389,13 @@ public sealed class InfrastructureAgent : IAgent
                   - uses: actions/checkout@v4
                   - name: Deploy to production
                     run: |
-                      helm upgrade --install hms-prod infrastructure/helm/ \
-                        --namespace hms-production \
+                      helm upgrade --install {{{nsLower}}}-prod infrastructure/helm/ \
+                        --namespace {{{nsLower}}}-production \
                         --set global.image.tag=${{ github.sha }} \
                         --values infrastructure/helm/values-production.yaml
             """
-    };
+        };
+    }
 
     private static CodeArtifact GenerateDatabaseMigrationRunner() => new()
     {
@@ -475,20 +462,20 @@ public sealed class InfrastructureAgent : IAgent
             """
     };
 
-    private static string GenerateK8sFallback()
+    private static string GenerateK8sFallback(IReadOnlyList<MicroserviceDefinition> services, string solutionNs)
     {
+        var nsLower = solutionNs.ToLowerInvariant();
         var docs = new List<string>();
-        foreach (var (name, port) in Services)
+        foreach (var svc in services)
         {
-            var lower = name.ToLowerInvariant();
-            var proj = name == "ApiGateway" ? "hms-apigateway" : $"hms-{lower}";
+            var proj = $"{nsLower}-{svc.ShortName}";
             docs.Add($"""
                 ---
                 apiVersion: apps/v1
                 kind: Deployment
                 metadata:
                   name: {proj}
-                  namespace: hms
+                  namespace: {nsLower}
                   labels:
                     app: {proj}
                 spec:
@@ -503,9 +490,9 @@ public sealed class InfrastructureAgent : IAgent
                     spec:
                       containers:
                         - name: {proj}
-                          image: ghcr.io/hms/{proj}:latest
+                          image: ghcr.io/{nsLower}/{proj}:latest
                           ports:
-                            - containerPort: {port}
+                            - containerPort: {svc.ApiPort}
                           resources:
                             requests:
                               cpu: 200m
@@ -516,13 +503,13 @@ public sealed class InfrastructureAgent : IAgent
                           livenessProbe:
                             httpGet:
                               path: /healthz
-                              port: {port}
+                              port: {svc.ApiPort}
                             initialDelaySeconds: 15
                             periodSeconds: 30
                           readinessProbe:
                             httpGet:
                               path: /healthz
-                              port: {port}
+                              port: {svc.ApiPort}
                             initialDelaySeconds: 5
                             periodSeconds: 10
                 ---
@@ -530,20 +517,20 @@ public sealed class InfrastructureAgent : IAgent
                 kind: Service
                 metadata:
                   name: {proj}
-                  namespace: hms
+                  namespace: {nsLower}
                 spec:
                   selector:
                     app: {proj}
                   ports:
-                    - port: {port}
-                      targetPort: {port}
+                    - port: {svc.ApiPort}
+                      targetPort: {svc.ApiPort}
                   type: ClusterIP
                 ---
                 apiVersion: autoscaling/v2
                 kind: HorizontalPodAutoscaler
                 metadata:
                   name: {proj}
-                  namespace: hms
+                  namespace: {nsLower}
                 spec:
                   scaleTargetRef:
                     apiVersion: apps/v1
@@ -563,7 +550,7 @@ public sealed class InfrastructureAgent : IAgent
                 kind: PodDisruptionBudget
                 metadata:
                   name: {proj}
-                  namespace: hms
+                  namespace: {nsLower}
                 spec:
                   maxUnavailable: 1
                   selector:
@@ -574,27 +561,34 @@ public sealed class InfrastructureAgent : IAgent
         return string.Join("\n", docs);
     }
 
-    private static string GenerateHelmFallback() => """
+    private static string GenerateHelmFallback(IReadOnlyList<MicroserviceDefinition> services, string solutionNs)
+    {
+        var nsLower = solutionNs.ToLowerInvariant();
+        var svcEntries = string.Join("\n", services.Select(s =>
+            $"        {char.ToLowerInvariant(s.Name[0])}{s.Name[1..]}:\n" +
+            $"          replicas: 2\n" +
+            $"          port: {s.ApiPort}"));
+
+        return $"""
         global:
-          namespace: hms
+          namespace: {nsLower}
           image:
-            registry: ghcr.io/hms
+            registry: ghcr.io/{nsLower}
             pullPolicy: IfNotPresent
             tag: latest
           tls:
             enabled: true
-            certSecretName: hms-tls-cert
-          hipaa:
-            encryptionKeySecret: hms-encryption-key
-            phiAuditRetentionDays: 2555  # 7 years per HIPAA
-            breakTheGlassTimeoutHours: 4
+            certSecretName: {nsLower}-tls-cert
+          security:
+            encryptionKeySecret: {nsLower}-encryption-key
+            auditRetentionDays: 365
 
         database:
           host: postgres
           port: 5432
-          name: hms
-          username: hms
-          passwordSecret: hms-db-password
+          name: {nsLower}
+          username: {nsLower}_admin
+          passwordSecret: {nsLower}-db-password
 
         kafka:
           bootstrapServers: kafka:9092
@@ -613,38 +607,7 @@ public sealed class InfrastructureAgent : IAgent
             adminPasswordSecret: grafana-admin-password
 
         services:
-          patientService:
-            replicas: 2
-            port: 5101
-            resources:
-              requests: { cpu: 200m, memory: 256Mi }
-              limits: { cpu: 500m, memory: 512Mi }
-          encounterService:
-            replicas: 2
-            port: 5102
-          inpatientService:
-            replicas: 2
-            port: 5103
-          emergencyService:
-            replicas: 3  # Higher for ER load
-            port: 5104
-          diagnosticsService:
-            replicas: 2
-            port: 5105
-          revenueService:
-            replicas: 2
-            port: 5106
-          auditService:
-            replicas: 2
-            port: 5107
-          aiService:
-            replicas: 2
-            port: 5108
-            resources:
-              requests: { cpu: 500m, memory: 1Gi }
-              limits: { cpu: 2000m, memory: 4Gi }
-          apiGateway:
-            replicas: 3
-            port: 5100
+        {svcEntries}
         """;
+    }
 }

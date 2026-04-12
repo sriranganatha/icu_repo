@@ -103,6 +103,42 @@ public sealed class PipelineStateStore
     }
 
     /// <summary>
+    /// Persist LLM-derived microservices so they survive restarts.
+    /// </summary>
+    public void TrackDerivedServices(string runId, List<MicroserviceDefinition> services)
+    {
+        lock (_lock)
+        {
+            var snapshot = CurrentSnapshot ??= new PipelineStateSnapshot();
+            snapshot.RunId = runId;
+            snapshot.DerivedServices = services.Select(s => new DerivedServiceSnapshot
+            {
+                Name = s.Name, ShortName = s.ShortName, Schema = s.Schema,
+                Description = s.Description, ApiPort = s.ApiPort,
+                Entities = s.Entities.ToList(), DependsOn = s.DependsOn.ToList()
+            }).ToList();
+            snapshot.LastUpdated = DateTimeOffset.UtcNow;
+            SaveToDisk(snapshot);
+        }
+    }
+
+    /// <summary>
+    /// Restore DerivedServices from persisted snapshot into an AgentContext.
+    /// </summary>
+    public void RestoreDerivedServices(AgentContext context)
+    {
+        if (CurrentSnapshot?.DerivedServices is not { Count: > 0 } saved) return;
+        if (context.DerivedServices.Count > 0) return; // already populated
+
+        context.DerivedServices = saved.Select(s => new MicroserviceDefinition
+        {
+            Name = s.Name, ShortName = s.ShortName, Schema = s.Schema,
+            Description = s.Description, ApiPort = s.ApiPort,
+            Entities = s.Entities.ToArray(), DependsOn = s.DependsOn.ToArray()
+        }).ToList();
+    }
+
+    /// <summary>
     /// Clear state for a new run.
     /// </summary>
     public void Reset(string runId)
@@ -163,6 +199,7 @@ public sealed class PipelineStateSnapshot
     public Dictionary<string, int> AgentFindings { get; set; } = new();
     public Dictionary<string, int> AgentRetries { get; set; } = new();
     public List<BacklogItemSnapshot> BacklogItems { get; set; } = [];
+    public List<DerivedServiceSnapshot> DerivedServices { get; set; } = [];
 }
 
 public sealed class BacklogItemSnapshot
@@ -184,4 +221,15 @@ public sealed class BacklogItemSnapshot
     public DateTimeOffset? StartedAt { get; set; }
     public DateTimeOffset? CompletedAt { get; set; }
     public string AssignedAgent { get; set; } = string.Empty;
+}
+
+public sealed class DerivedServiceSnapshot
+{
+    public string Name { get; set; } = string.Empty;
+    public string ShortName { get; set; } = string.Empty;
+    public string Schema { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+    public int ApiPort { get; set; }
+    public List<string> Entities { get; set; } = [];
+    public List<string> DependsOn { get; set; } = [];
 }

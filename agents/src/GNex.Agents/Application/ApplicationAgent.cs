@@ -157,6 +157,7 @@ public sealed class ApplicationAgent : IAgent
 
     private static List<MicroserviceDefinition> ResolveTargetServicesFromClaimed(AgentContext context)
     {
+        var catalog = ServiceCatalogResolver.GetServices(context);
         // Scope to services referenced by the current claimed backlog items
         if (context.CurrentClaimedItems.Count > 0)
         {
@@ -164,7 +165,7 @@ public sealed class ApplicationAgent : IAgent
             foreach (var item in context.CurrentClaimedItems)
             {
                 var text = $"{item.Title} {item.Description} {item.Module} {string.Join(" ", item.Tags)}";
-                foreach (var svc in MicroserviceCatalog.All)
+                foreach (var svc in catalog)
                 {
                     if (matched.Contains(svc.Name)) continue;
                     if (text.Contains(svc.ShortName, StringComparison.OrdinalIgnoreCase)
@@ -174,11 +175,11 @@ public sealed class ApplicationAgent : IAgent
                 }
             }
             if (matched.Count > 0)
-                return MicroserviceCatalog.All.Where(s => matched.Contains(s.Name)).ToList();
+                return catalog.Where(s => matched.Contains(s.Name)).ToList();
         }
 
         // Fallback: all services (first run before backlog items are assigned)
-        return MicroserviceCatalog.All.ToList();
+        return catalog.ToList();
     }
 
     private static string GetGuidanceSummary(AgentContext context)

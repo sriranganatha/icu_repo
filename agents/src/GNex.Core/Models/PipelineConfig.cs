@@ -29,20 +29,10 @@ public sealed class PipelineConfig
     // Orchestrator instructions — user-provided directives to guide the pipeline
     public string OrchestratorInstructions { get; init; } = string.Empty;
 
-    // Service port mapping
-    public ServicePortMap ServicePorts { get; init; } = new();
-}
-
-public sealed class ServicePortMap
-{
-    public int Patient { get; init; } = 5101;
-    public int Encounter { get; init; } = 5102;
-    public int Inpatient { get; init; } = 5103;
-    public int Emergency { get; init; } = 5104;
-    public int Diagnostics { get; init; } = 5105;
-    public int Revenue { get; init; } = 5106;
-    public int Audit { get; init; } = 5107;
-    public int Ai { get; init; } = 5108;
-    public int Gateway { get; init; } = 5100;
-    public int Kafka { get; init; } = 9092;
+    // Service port mapping — dynamic, populated from DerivedServices or user overrides
+    public Dictionary<string, int> ServicePorts { get; init; } = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["Gateway"] = 5100,
+        ["Kafka"] = 9092
+    };
 }

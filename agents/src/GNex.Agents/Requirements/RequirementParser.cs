@@ -301,9 +301,9 @@ public sealed partial class RequirementParser : IRequirementsReader
         if (lower.Contains("pharmacy") || lower.Contains("medication")) tags.Add("Pharmacy");
         if (lower.Contains("diagnostic") || lower.Contains("lab") || lower.Contains("result")) tags.Add("Diagnostics");
         if (lower.Contains("ai") || lower.Contains("copilot") || lower.Contains("automation")) tags.Add("AI");
-        if (lower.Contains("security") || lower.Contains("audit") || lower.Contains("hipaa")) tags.Add("Security");
+        if (lower.Contains("security") || lower.Contains("audit") || lower.Contains("compliance")) tags.Add("Security");
         if (lower.Contains("tenant") || lower.Contains("multi-tenant")) tags.Add("MultiTenant");
-        if (lower.Contains("integration") || lower.Contains("hl7") || lower.Contains("fhir")) tags.Add("Integration");
+        if (lower.Contains("integration") || lower.Contains("api") || lower.Contains("adapter")) tags.Add("Integration");
         return tags.Distinct().ToList();
     }
 

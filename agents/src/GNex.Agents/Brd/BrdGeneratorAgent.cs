@@ -134,7 +134,7 @@ public sealed class BrdGeneratorAgent : IAgent
         var prompt = new LlmPrompt
         {
             SystemPrompt = """
-                You are a senior healthcare business analyst writing BRD sections for a Hospital Management System.
+                You are a senior business analyst writing BRD sections for an enterprise software system.
                 Respond ONLY with the requested section content — no preamble, no markdown headers, no explanations.
                 Be specific, detailed, and tie every statement back to the requirements provided.
                 """,
@@ -227,7 +227,7 @@ public sealed class BrdGeneratorAgent : IAgent
 
         // Executive Summary
         brd.ExecutiveSummary = $"This document specifies the business requirements for the {projectName} module(s) " +
-                               $"of the Hospital Management System. It covers {requirements.Count} requirements across " +
+                               $"of the software system. It covers {requirements.Count} requirements across " +
                                $"{modules.Count} module(s), addressing functional capabilities, non-functional constraints, " +
                                "integration points, and compliance mandates.";
 
@@ -253,7 +253,7 @@ public sealed class BrdGeneratorAgent : IAgent
             brd.NonFunctionalRequirements =
             [
                 "NFR-PERF: API response time < 200ms at P95 under normal load",
-                "NFR-SEC: All PHI data encrypted at rest (AES-256) and in transit (TLS 1.3)",
+                "NFR-SEC: All sensitive data encrypted at rest (AES-256) and in transit (TLS 1.3)",
                 "NFR-AVAIL: 99.9% uptime SLA with automated failover",
                 "NFR-AUDIT: All data mutations produce immutable audit records"
             ];
@@ -265,11 +265,11 @@ public sealed class BrdGeneratorAgent : IAgent
             "PostgreSQL 16+ is the primary data store.",
             "The system runs on .NET 10 with microservice architecture.",
             "Kafka is used for async inter-service communication.",
-            "FHIR R4 is the healthcare interoperability standard."
+            "Standard integration protocols apply."
         ];
         brd.Constraints =
         [
-            "Must comply with HIPAA 164.312 for PHI handling.",
+            "Must comply with applicable data protection regulations.",
             "Must support multi-tenant data isolation via TenantId.",
             "All APIs must be versioned and backward-compatible.",
             "Database migrations must be non-destructive (no data loss)."
@@ -308,7 +308,7 @@ public sealed class BrdGeneratorAgent : IAgent
         brd.Risks =
         [
             new BrdRisk { Description = "Complex inter-service dependencies may cause cascading failures.", Impact = "High", Likelihood = "Medium", Mitigation = "Circuit breakers and retry policies per service." },
-            new BrdRisk { Description = "PHI data exposure if access control is misconfigured.", Impact = "Critical", Likelihood = "Low", Mitigation = "Automated HIPAA compliance scanning in pipeline." },
+            new BrdRisk { Description = "Sensitive data exposure if access control is misconfigured.", Impact = "Critical", Likelihood = "Low", Mitigation = "Automated compliance scanning in pipeline." },
             new BrdRisk { Description = "Schema migration failures during deployment.", Impact = "High", Likelihood = "Medium", Mitigation = "Non-destructive migrations with rollback scripts." }
         ];
 
@@ -326,7 +326,7 @@ public sealed class BrdGeneratorAgent : IAgent
     {
         var actors = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
-            "Hospital Administrator", "System Administrator"
+            "Administrator", "System Administrator"
         };
         var text = string.Join(" ", requirements.Select(r => $"{r.Title} {r.Description}")).ToLowerInvariant();
         if (text.Contains("patient")) actors.Add("Patient");
@@ -335,7 +335,7 @@ public sealed class BrdGeneratorAgent : IAgent
         if (text.Contains("billing") || text.Contains("claim") || text.Contains("revenue")) actors.Add("Billing Staff");
         if (text.Contains("lab") || text.Contains("diagnostic")) actors.Add("Lab Technician");
         if (text.Contains("emergency") || text.Contains("triage")) actors.Add("Emergency Department Staff");
-        if (text.Contains("api") || text.Contains("integration") || text.Contains("fhir")) actors.Add("External System (API Consumer)");
+        if (text.Contains("api") || text.Contains("integration")) actors.Add("External System (API Consumer)");
         return [.. actors];
     }
 
@@ -343,7 +343,7 @@ public sealed class BrdGeneratorAgent : IAgent
     {
         var points = new List<string>();
         var text = string.Join(" ", requirements.Select(r => $"{r.Title} {r.Description}")).ToLowerInvariant();
-        if (text.Contains("fhir")) points.Add("FHIR R4 — Healthcare interoperability (Patient, Encounter, Observation resources)");
+        if (text.Contains("fhir")) points.Add("FHIR R4 — Interoperability (structured data exchange)");
         if (text.Contains("hl7")) points.Add("HL7 v2 — Legacy system messaging");
         if (text.Contains("kafka")) points.Add("Apache Kafka — Async event streaming between microservices");
         if (text.Contains("email") || text.Contains("notification")) points.Add("SMTP / Push Notifications — Alert delivery");

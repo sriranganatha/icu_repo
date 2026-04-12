@@ -52,12 +52,12 @@ public sealed class TemplateFallbackLlmProvider : ILlmProvider
         if (prompt.RequestingAgent == "Requirements Expander" && user.Contains("=== high-level requirements ==="))
             return GenerateRequirementsExpansion(prompt.UserPrompt);
 
-        // HIPAA compliance
-        if (user.Contains("hipaa") || user.Contains("phi"))
+        // Compliance
+        if (user.Contains("compliance") || user.Contains("sensitive"))
         {
             return """
-                // AI-Generated: HIPAA Compliance Implementation
-                // This code implements HIPAA Technical Safeguards (45 CFR § 164.312)
+                // AI-Generated: Compliance Implementation
+                // This code implements security and compliance safeguards
                 //
                 // Access Control (§164.312(a)): Role-based access with per-tenant isolation
                 // Audit Controls (§164.312(b)): All PHI access logged with who/what/when/where

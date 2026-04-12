@@ -104,7 +104,7 @@ public sealed class MigrationAgent : IAgent
                     Create a static class {svc}DataSeeder with a method:
                       public static void Seed({dbContextName} context)
                     
-                    Include realistic healthcare data (5-10 records per entity).
+                    Include realistic sample data (5-10 records per entity).
                     Use .NET 8 syntax. Namespace: GNex.{svc}.Data
                     """;
 
@@ -124,7 +124,7 @@ public sealed class MigrationAgent : IAgent
                 var rollbackPrompt = $"""
                     Generate a PostgreSQL rollback SQL script for {svc} that drops all tables,
                     indexes, and sequences created by the initial migration.
-                    Schema: {MicroserviceCatalog.All.FirstOrDefault(s => s.Name == svc)?.Schema ?? "public"}
+                    Schema: {ServiceCatalogResolver.ByName(context, svc)?.Schema ?? "public"}
                     Entities: {string.Join(", ", entities.Take(10))}
                     Include IF EXISTS guards and CASCADE. Add header comment with service name and date placeholder.
                     """;

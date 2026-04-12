@@ -12,7 +12,8 @@ public static class BrdDiagramGenerator
     {
         var sb = new StringBuilder();
         sb.AppendLine("graph TB");
-        sb.AppendLine("    HMS[Hospital Management System]");
+        var systemLabel = requirements.Select(r => r.Module).FirstOrDefault(m => !string.IsNullOrEmpty(m)) ?? "System";
+        sb.AppendLine($"    SYS[{systemLabel}]");
 
         var actors = ExtractActors(requirements);
         var systems = ExtractExternalSystems(requirements);
@@ -22,7 +23,7 @@ public static class BrdDiagramGenerator
         {
             var id = $"A{idx++}";
             sb.AppendLine($"    {id}((\"{actor}\"))");
-            sb.AppendLine($"    {id} --> HMS");
+            sb.AppendLine($"    {id} --> SYS");
         }
 
         idx = 0;
@@ -30,7 +31,7 @@ public static class BrdDiagramGenerator
         {
             var id = $"S{idx++}";
             sb.AppendLine($"    {id}[[\"{sys}\"]]");
-            sb.AppendLine($"    HMS --> {id}");
+            sb.AppendLine($"    SYS --> {id}");
         }
 
         if (domainModel?.Entities is { Count: > 0 })
@@ -39,7 +40,7 @@ public static class BrdDiagramGenerator
             foreach (var e in top)
             {
                 var id = e.Name.Replace(" ", "");
-                sb.AppendLine($"    HMS --- {id}[\"{e.Name}\"]");
+                sb.AppendLine($"    SYS --- {id}[\"{e.Name}\"]");
             }
         }
 
@@ -192,8 +193,8 @@ public static class BrdDiagramGenerator
     {
         var systems = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var text = string.Join(" ", requirements.Select(r => $"{r.Title} {r.Description}")).ToLowerInvariant();
-        if (text.Contains("fhir")) systems.Add("FHIR Server");
-        if (text.Contains("hl7")) systems.Add("HL7 Gateway");
+        if (text.Contains("fhir")) systems.Add("Integration Server");
+        if (text.Contains("hl7")) systems.Add("Legacy Gateway");
         if (text.Contains("kafka")) systems.Add("Kafka Cluster");
         if (text.Contains("email") || text.Contains("smtp")) systems.Add("Email Service");
         if (text.Contains("ldap") || text.Contains("active directory")) systems.Add("Identity Provider");

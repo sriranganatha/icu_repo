@@ -2,7 +2,7 @@ namespace GNex.Core.Interfaces;
 
 /// <summary>
 /// Abstraction for LLM-powered code generation. All agents use this to produce
-/// healthcare-grade code artifacts. Implementations can target OpenAI, Azure OpenAI,
+/// production-grade code artifacts. Implementations can target OpenAI, Azure OpenAI,
 /// Ollama, or a template-based fallback for offline/test scenarios.
 /// </summary>
 public interface ILlmProvider

@@ -1,5 +1,4 @@
 using FluentAssertions;
-using GNex.Core.Interfaces;
 using GNex.Database;
 using GNex.Database.Entities.Platform.Projects;
 using GNex.Database.Entities.Platform.Technology;
@@ -14,7 +13,6 @@ public class BrdUploadServiceTests : IDisposable
 {
     private readonly GNexDbContext _db;
     private readonly BrdUploadService _svc;
-    private readonly Mock<ILlmProvider> _llmMock = new();
     private readonly string _projectId;
     private const string TenantId = "test-tenant";
 
@@ -24,18 +22,7 @@ public class BrdUploadServiceTests : IDisposable
             .UseInMemoryDatabase(Guid.NewGuid().ToString())
             .Options;
         _db = new GNexDbContext(options, new TestTenantProvider(TenantId));
-        _llmMock.SetupGet(x => x.IsAvailable).Returns(true);
-        _llmMock.SetupGet(x => x.ProviderName).Returns("test-llm");
-        _llmMock
-            .Setup(x => x.GenerateAsync(It.IsAny<LlmPrompt>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new LlmResponse
-            {
-                Success = true,
-                Content = "Generated section content",
-                Model = "test-model"
-            });
-
-        _svc = new BrdUploadService(_db, _llmMock.Object, new Mock<ILogger<BrdUploadService>>().Object);
+        _svc = new BrdUploadService(_db, new Mock<ILogger<BrdUploadService>>().Object);
 
         // Seed a project
         _projectId = Guid.NewGuid().ToString("N");
@@ -100,14 +87,15 @@ public class BrdUploadServiceTests : IDisposable
 
         var result = await _svc.UploadAndGenerateDraftAsync(_projectId, "req.txt", "my requirements");
 
-        result.Status.Should().Be("draft_llm");
+        result.Status.Should().Be("draft");
         result.SectionsCreated.Should().Be(4);
 
         var sections = await _db.BrdSectionRecords.Where(s => s.BrdId == _projectId).ToListAsync();
         sections.Should().HaveCount(4);
         sections.Should().AllSatisfy(s =>
         {
-            s.Content.Should().Contain("Generated section content");
+            s.Content.Should().Contain("[DRAFT]");
+            s.Content.Should().Contain("req.txt");
             s.DiagramsJson.Should().Be("[]");
         });
         sections.Select(s => s.Order).Should().BeInAscendingOrder();
@@ -122,7 +110,7 @@ public class BrdUploadServiceTests : IDisposable
         var result = await _svc.UploadAndGenerateDraftAsync(
             _projectId, "spec.md", "spec content", templateId: templateId);
 
-        result.Status.Should().Be("draft_llm");
+        result.Status.Should().Be("draft");
         result.SectionsCreated.Should().Be(2);
     }
 
@@ -132,15 +120,15 @@ public class BrdUploadServiceTests : IDisposable
         SeedTemplate(sectionCount: 3);
 
         var first = await _svc.UploadAndGenerateDraftAsync(_projectId, "file1.txt", "content 1");
-        first.Status.Should().Be("draft_llm");
+        first.Status.Should().Be("draft");
         first.SectionsCreated.Should().Be(3);
 
         var second = await _svc.UploadAndGenerateDraftAsync(_projectId, "file2.txt", "content 2");
-        second.Status.Should().Be("draft_llm");
-        second.SectionsCreated.Should().Be(3);
+        second.Status.Should().Be("appended");
+        second.SectionsCreated.Should().Be(0);
 
         var sections = await _db.BrdSectionRecords.Where(s => s.BrdId == _projectId).ToListAsync();
-        sections.Should().HaveCount(3, "sections should be rebuilt as one canonical set without duplication");
+        sections.Should().HaveCount(3, "sections should NOT be duplicated on second upload");
 
         var rawCount = await _db.RawRequirements.CountAsync();
         rawCount.Should().Be(2, "both raw requirements should be stored");
@@ -214,7 +202,7 @@ public class BrdUploadServiceTests : IDisposable
 
         var result = await _svc.UploadBatchAndGenerateDraftAsync(_projectId, files);
 
-        result.Status.Should().Be("draft_llm");
+        result.Status.Should().Be("draft");
         result.FilesProcessed.Should().Be(3);
         result.TotalSectionsCreated.Should().Be(5, "exactly one set of template sections");
 
@@ -239,8 +227,9 @@ public class BrdUploadServiceTests : IDisposable
         var sections = await _db.BrdSectionRecords.Where(s => s.BrdId == _projectId).ToListAsync();
         sections.Should().AllSatisfy(s =>
         {
-            s.Content.Should().Contain("upload:alpha.txt");
-            s.Content.Should().Contain("upload:beta.md");
+            s.Content.Should().Contain("alpha.txt");
+            s.Content.Should().Contain("beta.md");
+            s.Content.Should().Contain("2 file(s)");
         });
     }
 
@@ -272,7 +261,7 @@ public class BrdUploadServiceTests : IDisposable
         {
             s.Content.Should().Contain("v2a.txt");
             s.Content.Should().Contain("v2b.txt");
-            s.Content.Should().Contain("v1.txt");
+            s.Content.Should().NotContain("v1.txt");
         });
     }
 
@@ -314,7 +303,7 @@ public class BrdUploadServiceTests : IDisposable
         result.FileResults.Should().AllSatisfy(fr =>
         {
             fr.RawRequirementId.Should().NotBeNullOrEmpty();
-            fr.Status.Should().Be("draft_llm");
+            fr.Status.Should().Be("draft");
         });
         result.FileResults.Select(fr => fr.FileName).Should()
             .BeEquivalentTo(["spec.md", "req.txt"]);
@@ -363,7 +352,7 @@ public class BrdUploadServiceTests : IDisposable
         {
             s.Id.Should().NotBeNullOrEmpty();
             s.SectionType.Should().StartWith("section_");
-            s.Content.Should().Contain("Generated section content");
+            s.Content.Should().Contain("[DRAFT]");
         });
     }
 

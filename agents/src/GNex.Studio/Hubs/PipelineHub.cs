@@ -119,6 +119,12 @@ public sealed class SignalRPipelineEventSink : IPipelineEventSink
                 }));
             }
 
+            // After ArchitectAgent — persist DerivedServices so they survive restarts
+            if (agent is AgentType.Architect && ctx.DerivedServices.Count > 0)
+            {
+                _stateStore.TrackDerivedServices(runId, ctx.DerivedServices);
+            }
+
             // After Backlog, RequirementsExpander, or any code-gen agent — save backlog items
             if (ctx.ExpandedRequirements.Count > 0 &&
                 agent is AgentType.Backlog or AgentType.RequirementsExpander

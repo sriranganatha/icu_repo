@@ -57,7 +57,7 @@ public sealed class ServicePlan
     /// <summary>Integration contract facts (events, topics, consumer groups).</summary>
     public Dictionary<string, string> IntegrationContracts { get; set; } = [];
 
-    /// <summary>Compliance constraints (HIPAA, SOC2, audit).</summary>
+    /// <summary>Compliance constraints (regulatory, SOC2, audit).</summary>
     public Dictionary<string, string> ComplianceConstraints { get; set; } = [];
 }
 

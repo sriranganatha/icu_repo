@@ -9,7 +9,7 @@ namespace GNex.Agents.Configuration;
 /// <summary>
 /// Configuration agent — generates per-environment appsettings, secrets management,
 /// feature flags, CORS policies, rate limiting, and health-check configurations
-/// for all 9 HMS microservices across Development, Staging, and Production.
+/// for all derived microservices across Development, Staging, and Production.
 /// </summary>
 public sealed class ConfigurationAgent : IAgent
 {
@@ -21,14 +21,6 @@ public sealed class ConfigurationAgent : IAgent
     public string Description => "Generates per-environment configs, secrets management, feature flags, and service discovery.";
 
     private static readonly string[] Environments = ["Development", "Staging", "Production"];
-    private static readonly (string Name, string Short, int Port)[] Services =
-    [
-        ("PatientService", "patient", 5101), ("EncounterService", "encounter", 5102),
-        ("InpatientService", "inpatient", 5103), ("EmergencyService", "emergency", 5104),
-        ("DiagnosticsService", "diagnostics", 5105), ("RevenueService", "revenue", 5106),
-        ("AuditService", "audit", 5107), ("AiService", "ai", 5108),
-        ("ApiGateway", "gateway", 5100),
-    ];
 
     public ConfigurationAgent(ILlmProvider llm, ILogger<ConfigurationAgent> logger)
     {
@@ -43,18 +35,20 @@ public sealed class ConfigurationAgent : IAgent
         _logger.LogInformation("ConfigurationAgent starting");
 
         var artifacts = new List<CodeArtifact>();
+        var services = ServiceCatalogResolver.GetServices(context);
+        var solutionNs = context.PipelineConfig?.SolutionNamespace ?? "GNex";
 
         try
         {
             // ── Per-service, per-environment appsettings ──
-            foreach (var (name, shortName, port) in Services)
+            foreach (var svc in services)
             {
                 ct.ThrowIfCancellationRequested();
                 foreach (var env in Environments)
                 {
                     var prompt = $"""
-                        Generate an appsettings.{env}.json for a .NET 8 microservice "{name}" (port {port})
-                        in a Hospital Management System.
+                        Generate an appsettings.{env}.json for a .NET 8 microservice "{svc.Name}" (port {svc.ApiPort})
+                        in a microservices platform. Service description: {svc.Description}
                         
                         Include:
                         - ConnectionStrings (PostgreSQL, Redis)
@@ -78,7 +72,7 @@ public sealed class ConfigurationAgent : IAgent
                     artifacts.Add(new CodeArtifact
                     {
                         Layer = ArtifactLayer.Configuration,
-                        RelativePath = $"src/GNex.{name}/appsettings.{env}.json",
+                        RelativePath = $"src/{solutionNs}.{svc.Name}/appsettings.{env}.json",
                         FileName = $"appsettings.{env}.json",
                         Namespace = string.Empty,
                         ProducedBy = Type,
@@ -89,11 +83,12 @@ public sealed class ConfigurationAgent : IAgent
             }
 
             // ── Feature flags configuration ──
+            var serviceNames = string.Join(", ", services.Select(s => s.Name));
             var ffPrompt = $"""
-                Generate a feature-flags.json for a Hospital Management System with 9 microservices.
+                Generate a feature-flags.json for a microservices platform with these services: {serviceNames}.
                 Include flags for:
-                - NewPatientWorkflow, EnhancedTriage, AiCopilot, BulkImport, RealTimeAlerts
-                - FhirR4Support, HipaaEnhancedAudit, DarkMode, MaintenanceMode
+                - DarkMode, MaintenanceMode, BulkImport, RealTimeAlerts, AiCopilot
+                - Per-service feature toggles based on service capabilities
                 Each flag has: name, description, enabled (bool), rolloutPercentage (0-100), environments (array)
                 Return ONLY valid JSON.
                 """;
@@ -114,12 +109,12 @@ public sealed class ConfigurationAgent : IAgent
             artifacts.Add(GenerateSecretsTemplate());
 
             // ── Service discovery / Consul config ──
-            artifacts.Add(GenerateServiceDiscovery());
+            artifacts.Add(GenerateServiceDiscovery(services, solutionNs));
 
             // ── .env template files ──
             foreach (var env in Environments)
             {
-                artifacts.Add(GenerateEnvFile(env));
+                artifacts.Add(GenerateEnvFile(env, solutionNs));
             }
 
             context.Artifacts.AddRange(artifacts);
@@ -132,7 +127,7 @@ public sealed class ConfigurationAgent : IAgent
             return new AgentResult
             {
                 Agent = Type, Success = true,
-                Summary = $"Configuration Agent: {artifacts.Count} config artifacts — {Services.Length} services × {Environments.Length} environments + feature flags + secrets",
+                Summary = $"Configuration Agent: {artifacts.Count} config artifacts — {services.Count} services × {Environments.Length} environments + feature flags + secrets",
                 Artifacts = artifacts, Duration = sw.Elapsed
             };
         }
@@ -161,14 +156,14 @@ public sealed class ConfigurationAgent : IAgent
               "RedisPassword": "${REDIS_PASSWORD}",
               "SmtpPassword": "${SMTP_PASSWORD}",
               "AiApiKey": "${AI_API_KEY}",
-              "FhirClientSecret": "${FHIR_CLIENT_SECRET}",
+              "IntegrationClientSecret": "${INTEGRATION_CLIENT_SECRET}",
               "EncryptionKey": "${ENCRYPTION_KEY_BASE64}",
-              "HipaaAuditSigningKey": "${HIPAA_AUDIT_KEY}"
+              "AuditSigningKey": "${AUDIT_SIGNING_KEY}"
             }
             """
     };
 
-    private static CodeArtifact GenerateServiceDiscovery() => new()
+    private static CodeArtifact GenerateServiceDiscovery(IReadOnlyList<MicroserviceDefinition> services, string solutionNs) => new()
     {
         Layer = ArtifactLayer.Configuration,
         RelativePath = "config/service-discovery.json",
@@ -178,21 +173,22 @@ public sealed class ConfigurationAgent : IAgent
         TracedRequirementIds = ["NFR-CONFIG-04"],
         Content = System.Text.Json.JsonSerializer.Serialize(new
         {
-            services = Services.Select(s => new
+            services = services.Select(s => new
             {
                 name = s.Name,
-                shortName = s.Short,
-                port = s.Port,
-                healthEndpoint = $"http://localhost:{s.Port}/healthz",
-                baseUrl = $"http://localhost:{s.Port}",
-                grpcPort = s.Port + 1000
+                shortName = s.ShortName,
+                port = s.ApiPort,
+                healthEndpoint = $"http://localhost:{s.ApiPort}/healthz",
+                baseUrl = $"http://localhost:{s.ApiPort}",
+                grpcPort = s.ApiPort + 1000
             })
         }, new System.Text.Json.JsonSerializerOptions { WriteIndented = true })
     };
 
-    private static CodeArtifact GenerateEnvFile(string env)
+    private static CodeArtifact GenerateEnvFile(string env, string solutionNs)
     {
         var isProd = env == "Production";
+        var lower = solutionNs.ToLowerInvariant();
         return new CodeArtifact
         {
             Layer = ArtifactLayer.Configuration,
@@ -202,20 +198,20 @@ public sealed class ConfigurationAgent : IAgent
             ProducedBy = AgentType.Configuration,
             TracedRequirementIds = ["NFR-CONFIG-05"],
             Content = $"""
-                # HMS Environment: {env}
+                # {solutionNs} Environment: {env}
                 ASPNETCORE_ENVIRONMENT={env}
-                DB_HOST={(isProd ? "hms-db.internal" : "localhost")}
+                DB_HOST={(isProd ? $"{lower}-db.internal" : "localhost")}
                 DB_PORT=5432
-                DB_NAME=hms
-                DB_USER=hms
+                DB_NAME={lower}
+                DB_USER={lower}_admin
                 DB_PASSWORD=$DB_PASSWORD_PLACEHOLDER
-                REDIS_HOST={(isProd ? "hms-redis.internal" : "localhost")}
+                REDIS_HOST={(isProd ? $"{lower}-redis.internal" : "localhost")}
                 REDIS_PORT=6379
-                KAFKA_BROKERS={(isProd ? "hms-kafka-1.internal:9092,hms-kafka-2.internal:9092" : "localhost:9092")}
-                JWT_ISSUER=hms-{env.ToLowerInvariant()}
-                JWT_AUDIENCE=hms-api
+                KAFKA_BROKERS={(isProd ? $"{lower}-kafka-1.internal:9092,{lower}-kafka-2.internal:9092" : "localhost:9092")}
+                JWT_ISSUER={lower}-{env.ToLowerInvariant()}
+                JWT_AUDIENCE={lower}-api
                 LOG_LEVEL={(isProd ? "Warning" : env == "Staging" ? "Information" : "Debug")}
-                OTEL_EXPORTER_ENDPOINT={(isProd ? "https://otel.hms.internal:4317" : "http://localhost:4317")}
+                OTEL_EXPORTER_ENDPOINT={(isProd ? $"https://otel.{lower}.internal:4317" : "http://localhost:4317")}
                 ENABLE_SWAGGER={(isProd ? "false" : "true")}
                 """
         };

@@ -22,7 +22,7 @@ namespace GNex.Agents.CodeReasoning;
 ///   4. Multi-tenant consistency — all entities have TenantId + RLS
 ///   5. Naming convention coherence — Pascal/camelCase, namespace consistency
 ///   6. Cross-service dependency correctness — consumed events match published schemas
-///   7. Compliance wiring — PHI entities have audit + encryption attributes
+///   7. Compliance wiring — Sensitive entities have audit + encryption attributes
 /// </summary>
 public sealed class CodeReasoningAgent : IAgent
 {
@@ -45,7 +45,7 @@ public sealed class CodeReasoningAgent : IAgent
         context.AgentStatuses[Type] = AgentStatus.Running;
 
         context.ReportProgress?.Invoke(Type,
-            $"Reasoning over {context.Artifacts.Count} artifacts across {MicroserviceCatalog.All.Length} services...");
+            $"Reasoning over {context.Artifacts.Count} artifacts across {ServiceCatalogResolver.GetServices(context).Count} services...");
 
         try
         {
@@ -506,13 +506,14 @@ public sealed class CodeReasoningAgent : IAgent
     private async Task<List<ReviewFinding>> CheckCrossServiceDependencies(AgentContext context, CancellationToken ct)
     {
         var findings = new List<ReviewFinding>();
+        var catalog = ServiceCatalogResolver.GetServices(context);
 
-        foreach (var svcDef in MicroserviceCatalog.All)
+        foreach (var svcDef in catalog)
         {
             foreach (var dep in svcDef.DependsOn)
             {
                 // Check if the dependency service actually exists
-                var depService = MicroserviceCatalog.ByName(dep);
+                var depService = ServiceCatalogResolver.ByName(context, dep);
 
                 if (depService is null)
                 {
@@ -522,7 +523,7 @@ public sealed class CodeReasoningAgent : IAgent
                         Severity = ReviewSeverity.Critical,
                         Message = $"{svcDef.Name} depends on '{dep}' which doesn't exist in the service catalog.",
                         FilePath = $"src/GNex.{svcDef.Name}/",
-                        Suggestion = $"Add '{dep}' service to MicroserviceCatalog or remove the dependency from {svcDef.Name}."
+                        Suggestion = $"Add '{dep}' service to the service catalog or remove the dependency from {svcDef.Name}."
                     });
                     continue;
                 }
@@ -561,7 +562,7 @@ public sealed class CodeReasoningAgent : IAgent
 
         if (context.DomainModel is null) return findings;
 
-        // Identify PHI-bearing entities
+        // Identify sensitive entities
         var phiKeywords = new[] { "patient", "encounter", "diagnosis", "medication", "observation", "vital", "allergy", "lab" };
 
         foreach (var entity in context.DomainModel.Entities)
@@ -574,7 +575,7 @@ public sealed class CodeReasoningAgent : IAgent
             // Query compliance requirements via broker
             var compResponse = await _broker.ResolveAsync(new ContextQuery
             {
-                From = Type, To = AgentType.HipaaCompliance,
+                From = Type, To = AgentType.Soc2Compliance,
                 Intent = QueryIntent.ComplianceConstraints,
                 Module = entity.ServiceName, EntityName = entity.Name
             }, context, ct);
@@ -588,29 +589,29 @@ public sealed class CodeReasoningAgent : IAgent
             {
                 var content = entityArtifact.Content;
 
-                // PHI entities must have audit columns
+                // Sensitive entities must have audit columns
                 if (!content.Contains("CreatedAt") || !content.Contains("UpdatedAt"))
                 {
                     findings.Add(new ReviewFinding
                     {
-                        Category = "HIPAA-164.312(b)",
+                        Category = "DATA-GOV-01",
                         Severity = ReviewSeverity.Critical,
-                        Message = $"PHI entity {entity.Name} in {entity.ServiceName} is missing audit trail columns (CreatedAt/UpdatedAt).",
+                        Message = $"Sensitive entity {entity.Name} in {entity.ServiceName} is missing audit trail columns (CreatedAt/UpdatedAt).",
                         FilePath = entityArtifact.RelativePath,
-                        Suggestion = "Add CreatedAt, CreatedBy, UpdatedAt, UpdatedBy properties for HIPAA audit compliance."
+                        Suggestion = "Add CreatedAt, CreatedBy, UpdatedAt, UpdatedBy properties for audit compliance."
                     });
                 }
 
-                // PHI entities should have data classification attribute
+                // Sensitive entities should have data classification attribute
                 if (!content.Contains("DataClassification") && !content.Contains("[Restricted]") && !content.Contains("[Confidential]"))
                 {
                     findings.Add(new ReviewFinding
                     {
                         Category = "Security",
                         Severity = ReviewSeverity.Warning,
-                        Message = $"PHI entity {entity.Name} in {entity.ServiceName} lacks data classification attribute.",
+                        Message = $"Sensitive entity {entity.Name} in {entity.ServiceName} lacks data classification attribute.",
                         FilePath = entityArtifact.RelativePath,
-                        Suggestion = "Add [DataClassification(\"Restricted\")] or [Confidential] attribute for PHI data."
+                        Suggestion = "Add [DataClassification(\"Restricted\")] or [Confidential] attribute for sensitive data."
                     });
                 }
             }
@@ -628,11 +629,11 @@ public sealed class CodeReasoningAgent : IAgent
                 {
                     findings.Add(new ReviewFinding
                     {
-                        Category = "HIPAA-164.312(a)",
+                        Category = "DATA-GOV-02",
                         Severity = ReviewSeverity.Error,
-                        Message = $"PHI service {serviceArtifact.FileName} has no authorization check — minimum-necessary access rule violated.",
+                        Message = $"Sensitive service {serviceArtifact.FileName} has no authorization check — minimum-necessary access rule violated.",
                         FilePath = serviceArtifact.RelativePath,
-                        Suggestion = "Add role-based authorization (e.g., [Authorize(Policy = \"CanAccessPHI\")]) to all PHI endpoints."
+                        Suggestion = "Add role-based authorization (e.g., [Authorize(Policy = \"CanAccessSensitiveData\")]) to all sensitive data endpoints."
                     });
                 }
             }

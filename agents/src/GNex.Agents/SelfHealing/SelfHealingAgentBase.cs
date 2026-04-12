@@ -171,7 +171,7 @@ public abstract class SelfHealingAgentBase : IAgent
             var diagPrompt = new LlmPrompt
             {
                 SystemPrompt = $"""
-                    You are a senior .NET 8 developer and DevOps engineer specializing in healthcare systems.
+                    You are a senior .NET 8 developer and DevOps engineer specializing in enterprise systems.
                     Analyze the error from the {Name} and provide:
                     1. ROOT CAUSE: One-line explanation
                     2. FIX: Specific actionable fix (code change, config change, or command)
@@ -248,7 +248,7 @@ public abstract class SelfHealingAgentBase : IAgent
     {
         var response = await Llm.GenerateAsync(new LlmPrompt
         {
-            SystemPrompt = $"You are an expert .NET 8/C# developer for a Hospital Management System. Agent: {Name}.",
+            SystemPrompt = $"You are an expert .NET 8/C# developer for an enterprise application. Agent: {Name}.",
             UserPrompt = prompt,
             Temperature = temp,
             MaxTokens = maxTokens,
@@ -263,7 +263,7 @@ public abstract class SelfHealingAgentBase : IAgent
     {
         var response = await Llm.GenerateAsync(new LlmPrompt
         {
-            SystemPrompt = $"You are an expert .NET 8/C# developer for a Hospital Management System. Agent: {Name}.",
+            SystemPrompt = $"You are an expert .NET 8/C# developer for an enterprise application. Agent: {Name}.",
             UserPrompt = prompt,
             Temperature = temp,
             MaxTokens = maxTokens,

@@ -47,7 +47,7 @@ public sealed class ObservabilityAgent : IAgent
             artifacts.Add(GenerateOpenTelemetryBootstrap());
 
             if (context.ReportProgress is not null)
-                await context.ReportProgress(Type, "Generating HMS metrics — request counters, duration histograms, PHI access tracking, Kafka latency");
+                await context.ReportProgress(Type, "Generating metrics — request counters, duration histograms, access tracking, Kafka latency");
             artifacts.Add(GenerateGNexMetrics());
 
             if (context.ReportProgress is not null)
@@ -63,7 +63,7 @@ public sealed class ObservabilityAgent : IAgent
             artifacts.Add(await GenerateGrafanaDashboard(ct));
 
             if (context.ReportProgress is not null)
-                await context.ReportProgress(Type, "Generating Prometheus alerting rules — SLA violation, error spike, PHI breach attempt alerts");
+                await context.ReportProgress(Type, "Generating Prometheus alerting rules — SLA violation, error spike, unauthorized access alerts");
             artifacts.Add(GenerateAlertingRules());
 
             context.Artifacts.AddRange(artifacts);
@@ -126,9 +126,9 @@ public sealed class ObservabilityAgent : IAgent
                 public static readonly Counter<long> ErrorCounter =
                     ServiceMeter.CreateCounter<long>("hms.errors.total", "error", "Total errors");
 
-                // Healthcare-specific metrics
+                // Domain-specific metrics
                 public static readonly Counter<long> PhiAccessCounter =
-                    ServiceMeter.CreateCounter<long>("hms.phi.access_total", "access", "Total PHI access events");
+                    ServiceMeter.CreateCounter<long>("app.sensitive_data.access_total", "access", "Total sensitive data access events");
                 public static readonly Counter<long> BreachAttemptCounter =
                     ServiceMeter.CreateCounter<long>("hms.security.breach_attempts", "attempt", "Potential breach attempts");
                 public static readonly Histogram<double> KafkaPublishLatency =
@@ -155,7 +155,7 @@ public sealed class ObservabilityAgent : IAgent
             namespace GNex.SharedKernel.Observability;
 
             /// <summary>
-            /// Healthcare-domain Prometheus metrics for clinical and operational monitoring.
+            /// Application-domain Prometheus metrics for clinical and operational monitoring.
             /// </summary>
             public static class GNexMetrics
             {
@@ -203,7 +203,7 @@ public sealed class ObservabilityAgent : IAgent
         var response = await _llm.GenerateAsync(new LlmPrompt
         {
             SystemPrompt = "You are an ASP.NET Core observability expert. Generate request tracing middleware.",
-            UserPrompt = "Generate a RequestTracingMiddleware that: 1) Starts a new Activity/span per request, 2) Tags with TenantId, UserId, Role, 3) Records request duration, 4) Logs structured request/response, 5) Marks PHI access events. Use OpenTelemetryBootstrap.ServiceActivitySource. Namespace: GNex.SharedKernel.Observability.",
+            UserPrompt = "Generate a RequestTracingMiddleware that: 1) Starts a new Activity/span per request, 2) Tags with TenantId, UserId, Role, 3) Records request duration, 4) Logs structured request/response, 5) Marks sensitive data access events. Use OpenTelemetryBootstrap.ServiceActivitySource. Namespace: GNex.SharedKernel.Observability.",
             Temperature = 0.1, RequestingAgent = Name
         }, ct);
 
@@ -334,8 +334,8 @@ public sealed class ObservabilityAgent : IAgent
     {
         var response = await _llm.GenerateAsync(new LlmPrompt
         {
-            SystemPrompt = "You are a Grafana dashboarding expert for healthcare monitoring. Generate a Grafana dashboard JSON.",
-            UserPrompt = $"Generate a Grafana dashboard JSON for HMS with panels: 1) Request rate per service, 2) P50/P95/P99 latency, 3) Error rate, 4) PHI access events, 5) Emergency arrivals by triage level, 6) AI interaction latency, 7) Kafka publish latency, 8) Database connection pool. Services: {string.Join(", ", HmsServices)}. Use Prometheus data source.",
+            SystemPrompt = "You are a Grafana dashboarding expert for application monitoring. Generate a Grafana dashboard JSON.",
+            UserPrompt = $"Generate a Grafana dashboard JSON for HMS with panels: 1) Request rate per service, 2) P50/P95/P99 latency, 3) Error rate, 4) Sensitive data access events, 5) Domain-specific operational metrics, 6) AI interaction latency, 7) Kafka publish latency, 8) Database connection pool. Services: {string.Join(", ", HmsServices)}. Use Prometheus data source.",
             Temperature = 0.2, RequestingAgent = Name
         }, ct);
 
@@ -394,7 +394,7 @@ public sealed class ObservabilityAgent : IAgent
                     labels:
                       severity: critical
                     annotations:
-                      summary: "Potential unauthorized PHI access detected ({{ $value }}/sec)"
+                      summary: "Potential unauthorized sensitive data access detected ({{ $value }}/sec)"
 
                   - alert: ServiceDown
                     expr: up == 0
@@ -428,7 +428,7 @@ public sealed class ObservabilityAgent : IAgent
                     labels:
                       severity: warning
                     annotations:
-                      summary: "Unusual PHI access rate: {{ $value }}/sec from {{ $labels.user }}"
+                      summary: "Unusual sensitive data access rate: {{ $value }}/sec from {{ $labels.user }}"
 
                   - alert: BreakTheGlassUsed
                     expr: increase(hms_requests_total{operation="break_the_glass"}[1h]) > 0
@@ -443,7 +443,7 @@ public sealed class ObservabilityAgent : IAgent
     private static string GenerateGrafanaDashboardFallback() => """
         {
           "dashboard": {
-            "title": "HMS Healthcare Platform",
+            "title": "Application Platform",
             "uid": "hms-overview",
             "timezone": "UTC",
             "refresh": "10s",
@@ -470,7 +470,7 @@ public sealed class ObservabilityAgent : IAgent
                 "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 }
               },
               {
-                "title": "PHI Access Events",
+                "title": "Sensitive Data Access Events",
                 "type": "timeseries",
                 "datasource": "Prometheus",
                 "targets": [{ "expr": "rate(hms_phi_access_total[5m])", "legendFormat": "{{ entity }} - {{ access }}" }],

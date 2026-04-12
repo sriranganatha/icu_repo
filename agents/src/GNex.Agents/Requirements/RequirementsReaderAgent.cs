@@ -56,7 +56,7 @@ public sealed class RequirementsReaderAgent : IAgent
 
             // Build initial domain model from MicroserviceCatalog (entity artifacts not yet available)
             // This will be enriched after DatabaseAgent runs by calling EnrichDomainModel()
-            context.DomainModel = EntityFieldExtractor.BuildDomainModel(context.Artifacts.ToList());
+            context.DomainModel = EntityFieldExtractor.BuildDomainModel(context.Artifacts.ToList(), ServiceCatalogResolver.GetServices(context));
 
             if (context.ReportProgress is not null)
                 await context.ReportProgress(Type, $"Built domain model: {context.DomainModel.Entities.Count} entities, {context.DomainModel.ApiEndpoints.Count} endpoints, {context.DomainModel.DomainEvents.Count} events");

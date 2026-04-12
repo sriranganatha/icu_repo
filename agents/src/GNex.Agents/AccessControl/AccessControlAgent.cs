@@ -8,7 +8,7 @@ using Microsoft.Extensions.Logging;
 namespace GNex.Agents.AccessControl;
 
 /// <summary>
-/// AI-powered healthcare RBAC/ABAC agent. Generates role definitions, permission
+/// AI-powered RBAC/ABAC agent. Generates role definitions, permission
 /// matrices, resource-level authorization policies, break-the-glass emergency access,
 /// and consent management for the HMS platform.
 /// </summary>
@@ -19,7 +19,7 @@ public sealed class AccessControlAgent : IAgent
 
     public AgentType Type => AgentType.AccessControl;
     public string Name => "Access Control Agent";
-    public string Description => "Generates healthcare RBAC roles, permission matrices, resource-level authorization, break-the-glass emergency access, and consent management.";
+    public string Description => "Generates RBAC roles, permission matrices, resource-level authorization, break-the-glass emergency access, and consent management.";
 
     public AccessControlAgent(ILlmProvider llm, ILogger<AccessControlAgent> logger)
     {
@@ -38,7 +38,7 @@ public sealed class AccessControlAgent : IAgent
         try
         {
             if (context.ReportProgress is not null)
-                await context.ReportProgress(Type, "Generating healthcare role definitions — Physician, Nurse, Pharmacist, Admin, Patient + 15 more roles");
+                await context.ReportProgress(Type, "Generating role definitions from domain requirements");
             artifacts.Add(GenerateRoleDefinitions());
 
             if (context.ReportProgress is not null)
@@ -50,11 +50,11 @@ public sealed class AccessControlAgent : IAgent
             artifacts.Add(await GenerateAuthorizationPolicyProvider(ct));
 
             if (context.ReportProgress is not null)
-                await context.ReportProgress(Type, "Generating break-the-glass emergency access service — time-limited PHI override with full audit trail");
+                await context.ReportProgress(Type, "Generating break-the-glass emergency access service — time-limited elevated access with full audit trail");
             artifacts.Add(GenerateBreakTheGlassService());
 
             if (context.ReportProgress is not null)
-                await context.ReportProgress(Type, "Generating consent management — patient consent tracking, revocation, HIPAA minimum necessary");
+                await context.ReportProgress(Type, "Generating consent management — consent tracking, revocation, minimum necessary access");
             artifacts.Add(GenerateConsentManagement());
 
             context.Artifacts.AddRange(artifacts);
@@ -95,7 +95,7 @@ public sealed class AccessControlAgent : IAgent
             namespace GNex.SharedKernel.AccessControl;
 
             /// <summary>
-            /// Healthcare role definitions following least-privilege principle.
+            /// Role definitions following least-privilege principle.
             /// Each role has a defined scope of access to HMS resources.
             /// </summary>
             public static class GNexRoles
@@ -178,7 +178,7 @@ public sealed class AccessControlAgent : IAgent
 
             /// <summary>
             /// Role → Permission mapping for the HMS platform.
-            /// Enforces least-privilege access per healthcare compliance requirements.
+            /// Enforces least-privilege access per compliance standards.
             /// </summary>
             public static class PermissionMatrix
             {
@@ -246,7 +246,7 @@ public sealed class AccessControlAgent : IAgent
     {
         var response = await _llm.GenerateAsync(new LlmPrompt
         {
-            SystemPrompt = "You are a .NET security expert for healthcare. Generate an ASP.NET Core authorization policy provider that enforces the HMS permission matrix.",
+            SystemPrompt = "You are a .NET security expert. Generate an ASP.NET Core authorization policy provider that enforces the HMS permission matrix.",
             UserPrompt = "Generate an GNexAuthorizationPolicyProvider that maps GNexPermission to ASP.NET Core policies. Include a RequirePermissionAttribute and an GNexAuthorizationHandler. Namespace: GNex.SharedKernel.AccessControl.",
             Temperature = 0.1, RequestingAgent = Name
         }, ct);
@@ -302,7 +302,7 @@ public sealed class AccessControlAgent : IAgent
         FileName = "BreakTheGlassService.cs",
         Namespace = "GNex.SharedKernel.AccessControl",
         ProducedBy = AgentType.AccessControl,
-        TracedRequirementIds = ["NFR-SEC-01", "HIPAA-EmergencyAccess"],
+        TracedRequirementIds = ["NFR-SEC-01", "NFR-ACCESS-01"],
         Content = """
             namespace GNex.SharedKernel.AccessControl;
 
@@ -384,7 +384,7 @@ public sealed class AccessControlAgent : IAgent
         FileName = "ConsentManagement.cs",
         Namespace = "GNex.SharedKernel.AccessControl",
         ProducedBy = AgentType.AccessControl,
-        TracedRequirementIds = ["HIPAA-Consent", "NFR-SEC-01"],
+        TracedRequirementIds = ["NFR-CONSENT-01", "NFR-SEC-01"],
         Content = """
             namespace GNex.SharedKernel.AccessControl;
 

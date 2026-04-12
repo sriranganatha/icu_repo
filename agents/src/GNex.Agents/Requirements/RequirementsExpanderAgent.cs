@@ -75,12 +75,12 @@ public sealed class RequirementsExpanderAgent : IAgent
         var readyRequirements = allRequirements;
 
         // ── Step 1: Build requirement→service mapping ──
-        var reqServiceMap = BuildRequirementServiceMap(readyRequirements, context.DomainModel);
+        var reqServiceMap = BuildRequirementServiceMap(readyRequirements, context.DomainModel, context);
         if (context.ReportProgress is not null)
             await context.ReportProgress(Type, $"Mapped {readyRequirements.Count} requirements to {reqServiceMap.Values.SelectMany(v => v).Distinct().Count()} microservices");
 
         // ── Step 2: Build requirement dependency graph ──
-        var reqDeps = BuildRequirementDependencies(readyRequirements, reqServiceMap);
+        var reqDeps = BuildRequirementDependencies(readyRequirements, reqServiceMap, context);
         if (context.ReportProgress is not null)
         {
             var totalDeps = reqDeps.Values.Sum(d => d.Count);
@@ -115,9 +115,9 @@ public sealed class RequirementsExpanderAgent : IAgent
             var domainCtx = BuildDomainContextForModule(module, context.DomainModel);
             var phaseItems = await ExpandModuleWithPhasesAsync(
                 reqs, module, iteration, reqServiceMap, reqDeps, qualityInsights,
-                domainCtx, context.ReportProgress, ct);
+                domainCtx, context.ReportProgress, context, ct);
 
-            await EnrichItemsWithLlmAsync(phaseItems, reqs, module, reqServiceMap, ct);
+            await EnrichItemsWithLlmAsync(phaseItems, reqs, module, reqServiceMap, context, ct);
 
             if (context.ReportProgress is not null)
             {
@@ -136,7 +136,7 @@ public sealed class RequirementsExpanderAgent : IAgent
         expanded = expanded.Where(i => seenIds.Add(i.Id)).ToList();
 
         // ── Step 4: Resolve dependency chains across all expanded items ──
-        ResolveExpandedDependencies(expanded, context.DomainModel);
+        ResolveExpandedDependencies(expanded, context.DomainModel, context);
         if (context.ReportProgress is not null)
             await context.ReportProgress(Type, $"Resolved dependency chains across {expanded.Count} expanded items");
 
@@ -213,6 +213,7 @@ public sealed class RequirementsExpanderAgent : IAgent
         QualityAssessmentResult qualityInsights,
         string domainCtx,
         Func<AgentType, string, Task>? reportProgress,
+        AgentContext context,
         CancellationToken ct)
     {
         var allItems = new List<ExpandedRequirement>();
@@ -238,7 +239,7 @@ public sealed class RequirementsExpanderAgent : IAgent
         if (epics.Count == 0)
         {
             _logger.LogWarning("Phase 1 produced 0 epics for module '{Module}' — using fallback", module);
-            return CreateFallbackItems(reqs, module, iteration, reqServiceMap, reqDeps);
+            return CreateFallbackItems(reqs, module, iteration, reqServiceMap, reqDeps, context);
         }
 
         // ── Phase 2: Epics → Stories + Use Cases ──
@@ -1048,7 +1049,7 @@ public sealed class RequirementsExpanderAgent : IAgent
 
     // ─── Requirement→Service Mapping ───────────────────────────────────
     private static Dictionary<string, List<string>> BuildRequirementServiceMap(
-        List<Requirement> requirements, ParsedDomainModel? domainModel)
+        List<Requirement> requirements, ParsedDomainModel? domainModel, AgentContext context)
     {
         var map = new Dictionary<string, List<string>>();
 
@@ -1057,7 +1058,7 @@ public sealed class RequirementsExpanderAgent : IAgent
             var services = new List<string>();
             var lower = $"{req.Title} {req.Description}".ToLowerInvariant();
 
-            foreach (var svc in MicroserviceCatalog.All)
+            foreach (var svc in ServiceCatalogResolver.GetServices(context))
             {
                 var svcLower = svc.Name.Replace("Service", "").ToLowerInvariant();
                 if (req.Tags.Any(t => t.Equals(svc.ShortName, StringComparison.OrdinalIgnoreCase)) ||
@@ -1083,7 +1084,7 @@ public sealed class RequirementsExpanderAgent : IAgent
 
     // ─── Requirement Dependency Graph ──────────────────────────────────
     private static Dictionary<string, List<string>> BuildRequirementDependencies(
-        List<Requirement> requirements, Dictionary<string, List<string>> serviceMap)
+        List<Requirement> requirements, Dictionary<string, List<string>> serviceMap, AgentContext context)
     {
         var deps = new Dictionary<string, List<string>>();
 
@@ -1101,7 +1102,7 @@ public sealed class RequirementsExpanderAgent : IAgent
             {
                 foreach (var svcName in services)
                 {
-                    var svc = MicroserviceCatalog.ByName(svcName);
+                    var svc = ServiceCatalogResolver.ByName(context, svcName);
                     if (svc is null) continue;
 
                     foreach (var depSvc in svc.DependsOn)
@@ -1132,7 +1133,7 @@ public sealed class RequirementsExpanderAgent : IAgent
     }
 
     // ─── Resolve dependencies across expanded items ────────────────────
-    private static void ResolveExpandedDependencies(List<ExpandedRequirement> items, ParsedDomainModel? domainModel)
+    private static void ResolveExpandedDependencies(List<ExpandedRequirement> items, ParsedDomainModel? domainModel, AgentContext context)
     {
         // Use first-wins to handle any residual duplicates
         var byId = new Dictionary<string, ExpandedRequirement>(StringComparer.OrdinalIgnoreCase);
@@ -1170,7 +1171,7 @@ public sealed class RequirementsExpanderAgent : IAgent
             {
                 foreach (var svcName in item.AffectedServices)
                 {
-                    var svc = MicroserviceCatalog.ByName(svcName);
+                    var svc = ServiceCatalogResolver.ByName(context, svcName);
                     if (svc is null) continue;
 
                     foreach (var dep in svc.DependsOn)
@@ -1418,7 +1419,8 @@ public sealed class RequirementsExpanderAgent : IAgent
     private static List<ExpandedRequirement> CreateFallbackItems(List<Requirement> reqs,
         string module, int iteration,
         Dictionary<string, List<string>> serviceMap,
-        Dictionary<string, List<string>> depMap)
+        Dictionary<string, List<string>> depMap,
+        AgentContext context)
     {
         var items = new List<ExpandedRequirement>();
         var seq = 0;
@@ -1436,7 +1438,7 @@ public sealed class RequirementsExpanderAgent : IAgent
             var resolvedModule = module;
             if (string.Equals(resolvedModule, "General", StringComparison.OrdinalIgnoreCase))
             {
-                var inferredSvc = InferServiceFromContent(reqTitleLower, req.Description.ToLowerInvariant());
+                var inferredSvc = InferServiceFromContent(reqTitleLower, req.Description.ToLowerInvariant(), context);
                 if (inferredSvc is not null)
                 {
                     resolvedModule = inferredSvc.Replace("Service", "");
@@ -1446,7 +1448,7 @@ public sealed class RequirementsExpanderAgent : IAgent
 
             // Resolve the primary MicroserviceDefinition for rich context
             var primarySvcDef = services.Count > 0
-                ? MicroserviceCatalog.ByName(services[0])
+                ? ServiceCatalogResolver.ByName(context, services[0])
                 : null;
             var svcName = primarySvcDef?.Name ?? (services.Count > 0 ? services[0] : "UnknownService");
             var svcShort = primarySvcDef?.ShortName ?? resolvedModule.ToLowerInvariant();
@@ -1601,10 +1603,10 @@ public sealed class RequirementsExpanderAgent : IAgent
     }
 
     /// <summary>Infer a service name from requirement title and description content.</summary>
-    private static string? InferServiceFromContent(string titleLower, string descLower)
+    private static string? InferServiceFromContent(string titleLower, string descLower, AgentContext context)
     {
         var combined = $"{titleLower} {descLower}";
-        foreach (var svc in MicroserviceCatalog.All)
+        foreach (var svc in ServiceCatalogResolver.GetServices(context))
         {
             var svcLower = svc.Name.Replace("Service", "").ToLowerInvariant();
             if (combined.Contains(svcLower) ||
@@ -1663,12 +1665,13 @@ public sealed class RequirementsExpanderAgent : IAgent
         List<Requirement> reqs,
         string module,
         Dictionary<string, List<string>> reqServiceMap,
+        AgentContext context,
         CancellationToken ct)
     {
         if (items.Count == 0) return;
 
         // Build a compact catalog summary for the prompt
-        var catalogLines = MicroserviceCatalog.All.Select(s =>
+        var catalogLines = ServiceCatalogResolver.GetServices(context).Select(s =>
             $"- {s.Name} (schema: {s.Schema}, entities: [{string.Join(", ", s.Entities)}], " +
             $"ns: {s.Namespace}, port: {s.ApiPort}, depends: [{string.Join(", ", s.DependsOn)}])");
         var catalogBlock = string.Join("\n", catalogLines);
@@ -1722,7 +1725,7 @@ public sealed class RequirementsExpanderAgent : IAgent
         {
             _logger.LogWarning("LLM enrichment failed for {Module}, using deterministic fallback: {Error}",
                 module, response.Error ?? "empty response");
-            EnrichItemsWithServiceContext(items, reqs, module, reqServiceMap);
+            EnrichItemsWithServiceContext(items, reqs, module, reqServiceMap, context);
             return;
         }
 
@@ -1745,7 +1748,7 @@ public sealed class RequirementsExpanderAgent : IAgent
             if (!itemLookup.TryGetValue(itemId, out var item)) continue;
             if (string.Equals(svcName, "UNKNOWN", StringComparison.OrdinalIgnoreCase)) continue;
 
-            var svcDef = MicroserviceCatalog.ByName(svcName);
+            var svcDef = ServiceCatalogResolver.ByName(context, svcName);
             if (svcDef is null) continue;
 
             mapped++;
@@ -1818,7 +1821,7 @@ public sealed class RequirementsExpanderAgent : IAgent
             if (unmappedItems.Count > 0)
             {
                 _logger.LogInformation("Deterministic fallback enriching {Count} unmapped items", unmappedItems.Count);
-                EnrichItemsWithServiceContext(unmappedItems, reqs, module, reqServiceMap);
+                EnrichItemsWithServiceContext(unmappedItems, reqs, module, reqServiceMap, context);
             }
         }
     }
@@ -1832,7 +1835,8 @@ public sealed class RequirementsExpanderAgent : IAgent
         List<ExpandedRequirement> items,
         List<Requirement> reqs,
         string module,
-        Dictionary<string, List<string>> reqServiceMap)
+        Dictionary<string, List<string>> reqServiceMap,
+        AgentContext context)
     {
         foreach (var item in items)
         {
@@ -1851,7 +1855,8 @@ public sealed class RequirementsExpanderAgent : IAgent
             {
                 var inferredSvc = InferServiceFromContent(
                     item.Title.ToLowerInvariant(),
-                    (item.Description ?? "").ToLowerInvariant());
+                    (item.Description ?? "").ToLowerInvariant(),
+                    context);
                 if (inferredSvc is not null)
                     item.Module = inferredSvc.Replace("Service", "");
             }
@@ -1865,7 +1870,7 @@ public sealed class RequirementsExpanderAgent : IAgent
 
             // ── 3. Resolve service definition ──
             var primarySvcDef = item.AffectedServices.Count > 0
-                ? MicroserviceCatalog.ByName(item.AffectedServices[0])
+                ? ServiceCatalogResolver.ByName(context, item.AffectedServices[0])
                 : null;
 
             // Try to resolve from module if no service matched
@@ -1874,7 +1879,7 @@ public sealed class RequirementsExpanderAgent : IAgent
                 var svcName = InferServiceFromModule(item.Module);
                 if (svcName is not null)
                 {
-                    primarySvcDef = MicroserviceCatalog.ByName(svcName);
+                    primarySvcDef = ServiceCatalogResolver.ByName(context, svcName);
                     if (primarySvcDef is not null && item.AffectedServices.Count == 0)
                         item.AffectedServices.Add(svcName);
                 }
@@ -1946,18 +1951,7 @@ public sealed class RequirementsExpanderAgent : IAgent
         }
     }
 
-    private static string? InferServiceFromModule(string module) => module.ToLowerInvariant() switch
-    {
-        var m when m.Contains("patient") => "PatientService",
-        var m when m.Contains("encounter") || m.Contains("opd") => "EncounterService",
-        var m when m.Contains("inpatient") || m.Contains("admission") => "InpatientService",
-        var m when m.Contains("emergency") => "EmergencyService",
-        var m when m.Contains("diagnostic") || m.Contains("lab") => "DiagnosticsService",
-        var m when m.Contains("revenue") || m.Contains("billing") => "RevenueService",
-        var m when m.Contains("audit") || m.Contains("compliance") => "AuditService",
-        var m when m.Contains("ai") => "AiService",
-        _ => null
-    };
+    private static string? InferServiceFromModule(string module) => null; // Service mapping is handled by LLM enrichment
 
     private static string SanitizeId(string id) =>
         Regex.Replace(id.Trim(), @"[^a-zA-Z0-9\-_]", "");

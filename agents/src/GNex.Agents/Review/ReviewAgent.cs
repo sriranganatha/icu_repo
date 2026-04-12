@@ -129,7 +129,7 @@ public sealed class ReviewAgent : IAgent
                 Severity = ReviewSeverity.ComplianceViolation,
                 Category = "Audit",
                 Message = $"Entity '{artifact.FileName}' missing audit timestamp columns.",
-                Suggestion = "Add CreatedAt, CreatedBy, UpdatedAt, UpdatedBy for HIPAA audit trail."
+                Suggestion = "Add CreatedAt, CreatedBy, UpdatedAt, UpdatedBy for audit trail compliance."
             });
         }
 

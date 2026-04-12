@@ -105,7 +105,7 @@ public sealed class PipelineController : ControllerBase
             SpinUpDocker = request.SpinUpDocker,
             ExecuteDdl = request.ExecuteDdl,
             OrchestratorInstructions = request.OrchestratorInstructions ?? string.Empty,
-            ServicePorts = request.ServicePorts ?? new ServicePortMap()
+            ServicePorts = request.ServicePorts ?? new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase) { ["Gateway"] = 5100, ["Kafka"] = 9092 }
         };
 
         CancellationTokenSource runCts;
@@ -348,7 +348,8 @@ public sealed class PipelineController : ControllerBase
                 requirements = ctx.Requirements.Count,
                 artifacts = ctx.Artifacts.Count,
                 findings = ctx.Findings.Count,
-                completed = ctx.CompletedAt.HasValue
+                completed = ctx.CompletedAt.HasValue,
+                derivedServices = ctx.DerivedServices.Select(s => new { s.Name, s.ShortName, s.ApiPort }).ToArray()
             });
         }
 
@@ -1535,7 +1536,7 @@ public sealed class PipelineController : ControllerBase
             DbConnectionString = string.Empty,
             SpinUpDocker = request.SpinUpDocker,
             ExecuteDdl = false,
-            ServicePorts = request.ServicePorts ?? new ServicePortMap()
+            ServicePorts = request.ServicePorts ?? new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase) { ["Gateway"] = 5100, ["Kafka"] = 9092 }
         };
 
         var appCt = lifetime.ApplicationStopping;
@@ -1720,7 +1721,7 @@ public sealed class PipelineController : ControllerBase
         var prompt = new LlmPrompt
         {
             SystemPrompt = $"""
-                You are the {agentType} agent in an HMS (Hospital Management System) multi-agent pipeline.
+                You are the {agentType} agent in a multi-agent software generation pipeline.
                 Answer the user's question ONLY based on the work context provided below.
                 Be concise, factual, and specific. Reference actual file names, finding categories, or backlog items when relevant.
                 If requested information is not in your context, say so clearly.
@@ -1793,16 +1794,24 @@ public sealed class PipelineController : ControllerBase
                     await conn.OpenAsync();
 
                     // Drop all application schemas (not public/system ones)
-                    var schemas = new[] { "cl_mpi", "cl_encounter", "cl_inpatient", "cl_emergency", "cl_diagnostics", "op_revenue", "gov_audit", "gov_ai" };
-                    foreach (var schema in schemas)
+                    var schemasToKeep = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "public", "pg_catalog", "information_schema", "pg_toast" };
+                    var schemasToDropList = new List<string>();
+                    using (var listCmd = conn.CreateCommand())
+                    {
+                        listCmd.CommandText = "SELECT schema_name FROM information_schema.schemata WHERE schema_name NOT LIKE 'pg_%' AND schema_name <> 'information_schema' AND schema_name <> 'public';";
+                        using var reader = await listCmd.ExecuteReaderAsync();
+                        while (await reader.ReadAsync())
+                            schemasToDropList.Add(reader.GetString(0));
+                    }
+                    foreach (var schema in schemasToDropList)
                     {
                         using var cmd = conn.CreateCommand();
-                        cmd.CommandText = $"DROP SCHEMA IF EXISTS {schema} CASCADE;";
+                        cmd.CommandText = $"DROP SCHEMA IF EXISTS \"{schema}\" CASCADE;";
                         await cmd.ExecuteNonQueryAsync();
                     }
 
                     databaseDeleted = true;
-                    _logger.LogWarning("PostgreSQL schemas dropped: {Schemas}", string.Join(", ", schemas));
+                    _logger.LogWarning("PostgreSQL schemas dropped: {Schemas}", string.Join(", ", schemasToDropList));
                 }
                 catch (Exception dbEx)
                 {
@@ -1857,7 +1866,7 @@ public sealed class PipelineRunRequest
     public int MaxQueueItems { get; init; } = 50;
     public int MaxInDevItems { get; init; } = 50;
     public string? OrchestratorInstructions { get; init; }
-    public ServicePortMap? ServicePorts { get; init; }
+    public Dictionary<string, int>? ServicePorts { get; init; }
 }
 
 public sealed class InstructionRequest
@@ -1885,5 +1894,5 @@ public sealed class DeployRequest
     public string? RequirementsPath { get; init; }
     public string? SolutionNamespace { get; init; }
     public bool SpinUpDocker { get; init; } = true;
-    public ServicePortMap? ServicePorts { get; init; }
+    public Dictionary<string, int>? ServicePorts { get; init; }
 }

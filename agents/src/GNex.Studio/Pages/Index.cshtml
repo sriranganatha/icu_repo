@@ -9,7 +9,7 @@
     <div class="row mb-4">
         <div class="col">
             <h2><i class="bi bi-cpu"></i> GN Studio Dashboard</h2>
-            <p class="text-muted mb-0">Monitor agents building the Hospital Management System in real time.</p>
+            <p class="text-muted mb-0">Monitor agents building your project in real time.</p>
         </div>
         <div class="col-auto d-flex align-items-center gap-2">
             <span id="connectionBadge" class="badge bg-secondary">Disconnected</span>
@@ -110,57 +110,12 @@
                 <div class="d-flex align-items-center mb-2">
                     <i class="bi bi-diagram-3 me-2 text-primary"></i>
                     <span class="fw-semibold">Service Port Mapping</span>
-                    <small class="text-muted ms-2">Change ports if another service is already using a port</small>
+                    <small class="text-muted ms-2">Auto-populated from derived services. Override infrastructure ports below.</small>
                 </div>
-                <div class="row g-2">
-                    <div class="col-md-3 col-6">
-                        <div class="input-group input-group-sm">
-                            <span class="input-group-text" style="min-width:95px">Patient</span>
-                            <input type="number" id="portPatient" class="form-control" value="5101" />
-                        </div>
-                    </div>
-                    <div class="col-md-3 col-6">
-                        <div class="input-group input-group-sm">
-                            <span class="input-group-text" style="min-width:95px">Encounter</span>
-                            <input type="number" id="portEncounter" class="form-control" value="5102" />
-                        </div>
-                    </div>
-                    <div class="col-md-3 col-6">
-                        <div class="input-group input-group-sm">
-                            <span class="input-group-text" style="min-width:95px">Inpatient</span>
-                            <input type="number" id="portInpatient" class="form-control" value="5103" />
-                        </div>
-                    </div>
-                    <div class="col-md-3 col-6">
-                        <div class="input-group input-group-sm">
-                            <span class="input-group-text" style="min-width:95px">Emergency</span>
-                            <input type="number" id="portEmergency" class="form-control" value="5104" />
-                        </div>
-                    </div>
-                    <div class="col-md-3 col-6">
-                        <div class="input-group input-group-sm">
-                            <span class="input-group-text" style="min-width:95px">Diagnostics</span>
-                            <input type="number" id="portDiagnostics" class="form-control" value="5105" />
-                        </div>
-                    </div>
-                    <div class="col-md-3 col-6">
-                        <div class="input-group input-group-sm">
-                            <span class="input-group-text" style="min-width:95px">Revenue</span>
-                            <input type="number" id="portRevenue" class="form-control" value="5106" />
-                        </div>
-                    </div>
-                    <div class="col-md-3 col-6">
-                        <div class="input-group input-group-sm">
-                            <span class="input-group-text" style="min-width:95px">Audit</span>
-                            <input type="number" id="portAudit" class="form-control" value="5107" />
-                        </div>
-                    </div>
-                    <div class="col-md-3 col-6">
-                        <div class="input-group input-group-sm">
-                            <span class="input-group-text" style="min-width:95px">AI</span>
-                            <input type="number" id="portAi" class="form-control" value="5108" />
-                        </div>
-                    </div>
+                <div class="row g-2" id="dynamicPortMapping">
+                    <!-- Populated dynamically from DerivedServices via JS -->
+                </div>
+                <div class="row g-2 mt-1">
                     <div class="col-md-3 col-6">
                         <div class="input-group input-group-sm">
                             <span class="input-group-text" style="min-width:95px">API Gateway</span>
@@ -244,7 +199,7 @@
             <div class="row g-2 mb-2">
                 <div class="col">
                     <textarea id="inputInstructions" class="form-control" rows="3"
-                        placeholder="e.g. Focus on security hardening for patient data. Skip performance optimization. Ensure all services have HIPAA audit logging. Use async/await everywhere..."></textarea>
+                        placeholder="e.g. Focus on security hardening. Skip performance optimization. Ensure all services have audit logging. Use async/await everywhere..."></textarea>
                 </div>
             </div>
             <div class="d-flex gap-2 align-items-center">
@@ -310,21 +265,18 @@
         <div class="card-body">
             <div class="row g-2 mb-2">
                 <div class="col-md-5">
-                    <input id="newReqTitle" class="form-control form-control-sm" placeholder="Requirement Title (e.g. Patient Medication Reconciliation)" />
+                    <input id="newReqTitle" class="form-control form-control-sm" placeholder="Requirement Title (e.g. User Authentication Flow)" />
                 </div>
                 <div class="col-md-3">
                     <select id="newReqModule" class="form-select form-select-sm">
                         <option value="General">General</option>
-                        <option value="Patient">Patient</option>
-                        <option value="Encounter">Encounter</option>
-                        <option value="Inpatient">Inpatient</option>
-                        <option value="Emergency">Emergency</option>
-                        <option value="Diagnostics">Diagnostics</option>
-                        <option value="Revenue">Revenue</option>
-                        <option value="Pharmacy">Pharmacy</option>
-                        <option value="AI">AI</option>
+                        <option value="Core">Core</option>
+                        <option value="Auth">Auth</option>
+                        <option value="API">API</option>
                         <option value="Integration">Integration</option>
                         <option value="Security">Security</option>
+                        <option value="Reporting">Reporting</option>
+                        <option value="AI">AI</option>
                     </select>
                 </div>
                 <div class="col-md-4">
@@ -991,9 +943,9 @@
         // Keep backward compat aliases
         const AGENTS = ALL_AGENTS;
         const AGENT_LABELS = ALL_AGENT_LABELS;
-        const SERVICES = ["Patient","Encounter","Inpatient","Emergency","Diagnostics","Revenue","Audit","AI"];
+        let SERVICES = []; // Populated dynamically from DerivedServices
         const LAYERS = ["Database","Repository","Service","Dto","ViewModel","RazorPage","Integration","Test","Migration","Configuration","Security","Compliance","Observability","Infrastructure","Documentation"];
-        const SVC_COLORS = ["#42a5f5","#66bb6a","#ffa726","#ef5350","#ab47bc","#26c6da","#8d6e63","#78909c"];
+        let SVC_COLORS = [];
         const LAYER_COLORS = ["#1565c0","#2e7d32","#ef6c00","#c62828","#6a1b9a","#00838f","#4e342e","#37474f","#ad1457","#546e7a","#d81b60","#283593","#00695c","#4527a0","#bf360c"];
 
         const nocState = {
@@ -1064,7 +1016,7 @@
             type: 'doughnut',
             data: {
                 labels: SERVICES,
-                datasets: [{ data: new Array(8).fill(0), backgroundColor: SVC_COLORS, borderWidth: 0 }]
+                datasets: [{ data: new Array(SERVICES.length).fill(0), backgroundColor: SVC_COLORS, borderWidth: 0 }]
             },
             options: {
                 responsive: true, maintainAspectRatio: false,
@@ -1131,32 +1083,61 @@
 
         function initServiceFlow() {
             const sf = document.getElementById('serviceFlow');
-            const svcDefs = [
-                { name: 'Patient', port: 5101, icon: 'bi-person' },
-                { name: 'Encounter', port: 5102, icon: 'bi-calendar-event' },
-                { name: 'Inpatient', port: 5103, icon: 'bi-building' },
-                { name: 'Emergency', port: 5104, icon: 'bi-exclamation-diamond' },
-                { name: 'Diagnostics', port: 5105, icon: 'bi-clipboard2-pulse' },
-                { name: 'Revenue', port: 5106, icon: 'bi-cash-stack' },
-                { name: 'Audit', port: 5107, icon: 'bi-journal-text' },
-                { name: 'AI', port: 5108, icon: 'bi-robot' }
-            ];
+            if (SERVICES.length === 0) {
+                sf.innerHTML = '<span class="text-muted small">Services will appear after the Architect agent derives them from your requirements.</span>';
+                return;
+            }
+            const palette = ["#42a5f5","#66bb6a","#ffa726","#ef5350","#ab47bc","#26c6da","#8d6e63","#78909c","#e91e63","#00897b","#ff7043","#5c6bc0"];
             sf.innerHTML =
                 '<div class="text-center px-2 py-2 rounded-3 border border-2 border-warning" style="min-width:80px;background:#fff8e1;">' +
                 '  <i class="bi bi-hdd-rack fs-5 text-warning"></i><div style="font-size:0.65rem;font-weight:700;">Kafka</div>' +
                 '  <div style="font-size:0.6rem;color:#888;">Event Bus</div></div>' +
                 '<i class="bi bi-arrow-left-right text-muted mx-1"></i>' +
-                svcDefs.map((s, i) => `
-                    <div id="sf-${s.name}" class="text-center px-2 py-2 rounded-3 border" style="min-width:68px;background:#f5f5f5;transition:all 0.3s;">
-                        <i class="bi ${s.icon}" style="font-size:1.1rem;color:${SVC_COLORS[i]}"></i>
-                        <div style="font-size:0.6rem;font-weight:600;">${s.name}</div>
-                        <div style="font-size:0.55rem;color:#999;">:${s.port}</div>
+                SERVICES.map((s, i) => `
+                    <div id="sf-${s}" class="text-center px-2 py-2 rounded-3 border" style="min-width:68px;background:#f5f5f5;transition:all 0.3s;">
+                        <i class="bi bi-box" style="font-size:1.1rem;color:${palette[i % palette.length]}"></i>
+                        <div style="font-size:0.6rem;font-weight:600;">${s}</div>
                     </div>
                 `).join('<i class="bi bi-arrow-left-right text-muted" style="font-size:0.7rem;"></i>');
         }
 
         initHeatmap();
         initServiceFlow();
+
+        // ─── Dynamic Service Helpers ────────────────────────────────────
+        function updateDerivedServices(serviceList) {
+            // serviceList: [{name, shortName, apiPort}, ...]
+            SERVICES = serviceList.map(s => s.name || s.shortName);
+            const palette = ["#42a5f5","#66bb6a","#ffa726","#ef5350","#ab47bc","#26c6da","#8d6e63","#78909c","#e91e63","#00897b","#ff7043","#5c6bc0"];
+            SVC_COLORS = SERVICES.map((_, i) => palette[i % palette.length]);
+
+            // Rebuild port mapping UI
+            const container = document.getElementById('dynamicPortMapping');
+            if (container) {
+                container.innerHTML = serviceList.map(s => `
+                    <div class="col-md-3 col-6">
+                        <div class="input-group input-group-sm">
+                            <span class="input-group-text" style="min-width:95px">${s.name || s.shortName}</span>
+                            <input type="number" class="form-control svc-port-input" data-svc="${(s.shortName || s.name).toLowerCase()}" value="${s.apiPort || 5100}" />
+                        </div>
+                    </div>
+                `).join('');
+            }
+
+            // Refresh service flow visualization
+            initServiceFlow();
+        }
+
+        function collectDynamicPorts() {
+            const ports = {
+                gateway: parseInt(document.getElementById('portGateway')?.value) || 5100,
+                kafka: parseInt(document.getElementById('portKafka')?.value) || 9092
+            };
+            document.querySelectorAll('.svc-port-input').forEach(el => {
+                ports[el.dataset.svc] = parseInt(el.value) || 5100;
+            });
+            return ports;
+        }
 
         // ─── NOC Update Functions ───────────────────────────────────────
         function nocUpdateAgentTiming(agentKey, status, elapsedMs) {
@@ -1849,18 +1830,7 @@
                 maxQueueItems: parseInt(document.getElementById('inputMaxQueue').value) || 10,
                 maxInDevItems: parseInt(document.getElementById('inputMaxInDev').value) || 10,
                 orchestratorInstructions: document.getElementById('inputInstructions').value.trim(),
-                servicePorts: {
-                    patient: parseInt(document.getElementById('portPatient').value) || 5101,
-                    encounter: parseInt(document.getElementById('portEncounter').value) || 5102,
-                    inpatient: parseInt(document.getElementById('portInpatient').value) || 5103,
-                    emergency: parseInt(document.getElementById('portEmergency').value) || 5104,
-                    diagnostics: parseInt(document.getElementById('portDiagnostics').value) || 5105,
-                    revenue: parseInt(document.getElementById('portRevenue').value) || 5106,
-                    audit: parseInt(document.getElementById('portAudit').value) || 5107,
-                    ai: parseInt(document.getElementById('portAi').value) || 5108,
-                    gateway: parseInt(document.getElementById('portGateway').value) || 5100,
-                    kafka: parseInt(document.getElementById('portKafka').value) || 9092
-                }
+                servicePorts: collectDynamicPorts()
             };
 
             appendLog('system', `Starting pipeline — reqs: ${body.requirementsPath}, output: ${body.outputPath}`);
@@ -2470,13 +2440,20 @@
                     document.getElementById('btnRunPipeline').disabled = false;
                     document.getElementById('btnStopPipeline').disabled = true;
                 }
+
+                // Update derived services if available and not yet populated
+                if (data.derivedServices && data.derivedServices.length > 0 && SERVICES.length === 0) {
+                    updateDerivedServices(data.derivedServices);
+                }
             } catch (e) { /* ignore poll errors */ }
         }, 4000);
 
         function nocResetCharts() {
             chartTimeline.data.datasets[0].data = new Array(ALL_AGENTS.length).fill(0);
             chartTimeline.update('none');
-            chartByService.data.datasets[0].data = new Array(8).fill(0);
+            chartByService.data.labels = SERVICES;
+            chartByService.data.datasets[0].data = new Array(SERVICES.length).fill(0);
+            chartByService.data.datasets[0].backgroundColor = SVC_COLORS;
             chartByService.update('none');
             chartByLayer.data.datasets[0].data = new Array(15).fill(0);
             chartByLayer.update('none');

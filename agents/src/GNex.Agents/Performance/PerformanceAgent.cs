@@ -319,7 +319,7 @@ public sealed class PerformanceAgent : IAgent
             /// </summary>
             public static class CacheProfiles
             {
-                public const string ShortLived = "ShortLived";   // 30s — patient list, encounter list
+                public const string ShortLived = "ShortLived";   // 30s — list endpoints, search results
                 public const string MediumLived = "MediumLived"; // 5min — reference data, facility info
                 public const string NoCache = "NoCache";         // 0s — mutations, sensitive data
 
