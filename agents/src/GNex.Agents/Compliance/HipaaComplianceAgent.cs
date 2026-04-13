@@ -30,27 +30,45 @@ public sealed class HipaaComplianceAgent : IAgent
     public async Task<AgentResult> ExecuteAsync(AgentContext context, CancellationToken ct = default)
     {
         var sw = Stopwatch.StartNew();
+
+        // HIPAA compliance only applies to Healthcare domain projects
+        var domain = context.PipelineConfig?.ProjectDomain ?? "";
+        if (!domain.Contains("health", StringComparison.OrdinalIgnoreCase) &&
+            !domain.Contains("medical", StringComparison.OrdinalIgnoreCase) &&
+            !domain.Contains("clinical", StringComparison.OrdinalIgnoreCase) &&
+            !domain.Contains("pharma", StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogInformation("HipaaComplianceAgent skipped — domain '{Domain}' does not require HIPAA compliance", domain);
+            context.AgentStatuses[Type] = AgentStatus.Completed;
+            return new AgentResult
+            {
+                Agent = Type, Success = true,
+                Summary = $"HIPAA compliance skipped — domain '{domain}' does not require HIPAA. Only Healthcare/Medical/Clinical/Pharma domains trigger HIPAA.",
+                Duration = sw.Elapsed
+            };
+        }
+
         context.AgentStatuses[Type] = AgentStatus.Running;
-        _logger.LogInformation("HipaaComplianceAgent starting — AI-powered PHI analysis");
+        _logger.LogInformation("HipaaComplianceAgent starting — AI-powered PHI analysis for {Domain} domain", domain);
 
         var findings = new List<ReviewFinding>();
         var artifacts = new List<CodeArtifact>();
 
         try
         {
-            // 1. Scan all artifacts for PHI fields
-            var phiFields = new[] { "DateOfBirth", "SocialSecurity", "SSN", "MedicalRecordNumber",
-                "InsuranceId", "DriversLicense", "LegalGivenName", "LegalFamilyName",
-                "PreferredName", "PrimaryLanguage", "SexAtBirth", "Diagnosis", "TreatmentPlan",
-                "LabResult", "Prescription", "Allergy", "Immunization", "VitalSign" };
+            // 1. Scan all artifacts for sensitive/regulated data fields (from DomainProfile or defaults)
+            var sensitiveFields = context.DomainProfile?.SensitiveFieldPatterns is { Count: > 0 } profileFields
+                ? profileFields.ToArray()
+                : new[] { "DateOfBirth", "SocialSecurity", "SSN", "Email", "Phone",
+                    "Address", "Password", "Secret", "Token", "CreditCard" };
 
             if (context.ReportProgress is not null)
-                await context.ReportProgress(Type, $"Scanning {context.Artifacts.Count} artifacts for {phiFields.Length} PHI field types (45 CFR §164.312)");
+                await context.ReportProgress(Type, $"Scanning {context.Artifacts.Count} artifacts for {sensitiveFields.Length} sensitive field types (45 CFR §164.312)");
 
             foreach (var artifact in context.Artifacts)
             {
                 ct.ThrowIfCancellationRequested();
-                foreach (var phi in phiFields)
+                foreach (var phi in sensitiveFields)
                 {
                     if (artifact.Content.Contains(phi, StringComparison.OrdinalIgnoreCase))
                     {
@@ -94,7 +112,7 @@ public sealed class HipaaComplianceAgent : IAgent
             if (context.ReportProgress is not null)
                 await context.ReportProgress(Type, $"PHI scan done: {findings.Count} compliance findings. AI-generating HIPAA artifacts — inventory, audit service, breach notification...");
 
-            artifacts.Add(await GeneratePhiInventory(domainSummary, ct));
+            artifacts.Add(await GeneratePhiInventory(domainSummary, context.PipelineConfig?.DomainContext ?? "healthcare", ct));
             if (context.ReportProgress is not null)
                 await context.ReportProgress(Type, "Generated PHI inventory — cataloging all protected health information across services");
             artifacts.Add(await GenerateAccessAuditService(domainSummary, ct));
@@ -142,12 +160,12 @@ public sealed class HipaaComplianceAgent : IAgent
             $"- {e.ServiceName}.{e.Name}: {string.Join(", ", e.Fields.Take(10).Select(f => f.Name))}"));
     }
 
-    private async Task<CodeArtifact> GeneratePhiInventory(string domainSummary, CancellationToken ct)
+    private async Task<CodeArtifact> GeneratePhiInventory(string domainSummary, string domainContext, CancellationToken ct)
     {
         var response = await _llm.GenerateAsync(new LlmPrompt
         {
-            SystemPrompt = "You are a HIPAA compliance expert for healthcare software. Generate C# code that catalogs all PHI fields across the system.",
-            UserPrompt = $"Generate a static PhiInventory class that maps every entity to its PHI fields for the HMS platform.\n\nEntities:\n{domainSummary}\n\nOutput a single C# file with namespace GNex.SharedKernel.Compliance.",
+            SystemPrompt = $"You are a HIPAA compliance expert for {domainContext} software. Generate C# code that catalogs all PHI fields across the system.",
+            UserPrompt = $"Generate a static PhiInventory class that maps every entity to its PHI/sensitive fields for the platform.\n\nEntities:\n{domainSummary}\n\nOutput a single C# file with namespace GNex.SharedKernel.Compliance.",
             Temperature = 0.1,
             RequestingAgent = Name,
             ContextSnippets = [domainSummary]
@@ -286,23 +304,24 @@ public sealed class HipaaComplianceAgent : IAgent
         namespace GNex.SharedKernel.Compliance;
 
         /// <summary>
-        /// Catalogs all PHI fields across HMS entities for HIPAA compliance tracking.
-        /// Used by HIPAA audit, breach assessment, and minimum necessary enforcement.
+        /// Catalogs all sensitive/PHI fields across system entities for compliance tracking.
+        /// Used by compliance audit, breach assessment, and minimum necessary enforcement.
         /// </summary>
         public static class PhiInventory
         {
-            public static readonly Dictionary<string, string[]> EntityPhiFields = new()
+            /// <summary>
+            /// Entity-to-sensitive-field mapping. Populated by compliance scan.
+            /// Keys are entity names, values are field names classified as sensitive.
+            /// </summary>
+            public static readonly Dictionary<string, string[]> EntityPhiFields = new();
+
+            /// <summary>
+            /// Register sensitive fields for an entity at startup (from compliance scan results).
+            /// </summary>
+            public static void Register(string entityName, params string[] sensitiveFields)
             {
-                ["PatientProfile"] = ["LegalGivenName", "LegalFamilyName", "PreferredName", "DateOfBirth", "SexAtBirth", "PrimaryLanguage"],
-                ["PatientIdentifier"] = ["IdentifierValue", "IssuingAuthority"],
-                ["Encounter"] = ["ChiefComplaint", "DischargeNotes"],
-                ["EmergencyArrival"] = ["TriageNotes", "ChiefComplaint"],
-                ["InpatientStay"] = ["AdmissionNotes", "DischargeSummary"],
-                ["DiagnosticOrder"] = ["ClinicalNotes", "ResultNarrative"],
-                ["DiagnosticResult"] = ["ResultValue", "Interpretation"],
-                ["Claim"] = ["PatientId", "DiagnosisCodes"],
-                ["AiInteraction"] = ["PromptText", "ResponseText", "PatientContextJson"],
-            };
+                EntityPhiFields[entityName] = sensitiveFields;
+            }
 
             public static bool IsPhiField(string entityName, string fieldName)
                 => EntityPhiFields.TryGetValue(entityName, out var fields) && fields.Contains(fieldName);
@@ -310,13 +329,12 @@ public sealed class HipaaComplianceAgent : IAgent
             public static PhiClassification Classify(string entityName, string fieldName)
             {
                 if (!IsPhiField(entityName, fieldName)) return PhiClassification.Public;
-                return fieldName switch
-                {
-                    "LegalGivenName" or "LegalFamilyName" or "DateOfBirth" => PhiClassification.ProtectedHealthInfo,
-                    "SexAtBirth" or "PrimaryLanguage" => PhiClassification.LimitedDataSet,
-                    "DiagnosisCodes" or "ClinicalNotes" => PhiClassification.HighlySensitive,
-                    _ => PhiClassification.ProtectedHealthInfo
-                };
+                // Default classification — domain-specific rules should override
+                return fieldName.Contains("Name", StringComparison.OrdinalIgnoreCase) ||
+                       fieldName.Contains("Birth", StringComparison.OrdinalIgnoreCase) ||
+                       fieldName.Contains("Address", StringComparison.OrdinalIgnoreCase)
+                    ? PhiClassification.ProtectedHealthInfo
+                    : PhiClassification.LimitedDataSet;
             }
         }
         """;

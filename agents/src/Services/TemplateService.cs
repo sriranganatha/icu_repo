@@ -76,10 +76,10 @@ public sealed class TemplateService : ITemplateService
         var entity = await _brdRepo.GetByIdAsync(id, ct)
             ?? throw new KeyNotFoundException($"BRD template not found: {id}");
 
-        entity.Name = request.Name;
-        entity.ProjectType = request.ProjectType;
-        entity.SectionsJson = request.SectionsJson;
-        entity.IsDefault = request.IsDefault;
+        entity.Name = request.Name ?? entity.Name;
+        entity.ProjectType = request.ProjectType ?? entity.ProjectType;
+        entity.SectionsJson = request.SectionsJson ?? entity.SectionsJson;
+        entity.IsDefault = request.IsDefault ?? entity.IsDefault;
 
         await _brdRepo.UpdateAsync(entity, ct);
         _logger.LogInformation("Updated BRD template {Id} '{Name}'", entity.Id, entity.Name);

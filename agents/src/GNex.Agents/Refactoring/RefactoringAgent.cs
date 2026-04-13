@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using GNex.Core.Enums;
+using GNex.Core.Extensions;
 using GNex.Core.Interfaces;
 using GNex.Core.Models;
 using Microsoft.Extensions.Logging;
@@ -36,6 +37,26 @@ public sealed class RefactoringAgent : IAgent
 
         try
         {
+            // ── Read feedback from previous iterations ──
+            var feedback = context.ReadFeedback(Type);
+            if (feedback.Count > 0)
+            {
+                _logger.LogInformation("RefactoringAgent received {Count} feedback items", feedback.Count);
+                if (context.ReportProgress is not null)
+                    await context.ReportProgress(Type, $"Incorporating {feedback.Count} feedback items from Review/Supervisor/GapAnalysis");
+            }
+
+            // ── Use DomainProfile for domain-aware naming checks ──
+            var profile = context.DomainProfile;
+            if (profile is not null && context.ReportProgress is not null)
+                await context.ReportProgress(Type, $"DomainProfile active: {profile.Domain} — {profile.DomainGlossary?.Count ?? 0} glossary terms for naming validation");
+
+            // ── Check prior review/quality agent results ──
+            if (context.AgentResults.TryGetValue(AgentType.Review, out var reviewResult) && reviewResult.Success)
+                _logger.LogInformation("RefactoringAgent consulting ReviewAgent results: {Summary}", reviewResult.Summary);
+            if (context.AgentResults.TryGetValue(AgentType.CodeQuality, out var cqResult) && cqResult.Success)
+                _logger.LogInformation("RefactoringAgent consulting CodeQualityAgent results: {Summary}", cqResult.Summary);
+
             // Gather refactoring-relevant findings
             var qualityFindings = context.Findings
                 .Where(f => f.Category.StartsWith("CodeQuality") || f.Category == "Implementation" || f.Category == "Audit")
@@ -86,6 +107,8 @@ public sealed class RefactoringAgent : IAgent
 
             // ── AI refactoring per file group ──
             var refactoredFiles = 0;
+            var llmContext = context.BuildLlmContextBlock(Type);
+
             foreach (var group in qualityFindings.Take(15))
             {
                 ct.ThrowIfCancellationRequested();
@@ -96,23 +119,35 @@ public sealed class RefactoringAgent : IAgent
                 var findingBlock = string.Join("\n", group.Select(f =>
                     $"Line {f.LineNumber}: [{f.Category}] {f.Message} — {f.Suggestion}"));
 
-                var prompt = $"""
-                    You are a senior .NET 8 architect. Refactor this C# file to address the findings below.
-                    Apply SOLID principles, extract methods, reduce complexity, fix naming.
-                    Return ONLY the complete refactored C# file with no explanations.
+                var prompt = new LlmPrompt
+                {
+                    SystemPrompt = $$"""
+                        You are a senior .NET 8 architect performing code refactoring.
+                        Apply SOLID principles, extract methods, reduce complexity, fix naming, eliminate dead code.
+                        Return ONLY the complete refactored C# file with no explanations or markdown fences.
 
-                    Findings:
-                    {findingBlock}
+                        {{(!string.IsNullOrWhiteSpace(llmContext) ? llmContext : "")}}
+                        """,
+                    UserPrompt = $"""
+                        Refactor this C# file to address the findings below.
 
-                    Current code:
-                    ```csharp
-                    {Truncate(content, 8000)}
-                    ```
-                    """;
+                        Findings:
+                        {findingBlock}
+
+                        Current code:
+                        ```csharp
+                        {Truncate(content, 8000)}
+                        ```
+                        """,
+                    Temperature = 0.2,
+                    MaxTokens = 8000,
+                    RequestingAgent = "RefactoringAgent"
+                };
 
                 try
                 {
-                    var refactored = await _llm.GenerateAsync(prompt, ct);
+                    var response = await _llm.GenerateAsync(prompt, ct);
+                    var refactored = response.Success ? response.Content ?? "" : "";
                     // Strip markdown fences if present
                     refactored = refactored
                         .Replace("```csharp", "").Replace("```cs", "").Replace("```", "").Trim();
@@ -174,6 +209,10 @@ public sealed class RefactoringAgent : IAgent
 
             context.Artifacts.AddRange(artifacts);
             context.AgentStatuses[Type] = AgentStatus.Completed;
+
+            // ── Dispatch refactoring results as feedback for downstream agents ──
+            if (refactoredFiles > 0)
+                context.WriteFeedback(AgentType.Build, Type, $"Refactored {refactoredFiles} files — verify build after refactoring changes");
 
             // Agent completes its own claimed work items
             foreach (var item in context.CurrentClaimedItems)

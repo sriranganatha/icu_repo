@@ -9,7 +9,7 @@ namespace GNex.Agents.UiUx;
 /// <summary>
 /// UI/UX agent — validates generated Razor Pages for WCAG 2.1 AA accessibility,
 /// responsive design patterns, Bootstrap best practices, and scaffolds reusable
-/// UI components (data tables, forms, navigation, modals) for all HMS modules.
+/// UI components (data tables, forms, navigation, modals) for all modules.
 /// </summary>
 public sealed class UiUxAgent : IAgent
 {
@@ -60,7 +60,7 @@ public sealed class UiUxAgent : IAgent
             {
                 ("DataTable", "Responsive data table with sorting, pagination, search, and ARIA labels"),
                 ("FormSection", "Accessible form layout with validation messages and field groups"),
-                ("PatientCard", "Patient summary card with demographics, photo placeholder, and quick actions"),
+                ("EntityCard", "Entity summary card with key fields, photo placeholder, and quick actions"),
                 ("NavigationMenu", "Side navigation with role-based menu items and keyboard navigation"),
                 ("AlertBanner", "Dismissible alert banner with severity levels and screen reader announcements"),
                 ("ConfirmModal", "Confirmation modal dialog with focus trap and ARIA attributes"),
@@ -112,7 +112,7 @@ public sealed class UiUxAgent : IAgent
                 - Skip-to-content link styles
                 - Reduced motion media query support
                 - Print stylesheet section
-                - Variables: --hms-primary, --hms-success, --hms-danger, --hms-warning, --hms-info
+                - Variables: --app-primary, --app-success, --app-danger, --app-warning, --app-info
                 - Professional color palette
                 
                 Return ONLY the CSS, no explanations.
@@ -122,8 +122,8 @@ public sealed class UiUxAgent : IAgent
             artifacts.Add(new CodeArtifact
             {
                 Layer = ArtifactLayer.RazorPage,
-                RelativePath = "src/GNex.SharedKernel/wwwroot/css/hms-theme.css",
-                FileName = "hms-theme.css",
+                RelativePath = "src/GNex.SharedKernel/wwwroot/css/app-theme.css",
+                FileName = "app-theme.css",
                 Namespace = string.Empty,
                 ProducedBy = Type,
                 TracedRequirementIds = ["NFR-UIX-02"],
@@ -142,7 +142,7 @@ public sealed class UiUxAgent : IAgent
                 - Breadcrumb navigation with aria-label
                 - Toast notification container with aria-live="polite"
                 - @RenderBody() and @RenderSection("Scripts", required: false)
-                - Reference to hms-theme.css
+                - Reference to app-theme.css
                 - lang attribute on html tag
                 
                 Return ONLY the Razor markup.

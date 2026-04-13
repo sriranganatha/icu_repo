@@ -8,8 +8,8 @@ namespace GNex.Agents.LoadTest;
 
 /// <summary>
 /// Load test agent — generates k6 load test scripts, performance benchmarks,
-/// and stress test scenarios for all HMS microservice endpoints. Produces
-/// runnable scripts with realistic healthcare workload patterns.
+/// and stress test scenarios for all microservice endpoints. Produces
+/// runnable scripts with realistic domain-specific workload patterns.
 /// </summary>
 public sealed class LoadTestAgent : IAgent
 {
@@ -18,20 +18,7 @@ public sealed class LoadTestAgent : IAgent
 
     public AgentType Type => AgentType.LoadTest;
     public string Name => "Load Test Agent";
-    public string Description => "Generates k6/JMeter load test scripts with realistic healthcare workload patterns.";
-
-    private static readonly (string Service, int Port, string[] Endpoints)[] ServiceEndpoints =
-    [
-        ("PatientService", 5101, ["/api/patients", "/api/patients/{id}", "/api/patients/search"]),
-        ("EncounterService", 5102, ["/api/encounters", "/api/encounters/{id}", "/api/encounters/{id}/notes"]),
-        ("InpatientService", 5103, ["/api/admissions", "/api/admissions/{id}", "/api/beds"]),
-        ("EmergencyService", 5104, ["/api/emergency/arrivals", "/api/emergency/triage"]),
-        ("DiagnosticsService", 5105, ["/api/diagnostics/results", "/api/diagnostics/orders"]),
-        ("RevenueService", 5106, ["/api/claims", "/api/billing"]),
-        ("AuditService", 5107, ["/api/audit/logs", "/api/audit/events"]),
-        ("AiService", 5108, ["/api/ai/interactions", "/api/ai/copilot"]),
-        ("ApiGateway", 5100, ["/api/health", "/api/gateway/routes"]),
-    ];
+    public string Description => "Generates k6/JMeter load test scripts with realistic domain-specific workload patterns.";
 
     public LoadTestAgent(ILlmProvider llm, ILogger<LoadTestAgent> logger)
     {
@@ -45,23 +32,30 @@ public sealed class LoadTestAgent : IAgent
         context.AgentStatuses[Type] = AgentStatus.Running;
         _logger.LogInformation("LoadTestAgent starting");
 
+        var services = ServiceCatalogResolver.GetServices(context);
+        var config = context.PipelineConfig;
+        var projectLabel = config?.ProjectLabel ?? "Application Platform";
+        var domainContext = config?.DomainContext ?? "a software platform";
         var artifacts = new List<CodeArtifact>();
 
         try
         {
             // ── Per-service k6 scripts ──
-            foreach (var (svc, port, endpoints) in ServiceEndpoints)
+            foreach (var svc in services)
             {
                 ct.ThrowIfCancellationRequested();
+                var endpoints = svc.Entities
+                    .SelectMany(e => new[] { $"/api/{e.ToLower()}", $"/api/{e.ToLower()}/{{id}}" })
+                    .ToArray();
                 var prompt = $"""
-                    Generate a k6 load test script (JavaScript) for the HMS {svc} running on port {port}.
+                    Generate a k6 load test script (JavaScript) for the {projectLabel} {svc.Name} running on port {svc.ApiPort}.
                     
                     Endpoints to test:
-                    {string.Join("\n", endpoints.Select(e => $"  - GET http://localhost:{port}{e}"))}
+                    {string.Join("\n", endpoints.Select(e => $"  - GET http://localhost:{svc.ApiPort}{e}"))}
                     
                     Requirements:
                     - Stages: ramp-up (1m, 50 VUs), steady (3m, 100 VUs), spike (30s, 200 VUs), cool-down (1m, 10 VUs)
-                    - Add realistic healthcare request bodies for POST endpoints
+                    - Add realistic domain-specific request bodies for POST endpoints
                     - Include JWT auth token in headers
                     - Thresholds: p95 < 500ms, error rate < 1%, throughput > 100 rps
                     - Include check() assertions on response status and body
@@ -78,8 +72,8 @@ public sealed class LoadTestAgent : IAgent
                 artifacts.Add(new CodeArtifact
                 {
                     Layer = ArtifactLayer.Test,
-                    RelativePath = $"tests/load/{svc.ToLowerInvariant()}-load-test.js",
-                    FileName = $"{svc.ToLowerInvariant()}-load-test.js",
+                    RelativePath = $"tests/load/{svc.Name.ToLowerInvariant()}-load-test.js",
+                    FileName = $"{svc.Name.ToLowerInvariant()}-load-test.js",
                     Namespace = string.Empty,
                     ProducedBy = Type,
                     TracedRequirementIds = ["NFR-LOADTEST-01"],
@@ -89,12 +83,12 @@ public sealed class LoadTestAgent : IAgent
 
             // ── Stress test scenario ──
             var stressPrompt = $"""
-                Generate a k6 stress test script that tests ALL HMS services simultaneously.
-                Services: {string.Join(", ", ServiceEndpoints.Select(s => $"{s.Service}(:{s.Port})"))}
+                Generate a k6 stress test script that tests ALL {projectLabel} services simultaneously.
+                Services: {string.Join(", ", services.Select(s => $"{s.Name}(:{s.ApiPort})"))}
                 
                 Requirements:
-                - Simulate hospital peak hours: 500 concurrent users
-                - Realistic workflow: patient registration → encounter → diagnosis → billing
+                - Simulate peak load scenario: 500 concurrent users
+                - Realistic workflow across all services with domain-specific operations
                 - Stages: warm-up (2m, 50VU), normal (5m, 200VU), peak (3m, 500VU), recovery (2m, 50VU)
                 - Breakpoint detection: find the max VUs before p95 > 2s
                 - Export results as JSON summary
@@ -124,8 +118,8 @@ public sealed class LoadTestAgent : IAgent
                 Namespace = string.Empty,
                 ProducedBy = Type,
                 TracedRequirementIds = ["NFR-LOADTEST-03"],
-                Content = """
-                    # HMS Load Test Runner
+                Content = $$"""
+                    # {{projectLabel}} Load Test Runner
                     param(
                         [string]$TestType = "all",
                         [string]$Service = "",
@@ -178,7 +172,7 @@ public sealed class LoadTestAgent : IAgent
             return new AgentResult
             {
                 Agent = Type, Success = true,
-                Summary = $"Load Test Agent: {artifacts.Count} artifacts — {ServiceEndpoints.Length} service scripts + stress test + runner",
+                Summary = $"Load Test Agent: {artifacts.Count} artifacts — {services.Count} service scripts + stress test + runner",
                 Artifacts = artifacts, Duration = sw.Elapsed
             };
         }

@@ -71,6 +71,37 @@ public sealed record CreateIaCTemplateRequest(
 public sealed record CreateDocumentationTemplateRequest(
     string Name, string DocType, string TemplateContent);
 
+// ─── Update Requests ────────────────────────────────────────
+public sealed record UpdateBrdTemplateRequest(
+    string? Name, string? ProjectType, string? SectionsJson, bool? IsDefault);
+
+public sealed record UpdateArchitectureTemplateRequest(
+    string? Name, string? Pattern, string? DiagramTemplate);
+
+public sealed record UpdateCodeTemplateRequest(
+    string? Name, string? LanguageId, string? FrameworkId,
+    string? TemplateType, string? Content, string? VariablesJson);
+
+public sealed record UpdateFileStructureTemplateRequest(
+    string? Name, string? FrameworkId, string? TreeJson);
+
+public sealed record UpdateCiCdTemplateRequest(
+    string? Name, string? Provider, string? LanguageId, string? PipelineYaml);
+
+public sealed record UpdateDockerTemplateRequest(
+    string? Name, string? LanguageId, string? FrameworkId,
+    string? DockerfileContent, string? ComposeContent);
+
+public sealed record UpdateTestTemplateRequest(
+    string? Name, string? TestType, string? FrameworkId,
+    string? TestFramework, string? TemplateContent);
+
+public sealed record UpdateIaCTemplateRequest(
+    string? Name, string? CloudProviderId, string? Tool, string? TemplateContent);
+
+public sealed record UpdateDocumentationTemplateRequest(
+    string? Name, string? DocType, string? TemplateContent);
+
 // ─── BRD Upload DTOs ────────────────────────────────────────
 public sealed record BrdUploadResult(
     string ProjectId, string RawRequirementId, int SectionsCreated, string Status);
@@ -84,3 +115,30 @@ public sealed record BrdFileResult(
 
 public sealed record BrdSectionDto(
     string Id, string SectionType, int Order, string Content, string DiagramsJson);
+
+public sealed record BrdProjectDto(
+    string ProjectId, string ProjectName, string ProjectType, int DocumentCount,
+    DateTimeOffset LastUpdated, string AggregateStatus);
+
+public sealed record BrdEnrichResult(
+    string BrdId, int SectionsEnriched, int SectionsFailed, string Status);
+
+// ─── Multi-BRD DTOs ─────────────────────────────────────────
+public sealed record BrdDocumentDto(
+    string Id, string ProjectId, string ProjectName, string Title, string Description,
+    string BrdType, string BrdTypeDisplay, string Instructions, string Status,
+    int SectionCount, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt,
+    DateTimeOffset? ApprovedAt, string? ApprovedBy);
+
+public sealed record CreateBrdDocumentRequest(
+    string ProjectId, string Title, string? Description, List<string> BrdTypes, string? Instructions);
+
+public sealed record UpdateBrdDocumentRequest(
+    string? Title, string? Description, string? Instructions);
+
+public sealed record UpdateSectionRequest(string Content);
+
+public sealed record BrdDocumentCreateResult(
+    string ProjectId, int BrdsCreated, List<BrdDocumentDto> Documents);
+
+public sealed record WorkflowActionRequest(string Reviewer, string? Comment, string? Reason, string? Feedback);

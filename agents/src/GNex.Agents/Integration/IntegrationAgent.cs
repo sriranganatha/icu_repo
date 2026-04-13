@@ -7,7 +7,7 @@ using Microsoft.Extensions.Logging;
 namespace GNex.Agents.Integration;
 
 /// <summary>
-/// Generates Kafka-based inter-service event bus, HL7/FHIR adapters,
+/// Generates Kafka-based inter-service event bus, protocol adapters,
 /// outbox pattern, consumer groups, and dead-letter queue handlers.
 /// </summary>
 public sealed class IntegrationAgent : IAgent
@@ -17,7 +17,7 @@ public sealed class IntegrationAgent : IAgent
 
     public AgentType Type => AgentType.Integration;
     public string Name => "Integration Agent";
-    public string Description => "Generates Kafka event bus, FHIR/HL7 adapters, outbox pattern, and cross-service consumers.";
+    public string Description => "Generates Kafka event bus, protocol adapters, outbox pattern, and cross-service consumers.";
 
     public IntegrationAgent(ILogger<IntegrationAgent> logger) => _logger = logger;
 
@@ -25,7 +25,7 @@ public sealed class IntegrationAgent : IAgent
     {
         var sw = Stopwatch.StartNew();
         context.AgentStatuses[Type] = AgentStatus.Running;
-        _logger.LogInformation("IntegrationAgent starting — Kafka event bus + FHIR/HL7");
+        _logger.LogInformation("IntegrationAgent starting — Kafka event bus + protocol adapters");
 
         var artifacts = new List<CodeArtifact>();
         var scopedServices = ResolveTargetServicesFromClaimed(context);
@@ -77,23 +77,27 @@ public sealed class IntegrationAgent : IAgent
                 }
             }
 
-            // Kafka topic provisioner, FHIR/HL7 (only on first run)
+            // Kafka topic provisioner (always), domain-specific protocol adapters (from DomainProfile)
             if (_generatedPaths.Add("IntegrationAdapters"))
             {
-                if (context.ReportProgress is not null)
-                    await context.ReportProgress(Type, "Generating Kafka topic provisioner, FHIR R4 adapter, HL7v2 processor");
                 artifacts.Add(GenerateTopicProvisioner());
 
-                // FHIR adapter
-                artifacts.Add(GenerateFhirAdapter());
+                // Generate protocol adapters from DomainProfile integration patterns
+                var domainPatterns = context.DomainProfile?.IntegrationPatterns ?? [];
+                foreach (var pattern in domainPatterns.Where(p =>
+                    !p.Name.Contains("REST", StringComparison.OrdinalIgnoreCase) &&
+                    !p.Name.Contains("gRPC", StringComparison.OrdinalIgnoreCase) &&
+                    !p.Name.Contains("Kafka", StringComparison.OrdinalIgnoreCase)))
+                {
+                    if (context.ReportProgress is not null)
+                        await context.ReportProgress(Type, $"Generating {pattern.Name} adapter ({pattern.Applicability})");
+                    artifacts.Add(GenerateDomainProtocolAdapter(pattern));
+                }
 
-                // HL7v2 processor
-                artifacts.Add(GenerateHl7Processor());
-
-                // Integration event contracts
+                // Integration event contracts (always — all domains use inter-service events)
                 if (context.ReportProgress is not null)
                     await context.ReportProgress(Type, "Generating integration event catalog — cross-service event contracts");
-                artifacts.Add(GenerateIntegrationEventCatalog());
+                artifacts.Add(GenerateIntegrationEventCatalog(scopedServices));
             }
 
             context.Artifacts.AddRange(artifacts);
@@ -104,14 +108,17 @@ public sealed class IntegrationAgent : IAgent
                 context.CompleteWorkItem?.Invoke(item);
 
             await Task.CompletedTask;
+            var adapterNames = artifacts.Where(a => a.FileName.Contains("Adapter") || a.FileName.Contains("Processor"))
+                .Select(a => a.FileName).ToList();
+            var adapterSuffix = adapterNames.Count > 0 ? $", protocol adapters: {string.Join(", ", adapterNames)}" : "";
             return new AgentResult
             {
                 Agent = Type, Success = true,
-                Summary = $"Generated {artifacts.Count} integration artifacts: Kafka bus, outbox, FHIR/HL7 adapters",
+                Summary = $"Generated {artifacts.Count} integration artifacts: Kafka bus, outbox{adapterSuffix}",
                 Artifacts = artifacts,
                 Messages = [new AgentMessage { From = Type, To = AgentType.Orchestrator,
                     Subject = "Integration layer ready",
-                    Body = $"{artifacts.Count} artifacts: Kafka consumers/producers, outbox, DLQ, FHIR R4, HL7v2. Scoped services: {string.Join(", ", scopedServices.Select(s => s.Name))}." }],
+                    Body = $"{artifacts.Count} artifacts: Kafka consumers/producers, outbox, DLQ{adapterSuffix}. Scoped services: {string.Join(", ", scopedServices.Select(s => s.Name))}." }],
                 Duration = sw.Elapsed
             };
         }
@@ -422,7 +429,7 @@ public sealed class IntegrationAgent : IAgent
             /// <summary>
             /// Handles messages that failed processing after maximum retries.
             /// Publishes to the dead-letter topic with original metadata for investigation.
-            /// Fires an audit event for HIPAA compliance tracking.
+            /// Fires an audit event for compliance tracking.
             /// </summary>
             public sealed class DeadLetterHandler
             {
@@ -546,7 +553,7 @@ public sealed class IntegrationAgent : IAgent
             /// Topic configuration:
             ///   - Partitions: 6 (allows parallel consumer scaling)
             ///   - Replication: configurable (3 in prod, 1 in dev)
-            ///   - Retention: 7 days for events, 2555 days (7yr) for audit (HIPAA)
+            ///   - Retention: 7 days for events, 2555 days (7yr) for audit (compliance)
             /// </summary>
             public sealed class KafkaTopicProvisioner
             {
@@ -575,7 +582,7 @@ public sealed class IntegrationAgent : IAgent
                         Configs = new Dictionary<string, string>
                         {
                             ["retention.ms"] = topic == KafkaTopics.Audit
-                                ? (7L * 365 * 24 * 60 * 60 * 1000).ToString()   // 7 years HIPAA
+                                ? (7L * 365 * 24 * 60 * 60 * 1000).ToString()   // 7 years compliance retention
                                 : (7L * 24 * 60 * 60 * 1000).ToString(),          // 7 days default
                             ["cleanup.policy"] = topic == KafkaTopics.Audit ? "delete" : "delete"
                         }
@@ -595,170 +602,106 @@ public sealed class IntegrationAgent : IAgent
             """
     };
 
-    // ─── FHIR Adapter ───────────────────────────────────────────────────────
+    // ─── Domain Protocol Adapters (generated from DomainProfile) ──────────
 
-    private static CodeArtifact GenerateFhirAdapter() => new()
+    private static CodeArtifact GenerateDomainProtocolAdapter(IntegrationPattern pattern)
     {
-        Layer = ArtifactLayer.Integration,
-        RelativePath = "GNex.SharedKernel/Fhir/FhirR4Adapter.cs",
-        FileName = "FhirR4Adapter.cs",
-        Namespace = "GNex.SharedKernel.Fhir",
-        ProducedBy = AgentType.Integration,
-        Content = """
-            using System.Text.Json;
+        var safeName = pattern.Name.Replace(" ", "").Replace("/", "").Replace("-", "").Replace(".", "");
+        var fileName = $"{safeName}Adapter.cs";
+        var ns = $"GNex.SharedKernel.Integration.{safeName}";
 
-            namespace GNex.SharedKernel.Fhir;
+        return new CodeArtifact
+        {
+            Layer = ArtifactLayer.Integration,
+            RelativePath = $"GNex.SharedKernel/Integration/{fileName}",
+            FileName = fileName,
+            Namespace = ns,
+            ProducedBy = AgentType.Integration,
+            Content = $$"""
+                namespace {{ns}};
 
-            /// <summary>
-            /// FHIR R4 adapter for healthcare data interoperability.
-            /// Converts internal domain models to FHIR JSON resources.
-            /// Supports Patient, Encounter, Observation, and Claim resources.
-            /// </summary>
-            public static class FhirR4Adapter
-            {
-                public static string ToFhirPatient(string id, string given, string family, string dob, string tenantId) =>
-                    JsonSerializer.Serialize(new
-                    {
-                        resourceType = "Patient",
-                        id,
-                        meta = new { versionId = "1", security = new[] { new { system = "http://hms/tenant", code = tenantId } } },
-                        name = new[] { new { use = "official", given = new[] { given }, family } },
-                        birthDate = dob,
-                        active = true
-                    });
-
-                public static string ToFhirEncounter(string id, string patientId, string type, string status) =>
-                    JsonSerializer.Serialize(new
-                    {
-                        resourceType = "Encounter",
-                        id,
-                        status,
-                        @class = new { code = type },
-                        subject = new { reference = $"Patient/{patientId}" }
-                    });
-
-                public static string ToFhirObservation(string id, string patientId, string code, string value, string unit) =>
-                    JsonSerializer.Serialize(new
-                    {
-                        resourceType = "Observation",
-                        id,
-                        status = "final",
-                        subject = new { reference = $"Patient/{patientId}" },
-                        code = new { coding = new[] { new { system = "http://loinc.org", code } } },
-                        valueQuantity = new { value, unit }
-                    });
-            }
-            """
-    };
-
-    // ─── HL7v2 Processor ────────────────────────────────────────────────────
-
-    private static CodeArtifact GenerateHl7Processor() => new()
-    {
-        Layer = ArtifactLayer.Integration,
-        RelativePath = "GNex.SharedKernel/Hl7/Hl7v2Processor.cs",
-        FileName = "Hl7v2Processor.cs",
-        Namespace = "GNex.SharedKernel.Hl7",
-        ProducedBy = AgentType.Integration,
-        Content = """
-            namespace GNex.SharedKernel.Hl7;
-
-            /// <summary>
-            /// HL7 v2.x message processor for legacy system integration.
-            /// Supports ADT (admit/discharge/transfer), ORM (orders), and ORU (results).
-            /// Incoming HL7 messages are parsed and published to Kafka for downstream processing.
-            /// </summary>
-            public static class Hl7v2Processor
-            {
-                public static Hl7Message Parse(string raw)
+                /// <summary>
+                /// Protocol adapter for {{pattern.Name}}.
+                /// Applicability: {{pattern.Applicability ?? "Domain-specific"}}
+                /// {{pattern.AdapterDescription ?? "Handles protocol-specific data exchange."}}
+                /// </summary>
+                public interface I{{safeName}}Adapter
                 {
-                    var segments = raw.Split('\r', '\n')
-                        .Where(s => !string.IsNullOrWhiteSpace(s))
-                        .Select(s => s.Split('|'))
-                        .ToArray();
+                    /// <summary>Sends data via the {{pattern.Name}} protocol.</summary>
+                    Task SendAsync(string payload, CancellationToken ct = default);
 
-                    var msh = segments.FirstOrDefault(s => s[0] == "MSH");
-                    return new Hl7Message
-                    {
-                        MessageType = msh?.Length > 8 ? msh[8] : "UNKNOWN",
-                        SendingApp = msh?.Length > 2 ? msh[2] : "",
-                        ReceivingApp = msh?.Length > 4 ? msh[4] : "",
-                        Timestamp = msh?.Length > 6 ? msh[6] : "",
-                        Segments = segments.Select(s => new Hl7Segment { Id = s[0], Fields = s }).ToList()
-                    };
+                    /// <summary>Receives data from the {{pattern.Name}} endpoint.</summary>
+                    Task<string> ReceiveAsync(CancellationToken ct = default);
+
+                    /// <summary>Validates data against {{pattern.Name}} spec.</summary>
+                    bool Validate(string payload);
                 }
 
-                public static string BuildAck(string messageControlId) =>
-                    $"MSH|^~\\&|HMS|FACILITY|SENDER|FACILITY|{DateTime.UtcNow:yyyyMMddHHmmss}||ACK|{Guid.NewGuid():N}|P|2.5\r" +
-                    $"MSA|AA|{messageControlId}\r";
-            }
+                /// <summary>
+                /// Default implementation of the {{pattern.Name}} adapter.
+                /// Replace with production logic once the {{pattern.Name}} SDK/library is integrated.
+                /// </summary>
+                public sealed class {{safeName}}Adapter : I{{safeName}}Adapter
+                {
+                    public Task SendAsync(string payload, CancellationToken ct = default)
+                    {
+                        // TODO: Implement {{pattern.Name}} send logic
+                        return Task.CompletedTask;
+                    }
 
-            public sealed class Hl7Message
-            {
-                public string MessageType { get; set; } = "";
-                public string SendingApp { get; set; } = "";
-                public string ReceivingApp { get; set; } = "";
-                public string Timestamp { get; set; } = "";
-                public List<Hl7Segment> Segments { get; set; } = [];
-            }
+                    public Task<string> ReceiveAsync(CancellationToken ct = default)
+                    {
+                        // TODO: Implement {{pattern.Name}} receive logic
+                        return Task.FromResult(string.Empty);
+                    }
 
-            public sealed class Hl7Segment
-            {
-                public string Id { get; set; } = "";
-                public string[] Fields { get; set; } = [];
-            }
-            """
-    };
+                    public bool Validate(string payload)
+                    {
+                        // TODO: Implement {{pattern.Name}} validation
+                        return !string.IsNullOrWhiteSpace(payload);
+                    }
+                }
+                """
+        };
+    }
 
     // ─── Integration Event Catalog ──────────────────────────────────────────
 
-    private static CodeArtifact GenerateIntegrationEventCatalog() => new()
+    private static CodeArtifact GenerateIntegrationEventCatalog(List<MicroserviceDefinition> services)
     {
-        Layer = ArtifactLayer.Integration,
-        RelativePath = "GNex.SharedKernel/Kafka/IntegrationEventCatalog.cs",
-        FileName = "IntegrationEventCatalog.cs",
-        Namespace = "GNex.SharedKernel.Kafka",
-        ProducedBy = AgentType.Integration,
-        Content = """
-            namespace GNex.SharedKernel.Kafka;
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine("namespace GNex.SharedKernel.Kafka;");
+        sb.AppendLine();
+        sb.AppendLine("/// <summary>");
+        sb.AppendLine("/// Canonical catalog of all integration events flowing through Kafka.");
+        sb.AppendLine("/// Auto-generated from the service catalog — do not edit manually.");
+        sb.AppendLine("/// </summary>");
+        sb.AppendLine("public static class IntegrationEventCatalog");
+        sb.AppendLine("{");
 
-            /// <summary>
-            /// Canonical catalog of all integration events flowing through Kafka.
-            /// Used for documentation, schema validation, and consumer routing.
-            /// </summary>
-            public static class IntegrationEventCatalog
-            {
-                // Patient Service
-                public const string PatientCreated       = "patient.patient_profile.created";
-                public const string PatientUpdated       = "patient.patient_profile.updated";
-                public const string PatientIdentifierAdded = "patient.patient_identifier.created";
+        foreach (var svc in services)
+        {
+            var svcLower = svc.Name.Replace("Service", "").Trim().ToLowerInvariant();
+            var svcPascal = svc.Name.Replace("Service", "").Trim();
+            sb.AppendLine($"    // {svc.Name}");
+            sb.AppendLine($"    public const string {svcPascal}Created = \"{svcLower}.{svcLower}_record.created\";");
+            sb.AppendLine($"    public const string {svcPascal}Updated = \"{svcLower}.{svcLower}_record.updated\";");
+            sb.AppendLine();
+        }
 
-                // Encounter Service
-                public const string EncounterCreated     = "encounter.encounter.created";
-                public const string EncounterUpdated     = "encounter.encounter.updated";
-                public const string ClinicalNoteAdded    = "encounter.clinical_note.created";
+        sb.AppendLine("}");
 
-                // Inpatient Service
-                public const string AdmissionCreated     = "inpatient.admission.created";
-                public const string EligibilityDecided   = "inpatient.admission_eligibility.created";
-
-                // Emergency Service
-                public const string ArrivalRegistered    = "emergency.emergency_arrival.created";
-                public const string TriageCompleted      = "emergency.triage_assessment.created";
-
-                // Diagnostics Service
-                public const string ResultAvailable      = "diagnostics.result_record.created";
-
-                // Revenue Service
-                public const string ClaimSubmitted       = "revenue.claim.created";
-                public const string ClaimUpdated         = "revenue.claim.updated";
-
-                // AI Service
-                public const string AiInteractionLogged  = "ai.ai_interaction.created";
-            }
-            """
-    };
+        return new CodeArtifact
+        {
+            Layer = ArtifactLayer.Integration,
+            RelativePath = "GNex.SharedKernel/Kafka/IntegrationEventCatalog.cs",
+            FileName = "IntegrationEventCatalog.cs",
+            Namespace = "GNex.SharedKernel.Kafka",
+            ProducedBy = AgentType.Integration,
+            Content = sb.ToString()
+        };
+    }
 
     private static string KafkaTopicFor(string serviceName) =>
-        $"hms.{serviceName.ToLowerInvariant()}.events";
+        $"app.{serviceName.ToLowerInvariant()}.events";
 }

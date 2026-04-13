@@ -89,6 +89,7 @@ public class GNexDbContext : DbContext
     public DbSet<ArchitectureDecisionRecord> ArchitectureDecisionRecords => Set<ArchitectureDecisionRecord>();
     public DbSet<RawRequirement> RawRequirements => Set<RawRequirement>();
     public DbSet<EnrichedRequirement> EnrichedRequirements => Set<EnrichedRequirement>();
+    public DbSet<BrdDocument> BrdDocuments => Set<BrdDocument>();
     public DbSet<BrdSectionRecord> BrdSectionRecords => Set<BrdSectionRecord>();
     public DbSet<BrdFeedbackRecord> BrdFeedbackRecords => Set<BrdFeedbackRecord>();
     public DbSet<Epic> Epics => Set<Epic>();
@@ -104,6 +105,9 @@ public class GNexDbContext : DbContext
     public DbSet<QualityReport> QualityReports => Set<QualityReport>();
     public DbSet<TraceabilityRecord> TraceabilityRecords => Set<TraceabilityRecord>();
     public DbSet<ProjectMetric> ProjectMetrics => Set<ProjectMetric>();
+
+    // ── Platform: Agent Learnings → plt_audit ─────────────────
+    public DbSet<AgentLearning> AgentLearnings => Set<AgentLearning>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -177,6 +181,7 @@ public class GNexDbContext : DbContext
         modelBuilder.Entity<ArchitectureDecisionRecord>().ToTable("architecture_decision_record", "plt_project");
         modelBuilder.Entity<RawRequirement>().ToTable("raw_requirement", "plt_project");
         modelBuilder.Entity<EnrichedRequirement>().ToTable("enriched_requirement", "plt_project");
+        modelBuilder.Entity<BrdDocument>().ToTable("brd_document", "plt_project");
         modelBuilder.Entity<BrdSectionRecord>().ToTable("brd_section_record", "plt_project");
         modelBuilder.Entity<BrdFeedbackRecord>().ToTable("brd_feedback_record", "plt_project");
         modelBuilder.Entity<Epic>().ToTable("epic", "plt_project");
@@ -196,6 +201,7 @@ public class GNexDbContext : DbContext
         modelBuilder.Entity<QualityReport>().ToTable("quality_report", "plt_audit");
         modelBuilder.Entity<TraceabilityRecord>().ToTable("traceability_record", "plt_audit");
         modelBuilder.Entity<ProjectMetric>().ToTable("project_metric", "plt_audit");
+        modelBuilder.Entity<AgentLearning>().ToTable("agent_learning", "plt_audit");
 
         // Platform tenant-scoped query filters
         modelBuilder.Entity<Project>().HasQueryFilter(e => e.TenantId == _tenantId);

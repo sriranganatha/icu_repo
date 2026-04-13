@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text.RegularExpressions;
 using GNex.Agents.Requirements;
 using GNex.Core.Enums;
+using GNex.Core.Extensions;
 using GNex.Core.Interfaces;
 using GNex.Core.Models;
 using Microsoft.Extensions.Logging;
@@ -17,12 +18,17 @@ namespace GNex.Agents.Security;
 public sealed class SecurityAgent : IAgent
 {
     private readonly ILogger<SecurityAgent> _logger;
+    private readonly ILlmProvider _llm;
 
     public AgentType Type => AgentType.Security;
     public string Name => "Security Agent";
     public string Description => "OWASP Top 10 analysis, input validation, auth patterns, encryption enforcement, and security middleware generation.";
 
-    public SecurityAgent(ILogger<SecurityAgent> logger) => _logger = logger;
+    public SecurityAgent(ILogger<SecurityAgent> logger, ILlmProvider llm)
+    {
+        _logger = logger;
+        _llm = llm;
+    }
 
     public async Task<AgentResult> ExecuteAsync(AgentContext context, CancellationToken ct = default)
     {
@@ -35,34 +41,191 @@ public sealed class SecurityAgent : IAgent
 
         try
         {
-            // ── Scan existing artifacts ──
+            // ── Read feedback from previous iterations ──
+            var feedback = context.ReadFeedback(Type);
+            if (feedback.Count > 0)
+            {
+                _logger.LogInformation("SecurityAgent received {Count} feedback items", feedback.Count);
+                if (context.ReportProgress is not null)
+                    await context.ReportProgress(Type, $"Incorporating {feedback.Count} feedback items from previous iterations");
+            }
+
+            // ── Load DomainProfile for domain-aware scanning ──
+            var profile = context.DomainProfile;
+            if (profile is not null)
+            {
+                _logger.LogInformation("SecurityAgent using DomainProfile: {Domain}, {SensitiveCount} sensitive field patterns, {ComplianceCount} compliance frameworks",
+                    profile.Domain, profile.SensitiveFieldPatterns?.Count ?? 0, profile.ComplianceFrameworks?.Count ?? 0);
+                if (context.ReportProgress is not null)
+                    await context.ReportProgress(Type, $"DomainProfile active: {profile.Domain} — {profile.SensitiveFieldPatterns?.Count ?? 0} sensitive patterns, {profile.ComplianceFrameworks?.Count ?? 0} compliance frameworks");
+            }
+
+            // ── Check prior agent results for cross-agent intelligence ──
+            if (context.AgentResults.TryGetValue(AgentType.HipaaCompliance, out var complianceResult) && complianceResult.Success)
+            {
+                _logger.LogInformation("SecurityAgent consulting ComplianceAgent results: {Summary}", complianceResult.Summary);
+            }
+
+            // ── Scan existing artifacts using LLM-based analysis ──
+            var llmContext = context.BuildLlmContextBlock(Type);
+            var sensitivePatterns = BuildSensitivePatterns(profile);
+
             if (context.ReportProgress is not null)
-                await context.ReportProgress(Type, $"Scanning {context.Artifacts.Count} artifacts for OWASP Top 10 vulnerabilities...");
-            foreach (var artifact in context.Artifacts)
+                await context.ReportProgress(Type, $"Scanning {context.Artifacts.Count} artifacts for OWASP Top 10 vulnerabilities via LLM...");
+
+            // Batch artifacts for LLM analysis (group by layer to reduce calls)
+            var artifactGroups = context.Artifacts
+                .Where(a => !string.IsNullOrWhiteSpace(a.Content) && a.Content.Length > 50)
+                .GroupBy(a => a.Layer)
+                .ToList();
+
+            foreach (var group in artifactGroups)
             {
                 ct.ThrowIfCancellationRequested();
-                findings.AddRange(ScanForInjection(artifact));
-                findings.AddRange(ScanForAuthGaps(artifact));
-                findings.AddRange(ScanForSensitiveDataExposure(artifact));
-                findings.AddRange(ScanForCryptoIssues(artifact));
-                findings.AddRange(ScanForInputValidation(artifact));
+                var batchContent = string.Join("\n\n---FILE---\n\n",
+                    group.Take(10).Select(a => $"// File: {a.RelativePath}\n{Truncate(a.Content, 3000)}"));
+
+                var scanPrompt = new LlmPrompt
+                {
+                    SystemPrompt = $$"""
+                        You are a senior application security engineer specializing in OWASP Top 10 analysis for .NET 8 applications.
+                        Analyze the provided code artifacts for security vulnerabilities.
+
+                        {{(!string.IsNullOrWhiteSpace(llmContext) ? llmContext : "")}}
+
+                        Categories to check:
+                        - A01: Broken Access Control (missing authorization, tenant isolation gaps)
+                        - A02: Cryptographic Failures (hardcoded secrets, weak hashing, missing encryption)
+                        - A03: Injection (SQL injection, command injection, XSS)
+                        - A04: Insecure Design (sensitive data exposure in logs/DTOs, missing classification)
+                        - A05: Security Misconfiguration (missing security headers, permissive CORS)
+                        - A06: Vulnerable Components (missing input validation)
+                        - A07: Authentication Failures (weak auth patterns)
+                        - A08: Data Integrity Failures (missing CSRF protection)
+
+                        For each finding, output a JSON array with objects:
+                        { "file": "relative/path.cs", "category": "OWASP-A03-Injection", "severity": "Critical|Warning|Info", "message": "description", "suggestion": "fix" }
+
+                        Output ONLY valid JSON array. No markdown fences. Empty array [] if no issues found.
+                        """,
+                    UserPrompt = $"Analyze these {group.Key} layer artifacts:\n\n{batchContent}",
+                    Temperature = 0.2,
+                    MaxTokens = 4096,
+                    RequestingAgent = "SecurityAgent"
+                };
+
+                try
+                {
+                    var response = await _llm.GenerateAsync(scanPrompt, ct);
+                    if (response.Success && !string.IsNullOrWhiteSpace(response.Content))
+                    {
+                        var parsed = ParseSecurityFindings(response.Content, group.FirstOrDefault()?.Id ?? "");
+                        findings.AddRange(parsed);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "LLM security scan failed for {Layer} layer, falling back to regex scan", group.Key);
+                    // Fallback: use regex-based scanning
+                    foreach (var artifact in group)
+                    {
+                        findings.AddRange(ScanForInjection(artifact));
+                        findings.AddRange(ScanForAuthGaps(artifact));
+                        findings.AddRange(ScanForSensitiveDataExposure(artifact, sensitivePatterns));
+                        findings.AddRange(ScanForCryptoIssues(artifact));
+                        findings.AddRange(ScanForInputValidation(artifact));
+                    }
+                }
             }
             if (context.ReportProgress is not null)
                 await context.ReportProgress(Type, $"Security scan complete: {findings.Count} findings (injection, auth gaps, sensitive data, crypto, input validation)");
 
-            // ── Generate security artifacts ──
+            // ── Generate security artifacts via LLM ──
             if (context.ReportProgress is not null)
-                await context.ReportProgress(Type, "Generating security middleware — input validation, rate limiting, security headers, API key validator, encryption, sensitive data redaction");
-            artifacts.Add(GenerateInputValidationMiddleware());
-            artifacts.Add(GenerateRateLimitingPolicy());
-            artifacts.Add(GenerateSecurityHeadersMiddleware());
-            artifacts.Add(GenerateApiKeyValidator());
-            artifacts.Add(GenerateDataEncryptionHelper());
-            artifacts.Add(GeneratePhiRedactionFilter());
+                await context.ReportProgress(Type, "Generating security middleware via LLM — input validation, rate limiting, security headers, API key validator, encryption, sensitive data redaction");
+
+            var secArtifactNames = new[] {
+                ("InputValidationMiddleware", "GNex.SharedKernel/Security/InputValidationMiddleware.cs", "NFR-SEC-01",
+                 "ASP.NET Core middleware that validates incoming request payloads for SQL injection, XSS, path traversal, and command injection patterns. Use a configurable blocklist, not hardcoded patterns."),
+                ("RateLimitingPolicy", "GNex.SharedKernel/Security/RateLimitingPolicy.cs", "NFR-SEC-02",
+                 "Extension methods to configure per-tenant, per-endpoint rate limiting using System.Threading.RateLimiting. Include clinical, search, and auth policy tiers."),
+                ("SecurityHeadersMiddleware", "GNex.SharedKernel/Security/SecurityHeadersMiddleware.cs", "NFR-SEC-01",
+                 "Middleware that adds OWASP-recommended security headers (Content-Security-Policy, HSTS, X-Frame-Options, etc.) to all responses."),
+                ("ApiKeyValidation", "GNex.SharedKernel/Security/ApiKeyValidation.cs", "NFR-SEC-02",
+                 "Middleware for X-Api-Key header validation on service-to-service calls. Keys loaded from IConfiguration, never hardcoded."),
+                ("DataEncryptionHelper", "GNex.SharedKernel/Security/DataEncryptionHelper.cs", "NFR-SEC-01",
+                 "AES-256-GCM encryption/decryption helper for sensitive fields at rest. Key management via IKeyProvider abstraction."),
+                ("PhiRedactionFilter", "GNex.SharedKernel/Security/PhiRedactionFilter.cs", "NFR-DATA-01",
+                 "Redaction filter for sensitive data in logs and error responses. Must redact SSN, phone, email, MRN, DOB patterns.")
+            };
+
+            foreach (var (name, path, traceId, description) in secArtifactNames)
+            {
+                ct.ThrowIfCancellationRequested();
+                var genPrompt = new LlmPrompt
+                {
+                    SystemPrompt = $$"""
+                        You are a senior .NET 8 security engineer. Generate production-quality C# code for the described security component.
+                        {{(!string.IsNullOrWhiteSpace(llmContext) ? llmContext : "")}}
+                        Follow these rules:
+                        - Use .NET 8 APIs and middleware patterns
+                        - Include XML documentation comments
+                        - Make components configurable via IConfiguration or IOptions
+                        - Use proper namespace: GNex.SharedKernel.Security
+                        - Return ONLY the complete C# file — no markdown fences, no explanations
+                        """,
+                    UserPrompt = $"Generate: {name}\nDescription: {description}",
+                    Temperature = 0.3,
+                    MaxTokens = 3000,
+                    RequestingAgent = "SecurityAgent"
+                };
+
+                try
+                {
+                    var response = await _llm.GenerateAsync(genPrompt, ct);
+                    var code = response.Success && !string.IsNullOrWhiteSpace(response.Content)
+                        ? response.Content.Replace("```csharp", "").Replace("```cs", "").Replace("```", "").Trim()
+                        : null;
+
+                    if (!string.IsNullOrWhiteSpace(code) && code.Length > 100)
+                    {
+                        artifacts.Add(new CodeArtifact
+                        {
+                            Layer = ArtifactLayer.Configuration,
+                            RelativePath = path,
+                            FileName = Path.GetFileName(path),
+                            Namespace = "GNex.SharedKernel.Security",
+                            ProducedBy = Type,
+                            TracedRequirementIds = [traceId],
+                            Content = code
+                        });
+                        continue;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "LLM generation failed for {Artifact}, using fallback", name);
+                }
+
+                // Fallback to hardcoded artifacts
+                artifacts.Add(name switch
+                {
+                    "InputValidationMiddleware" => GenerateInputValidationMiddleware(),
+                    "RateLimitingPolicy" => GenerateRateLimitingPolicy(),
+                    "SecurityHeadersMiddleware" => GenerateSecurityHeadersMiddleware(),
+                    "ApiKeyValidation" => GenerateApiKeyValidator(),
+                    "DataEncryptionHelper" => GenerateDataEncryptionHelper(),
+                    "PhiRedactionFilter" => GeneratePhiRedactionFilter(),
+                    _ => GenerateInputValidationMiddleware()
+                });
+            }
 
             context.Artifacts.AddRange(artifacts);
             context.Findings.AddRange(findings);
             context.AgentStatuses[Type] = AgentStatus.Completed;
+
+            // ── Dispatch findings as feedback for downstream agents ──
+            context.DispatchFindingsAsFeedback(Type, findings);
 
             // Agent completes its own claimed work items
             foreach (var item in context.CurrentClaimedItems)
@@ -124,6 +287,59 @@ public sealed class SecurityAgent : IAgent
 
         return findings;
     }
+
+    // ── LLM response parser ─────────────────────────────────────────────
+
+    private List<ReviewFinding> ParseSecurityFindings(string json, string fallbackArtifactId)
+    {
+        var findings = new List<ReviewFinding>();
+        try
+        {
+            json = json.Trim();
+            if (json.StartsWith("```")) json = json[(json.IndexOf('\n') + 1)..];
+            if (json.EndsWith("```")) json = json[..^3].Trim();
+
+            var items = System.Text.Json.JsonSerializer.Deserialize<List<SecurityFindingDto>>(json,
+                new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            if (items is null) return findings;
+
+            foreach (var item in items)
+            {
+                findings.Add(new ReviewFinding
+                {
+                    ArtifactId = fallbackArtifactId,
+                    FilePath = item.File ?? "unknown",
+                    Severity = item.Severity?.ToLowerInvariant() switch
+                    {
+                        "critical" => ReviewSeverity.SecurityViolation,
+                        "warning" => ReviewSeverity.Warning,
+                        "info" => ReviewSeverity.Info,
+                        _ => ReviewSeverity.Warning
+                    },
+                    Category = item.Category ?? "OWASP-Unknown",
+                    Message = item.Message ?? "Security issue detected by LLM analysis",
+                    Suggestion = item.Suggestion ?? ""
+                });
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to parse LLM security findings JSON");
+        }
+        return findings;
+    }
+
+    private sealed class SecurityFindingDto
+    {
+        public string? File { get; set; }
+        public string? Category { get; set; }
+        public string? Severity { get; set; }
+        public string? Message { get; set; }
+        public string? Suggestion { get; set; }
+    }
+
+    private static string Truncate(string? s, int max) =>
+        string.IsNullOrEmpty(s) ? "" : s.Length <= max ? s : s[..max] + "…";
 
     // ─── OWASP A01: Broken Access Control ───────────────────────────────────
 
@@ -205,18 +421,30 @@ public sealed class SecurityAgent : IAgent
 
     // ─── OWASP A04: Sensitive Data Exposure ─────────────────────────────────
 
-    private static List<ReviewFinding> ScanForSensitiveDataExposure(CodeArtifact artifact)
+    private static string[] BuildSensitivePatterns(DomainProfile? profile)
+    {
+        var defaults = new[] { "DateOfBirth", "SocialSecurity", "SSN", "MedicalRecordNumber",
+            "InsuranceId", "DriversLicense", "Diagnosis", "TreatmentPlan" };
+
+        if (profile?.SensitiveFieldPatterns is { Count: > 0 } domainPatterns)
+        {
+            // Merge domain-specific patterns with defaults, deduplicated
+            return defaults.Concat(domainPatterns)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+        }
+
+        return defaults;
+    }
+
+    private static List<ReviewFinding> ScanForSensitiveDataExposure(CodeArtifact artifact, string[] sensitivePatterns)
     {
         var findings = new List<ReviewFinding>();
         var content = artifact.Content;
 
-        // Sensitive fields exposed in DTOs without classification
-        var phiPatterns = new[] { "DateOfBirth", "SocialSecurity", "SSN", "MedicalRecordNumber",
-            "InsuranceId", "DriversLicense", "Diagnosis", "TreatmentPlan" };
-
         if (artifact.Layer == ArtifactLayer.Dto)
         {
-            foreach (var phi in phiPatterns)
+            foreach (var phi in sensitivePatterns)
             {
                 if (content.Contains(phi) && !content.Contains("ClassificationCode"))
                 {

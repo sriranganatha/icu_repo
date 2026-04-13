@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text.Json;
 using GNex.Core.Enums;
+using GNex.Core.Extensions;
 using GNex.Core.Interfaces;
 using GNex.Core.Models;
 using Microsoft.Extensions.Logging;
@@ -36,6 +37,25 @@ public sealed class ArchitectAgent : IAgent
 
         try
         {
+            // ── Read feedback from previous iterations ──
+            var feedback = context.ReadFeedback(Type);
+            if (feedback.Count > 0)
+            {
+                _logger.LogInformation("ArchitectAgent received {Count} feedback items", feedback.Count);
+                if (context.ReportProgress is not null)
+                    await context.ReportProgress(Type, $"Incorporating {feedback.Count} feedback items from previous iterations");
+            }
+
+            // ── Use DomainProfile for domain-aware architecture decisions ──
+            var profile = context.DomainProfile;
+            if (profile is not null)
+            {
+                _logger.LogInformation("ArchitectAgent using DomainProfile: {Domain}, {EventCount} domain events, {RuleCount} business rules",
+                    profile.Domain, profile.DomainEvents?.Count ?? 0, profile.BusinessRules?.Count ?? 0);
+                if (context.ReportProgress is not null)
+                    await context.ReportProgress(Type, $"DomainProfile active: {profile.Domain} — {profile.DomainEvents?.Count ?? 0} events, {profile.BusinessRules?.Count ?? 0} rules, {profile.QualityAttributes?.Count ?? 0} quality attributes");
+            }
+
             if (context.ReportProgress is not null)
                 await context.ReportProgress(Type, "Analyzing requirements to derive bounded-context microservices via LLM...");
 
@@ -64,7 +84,7 @@ public sealed class ArchitectAgent : IAgent
             }
 
             var activeServices = ServiceCatalogResolver.GetServices(context).ToList();
-            var principles = BuildPrinciples(context);
+            var principles = await BuildPrinciplesAsync(context, ct);
             var instruction = BuildArchitectureInstruction(activeServices, principles);
             UpsertInstruction(context, instruction, "[ARCH]");
 
@@ -104,6 +124,9 @@ public sealed class ArchitectAgent : IAgent
 
             context.Artifacts.Add(artifact);
             context.AgentStatuses[Type] = AgentStatus.Completed;
+
+            // ── Dispatch architecture findings as feedback for downstream agents ──
+            context.DispatchFindingsAsFeedback(Type, context.Findings.ToList());
 
             if (context.ReportProgress is not null)
                 await context.ReportProgress(Type,
@@ -156,9 +179,12 @@ public sealed class ArchitectAgent : IAgent
             return [];
         }
 
+        // Build rich context from feedback, DomainProfile, quality metrics, and agent results
+        var llmContext = context.BuildLlmContextBlock(Type);
+
         var prompt = new LlmPrompt
         {
-            SystemPrompt = """
+            SystemPrompt = $$"""
                 You are a senior software architect. Given a set of project requirements,
                 decompose the system into bounded-context microservices following Domain-Driven Design.
 
@@ -177,6 +203,8 @@ public sealed class ArchitectAgent : IAgent
                 - Keep services focused (single responsibility).
                 - Include cross-cutting services (Audit, Notification) only if requirements mention them.
                 - Output ONLY valid JSON array — no markdown, no commentary.
+
+                {{(!string.IsNullOrWhiteSpace(llmContext) ? llmContext : "")}}
                 """,
             UserPrompt = $$"""
                 Analyze these project requirements and derive bounded-context microservices:
@@ -293,7 +321,54 @@ public sealed class ArchitectAgent : IAgent
         public string[]? DependsOn { get; set; }
     }
 
-    private static List<string> BuildPrinciples(AgentContext context)
+    private async Task<List<string>> BuildPrinciplesAsync(AgentContext context, CancellationToken ct)
+    {
+        var llmContext = context.BuildLlmContextBlock(Type);
+        var requirementsSummary = string.Join("\n", context.Requirements
+            .Take(50)
+            .Select(r => $"- [{r.Module}] {r.Title}: {r.Description}"));
+
+        var prompt = new LlmPrompt
+        {
+            SystemPrompt = $$"""
+                You are a senior software architect. Given a set of project requirements and domain context,
+                derive 5-10 architecture principles that implementation agents must follow.
+
+                {{(!string.IsNullOrWhiteSpace(llmContext) ? llmContext : "")}}
+
+                Output ONLY a JSON array of principle strings. No markdown, no commentary.
+                Example: ["Bounded-context ownership per service", "Tenant isolation in data and APIs"]
+                """,
+            UserPrompt = $"Requirements:\n{requirementsSummary}",
+            Temperature = 0.3,
+            MaxTokens = 1024,
+            RequestingAgent = "ArchitectAgent"
+        };
+
+        try
+        {
+            var response = await _llm.GenerateAsync(prompt, ct);
+            if (response.Success && !string.IsNullOrWhiteSpace(response.Content))
+            {
+                var json = response.Content.Trim();
+                if (json.StartsWith("```")) json = json[(json.IndexOf('\n') + 1)..];
+                if (json.EndsWith("```")) json = json[..^3].Trim();
+
+                var principles = JsonSerializer.Deserialize<List<string>>(json);
+                if (principles is { Count: > 0 })
+                    return principles;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "LLM principle derivation failed, using fallback");
+        }
+
+        // Fallback to static principles
+        return BuildPrinciplesFallback(context);
+    }
+
+    private static List<string> BuildPrinciplesFallback(AgentContext context)
     {
         var text = string.Join(" ", context.Requirements.Select(r => r.Description)).ToLowerInvariant();
         var principles = new List<string>
@@ -312,6 +387,19 @@ public sealed class ArchitectAgent : IAgent
 
         if (ContainsAny(text, "security", "encrypt", "authentication", "authorization"))
             principles.Add("Security-first with defense-in-depth");
+
+        // Enrich from DomainProfile if available
+        var profile = context.DomainProfile;
+        if (profile is not null)
+        {
+            // Add compliance-derived principles
+            foreach (var fw in profile.ComplianceFrameworks ?? [])
+                principles.Add($"{fw.Name} compliance ({string.Join(", ", fw.KeyClauses.Take(3))})");
+
+            // Add quality attributes as architectural principles
+            foreach (var qa in profile.QualityAttributes?.Take(5) ?? [])
+                principles.Add(qa);
+        }
 
         return principles;
     }

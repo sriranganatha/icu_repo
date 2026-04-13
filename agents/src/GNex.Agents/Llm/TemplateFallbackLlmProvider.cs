@@ -50,7 +50,7 @@ public sealed class TemplateFallbackLlmProvider : ILlmProvider
 
         // Requirements Expander — produce pipe-delimited work items
         if (prompt.RequestingAgent == "Requirements Expander" && user.Contains("=== high-level requirements ==="))
-            return GenerateRequirementsExpansion(prompt.UserPrompt);
+            return GenerateRequirementsExpansion(prompt.UserPrompt, prompt.DomainHint);
 
         // Compliance
         if (user.Contains("compliance") || user.Contains("sensitive"))
@@ -60,12 +60,12 @@ public sealed class TemplateFallbackLlmProvider : ILlmProvider
                 // This code implements security and compliance safeguards
                 //
                 // Access Control (§164.312(a)): Role-based access with per-tenant isolation
-                // Audit Controls (§164.312(b)): All PHI access logged with who/what/when/where
-                // Integrity Controls (§164.312(c)): Hash verification on PHI modifications
+                // Audit Controls (§164.312(b)): All sensitive data access logged with who/what/when/where
+                // Integrity Controls (§164.312(c)): Hash verification on sensitive data modifications
                 // Transmission Security (§164.312(e)): TLS 1.2+ enforced, AES-256 at rest
                 //
-                // PHI Categories tracked: Names, DOB, SSN, MRN, Insurance IDs, Addresses,
-                // Phone numbers, Email, Biometric identifiers, Medical records, Lab results
+                // Sensitive data categories tracked: PII, financial records, credentials,
+                // API keys, internal identifiers, contact information, business-critical data
                 """;
         }
 
@@ -109,12 +109,12 @@ public sealed class TemplateFallbackLlmProvider : ILlmProvider
         if (user.Contains("rbac") || user.Contains("access control") || user.Contains("authorization"))
         {
             return """
-                // AI-Generated: Healthcare RBAC Policy
-                // Roles: Physician, Nurse, Admin, Billing, LabTech, Pharmacist, Auditor, SysAdmin
-                // Resource types: Patient, Encounter, Order, Result, Prescription, Claim
-                // Actions: Read, Write, Delete, Approve, Prescribe, Discharge
-                // Constraints: TenantId, FacilityId, DepartmentId, CareTeam membership
-                // Emergency override: Break-the-glass with mandatory justification + audit
+                // AI-Generated: RBAC Policy
+                // Roles: Admin, Manager, Operator, Analyst, ReadOnly, SysAdmin, Auditor
+                // Resource types: Entity, Report, Configuration, Integration, Workflow
+                // Actions: Read, Write, Delete, Approve, Export, Configure
+                // Constraints: TenantId, OrganizationId, DepartmentId, TeamMembership
+                // Emergency override: Elevated access with mandatory justification + audit
                 """;
         }
 
@@ -127,7 +127,7 @@ public sealed class TemplateFallbackLlmProvider : ILlmProvider
                 // Traces: OpenTelemetry distributed tracing, correlation-id propagation
                 // Logs: Structured JSON, Serilog sinks, ELK/Loki compatible
                 // Alerts: SLA-based (p99 < 200ms for reads, < 500ms for writes)
-                // Dashboards: Grafana templates for service health, tenant usage, PHI access audit
+                // Dashboards: Grafana templates for service health, tenant usage, access audit
                 """;
         }
 
@@ -150,10 +150,10 @@ public sealed class TemplateFallbackLlmProvider : ILlmProvider
         {
             return """
                 // AI-Generated: OpenAPI 3.1 Specification
-                // Endpoints follow RESTful conventions with FHIR-compatible resource naming
+                // Endpoints follow RESTful conventions with resource naming
                 // All endpoints require Bearer token + X-Tenant-Id header
                 // Standard responses: 200, 201, 400, 401, 403, 404, 409, 422, 429, 500
-                // PHI fields annotated with x-phi-classification extension
+                // Sensitive fields annotated with x-data-classification extension
                 // Pagination: cursor-based for large datasets, offset for small
                 """;
         }
@@ -169,10 +169,109 @@ public sealed class TemplateFallbackLlmProvider : ILlmProvider
     }
 
     /// <summary>
+    /// Returns domain-appropriate actor/persona definitions for vertical-slice user stories.
+    /// Each tuple is (Persona label, typical action verb phrase, value proposition).
+    /// </summary>
+    private static (string Persona, string ActionTemplate, string ValueTemplate, int Pts, string Labels)[] GetDomainActors(string domain) => domain?.ToLowerInvariant() switch
+    {
+        "healthcare" => [
+            ("clinician", "search and view {0} records", "I can quickly access information during patient care", 3, "Frontend,API,Database"),
+            ("nurse", "create and update {0} records", "documentation is accurate and timely for patient safety", 5, "Frontend,API,Database,Validation"),
+            ("administrator", "manage {0} configuration and access policies", "the system meets healthcare regulatory requirements", 3, "Frontend,API,Security"),
+            ("system", "validate {0} data integrity and generate audit trails", "HIPAA compliance is maintained automatically", 2, "API,Database,Security"),
+            ("medical director", "review and report on {0} analytics", "clinical outcomes improve through data-driven decisions", 3, "Frontend,API,Reporting")
+        ],
+        "fintech" or "banking" => [
+            ("account holder", "search and view {0} records", "I can monitor my financial activity in real-time", 3, "Frontend,API,Database"),
+            ("relationship manager", "create and update {0} records", "client portfolios are accurately maintained", 5, "Frontend,API,Database,Validation"),
+            ("compliance officer", "manage {0} regulatory rules and audit trails", "the platform meets financial regulatory standards", 3, "Frontend,API,Security"),
+            ("system", "validate {0} transactions and enforce risk controls", "fraud prevention and AML compliance are automated", 2, "API,Database,Security"),
+            ("financial analyst", "export and analyze {0} data", "investment and risk decisions are data-driven", 3, "Frontend,API,Reporting")
+        ],
+        "e-commerce" or "retail" => [
+            ("shopper", "browse and search {0} catalog", "I can quickly find products I want to purchase", 3, "Frontend,API,Database"),
+            ("merchant", "create and update {0} listings", "my product catalog is accurate and up-to-date", 5, "Frontend,API,Database,Validation"),
+            ("store admin", "manage {0} configuration and promotions", "the storefront reflects current business strategy", 3, "Frontend,API,Security"),
+            ("system", "validate {0} inventory and process order events", "stock accuracy and fulfillment reliability are maintained", 2, "API,Database,Security"),
+            ("business analyst", "report on {0} sales and trends", "merchandising decisions are data-driven", 3, "Frontend,API,Reporting")
+        ],
+        "manufacturing" => [
+            ("plant operator", "monitor and view {0} production data", "I can respond quickly to shop floor issues", 3, "Frontend,API,Database"),
+            ("production manager", "create and update {0} work orders", "manufacturing schedules are optimized and tracked", 5, "Frontend,API,Database,Validation"),
+            ("quality engineer", "manage {0} inspection rules and thresholds", "product quality meets specifications consistently", 3, "Frontend,API,Security"),
+            ("system", "validate {0} sensor readings and trigger alerts", "equipment downtime is minimized through predictive maintenance", 2, "API,Database,Security"),
+            ("operations analyst", "analyze {0} efficiency metrics", "continuous improvement targets are met", 3, "Frontend,API,Reporting")
+        ],
+        "education" or "edtech" => [
+            ("student", "access and view {0} course materials", "I can learn at my own pace and track my progress", 3, "Frontend,API,Database"),
+            ("instructor", "create and update {0} content and assessments", "course delivery is engaging and well-organized", 5, "Frontend,API,Database,Validation"),
+            ("academic admin", "manage {0} enrollment and policies", "institutional standards and accreditation requirements are met", 3, "Frontend,API,Security"),
+            ("system", "validate {0} submissions and compute grades", "academic integrity and grading accuracy are maintained", 2, "API,Database,Security"),
+            ("dean", "review {0} performance and retention analytics", "educational outcomes continuously improve", 3, "Frontend,API,Reporting")
+        ],
+        "logistics" or "supply chain" => [
+            ("warehouse operator", "track and view {0} shipment status", "I can manage inventory movements efficiently", 3, "Frontend,API,Database"),
+            ("logistics coordinator", "create and update {0} dispatch orders", "deliveries are on-time and cost-optimized", 5, "Frontend,API,Database,Validation"),
+            ("fleet manager", "manage {0} routes and carrier assignments", "transportation costs and SLAs are optimized", 3, "Frontend,API,Security"),
+            ("system", "validate {0} tracking events and update ETAs", "supply chain visibility is maintained end-to-end", 2, "API,Database,Security"),
+            ("supply chain analyst", "analyze {0} throughput and bottlenecks", "operational efficiency continuously improves", 3, "Frontend,API,Reporting")
+        ],
+        "insurance" or "insurtech" => [
+            ("policyholder", "view and manage {0} policy details", "I can understand my coverage and file claims easily", 3, "Frontend,API,Database"),
+            ("underwriter", "assess and update {0} risk evaluations", "premiums accurately reflect the risk profile", 5, "Frontend,API,Database,Validation"),
+            ("claims adjuster", "manage {0} claims workflow and settlements", "claims are resolved fairly and efficiently", 3, "Frontend,API,Security"),
+            ("system", "validate {0} policy rules and fraud indicators", "regulatory compliance and fraud prevention are automated", 2, "API,Database,Security"),
+            ("actuary", "analyze {0} loss ratios and risk trends", "product pricing and reserves are actuarially sound", 3, "Frontend,API,Reporting")
+        ],
+        "realestate" or "proptech" => [
+            ("tenant", "search and view {0} property listings", "I can find suitable properties quickly", 3, "Frontend,API,Database"),
+            ("property manager", "create and update {0} lease records", "portfolio occupancy and revenue are maximized", 5, "Frontend,API,Database,Validation"),
+            ("building admin", "manage {0} maintenance schedules and vendors", "properties are well-maintained and compliant", 3, "Frontend,API,Security"),
+            ("system", "validate {0} lease terms and automate rent escalations", "financial accuracy and compliance are maintained", 2, "API,Database,Security"),
+            ("asset analyst", "report on {0} portfolio performance", "investment decisions are data-driven", 3, "Frontend,API,Reporting")
+        ],
+        "telecom" or "telecommunications" => [
+            ("subscriber", "view and manage {0} account and usage", "I can control my services and spending", 3, "Frontend,API,Database"),
+            ("service rep", "create and update {0} service orders", "customer requests are fulfilled accurately and quickly", 5, "Frontend,API,Database,Validation"),
+            ("network admin", "manage {0} network configuration and capacity", "service quality meets SLA commitments", 3, "Frontend,API,Security"),
+            ("system", "validate {0} usage records and trigger billing events", "revenue assurance and fraud detection are automated", 2, "API,Database,Security"),
+            ("revenue analyst", "analyze {0} ARPU and churn metrics", "customer lifetime value is maximized", 3, "Frontend,API,Reporting")
+        ],
+        "government" or "govtech" => [
+            ("citizen", "access and view {0} public services", "I can interact with government services conveniently", 3, "Frontend,API,Database"),
+            ("case worker", "create and update {0} case records", "constituent needs are addressed thoroughly and fairly", 5, "Frontend,API,Database,Validation"),
+            ("department head", "manage {0} policies and approval workflows", "agency operations comply with regulations", 3, "Frontend,API,Security"),
+            ("system", "validate {0} eligibility rules and generate compliance reports", "transparency and accountability are maintained", 2, "API,Database,Security"),
+            ("policy analyst", "analyze {0} program outcomes and utilization", "public programs are effective and efficient", 3, "Frontend,API,Reporting")
+        ],
+        "hrtech" or "hr" or "workforce management" => [
+            ("employee", "view and update {0} personal records", "I can manage my HR information self-service", 3, "Frontend,API,Database"),
+            ("hr manager", "create and update {0} workforce records", "talent management processes run smoothly", 5, "Frontend,API,Database,Validation"),
+            ("hr admin", "manage {0} policies and compliance rules", "the organization meets labor regulations", 3, "Frontend,API,Security"),
+            ("system", "validate {0} payroll calculations and leave balances", "compensation accuracy and compliance are automated", 2, "API,Database,Security"),
+            ("hr analyst", "analyze {0} workforce metrics and attrition", "workforce planning decisions are data-driven", 3, "Frontend,API,Reporting")
+        ],
+        "energy" or "utilities" => [
+            ("consumer", "view and manage {0} utility account", "I can monitor my usage and control costs", 3, "Frontend,API,Database"),
+            ("field technician", "create and update {0} service records", "infrastructure maintenance is tracked and efficient", 5, "Frontend,API,Database,Validation"),
+            ("grid operator", "manage {0} distribution and load balancing", "energy delivery is reliable and optimized", 3, "Frontend,API,Security"),
+            ("system", "validate {0} meter readings and detect anomalies", "billing accuracy and outage detection are automated", 2, "API,Database,Security"),
+            ("energy analyst", "analyze {0} demand patterns and forecasts", "resource planning and sustainability targets are met", 3, "Frontend,API,Reporting")
+        ],
+        _ => [
+            ("user", "search and view {0} records", "I can quickly find information during operations", 3, "Frontend,API,Database"),
+            ("manager", "create and update {0} records", "documentation is accurate and up-to-date", 5, "Frontend,API,Database,Validation"),
+            ("admin", "manage {0} configuration and permissions", "the system meets our operational policies", 3, "Frontend,API,Security"),
+            ("system", "validate {0} data integrity and generate audit trails", "regulatory compliance is maintained automatically", 2, "API,Database,Security"),
+            ("analyst", "export and report on {0} data", "business operations run accurately and on time", 3, "Frontend,API,Reporting")
+        ]
+    };
+
+    /// <summary>
     /// Generates pipe-delimited EPIC/STORY/USECASE/TASK lines by parsing the requirement
     /// summaries from the user prompt and producing a rich vertical-slice decomposition.
     /// </summary>
-    private static string GenerateRequirementsExpansion(string rawPrompt)
+    private static string GenerateRequirementsExpansion(string rawPrompt, string domainHint)
     {
         var sb = new System.Text.StringBuilder();
 
@@ -237,45 +336,44 @@ public sealed class TemplateFallbackLlmProvider : ILlmProvider
         {
             // If we couldn't parse, create 1 synthetic requirement
             requirements.Add(($"REQ-{module}-001", $"{module} Core Functionality",
-                "Core module functionality for the healthcare platform",
-                "PatientService", ["Feature delivered and validated"]));
+                "Core module functionality for the platform",
+                "Service", ["Feature delivered and validated"]));
         }
 
-        // Healthcare personas for vertical slicing
-        var personas = new[] { "nurse", "doctor", "admin", "lab technician", "billing clerk" };
+        // Domain-driven personas for vertical slicing
+        var domainActors = GetDomainActors(domainHint);
 
         var epicSeq = 0;
         foreach (var (reqId, reqTitle, reqDesc, reqSvcs, reqAc) in requirements)
         {
             epicSeq++;
             var epicId = $"E-{module}-{epicSeq:D3}";
-            var services = string.IsNullOrEmpty(reqSvcs) || reqSvcs == "Unknown" ? "PatientService" : reqSvcs;
+            var services = string.IsNullOrEmpty(reqSvcs) || reqSvcs == "Unknown" ? "Service" : reqSvcs;
             var titleClean = reqTitle.Length > 80 ? reqTitle[..80] : reqTitle;
             var descClean = string.IsNullOrEmpty(reqDesc) ? titleClean : (reqDesc.Length > 200 ? reqDesc[..200] : reqDesc);
 
             // ── EPIC ──
-            sb.AppendLine($"EPIC|{epicId}|{titleClean}|{descClean}|Improves clinical workflow efficiency and patient safety|" +
-                $"Feature fully operational;All acceptance criteria verified;HIPAA compliance validated;Audit trail complete|" +
+            sb.AppendLine($"EPIC|{epicId}|{titleClean}|{descClean}|Improves workflow efficiency and operational reliability|" +
+                $"Feature fully operational;All acceptance criteria verified;Compliance validated;Audit trail complete|" +
                 $"Includes all CRUD operations, validation, and audit for this feature; excludes unrelated module refactors|" +
                 $"2|{services}|");
 
             // ── USE CASE ──
             var ucId = $"UC-{module}-{epicSeq:D3}-01";
-            sb.AppendLine($"USECASE|{ucId}|{epicId}|Execute {titleClean} Workflow|Nurse|" +
+            sb.AppendLine($"USECASE|{ucId}|{epicId}|Execute {titleClean} Workflow|User|" +
                 $"User is authenticated and has appropriate role permissions|" +
                 $"1. User navigates to the {titleClean} screen;2. System displays the relevant data list with search/filter;3. User selects or creates a record;4. System validates input against business rules;5. User confirms the action;6. System persists changes and creates audit log entry;7. System displays confirmation with updated data|" +
                 $"Invalid input shows validation errors; Unauthorized user sees access denied; Network failure shows retry option|" +
                 $"Data is persisted in database; Audit trail entry created; User sees confirmation|{services}");
 
             // ── USER STORIES (3-5 per epic, sliced by persona + operation) ──
-            var storyOps = new[]
-            {
-                (Persona: "nurse", Action: $"search and view {titleClean.ToLowerInvariant()} records", Value: "I can quickly find patient information during care delivery", Pts: 3, Labels: "Frontend,API,Database"),
-                (Persona: "doctor", Action: $"create and update {titleClean.ToLowerInvariant()} records", Value: "clinical documentation is accurate and up-to-date", Pts: 5, Labels: "Frontend,API,Database,Validation"),
-                (Persona: "admin", Action: $"manage {titleClean.ToLowerInvariant()} configuration and permissions", Value: "the system meets our facility's operational policies", Pts: 3, Labels: "Frontend,API,Security"),
-                (Persona: "system", Action: $"validate {titleClean.ToLowerInvariant()} data integrity and generate audit trails", Value: "regulatory compliance (HIPAA) is maintained automatically", Pts: 2, Labels: "API,Database,Security"),
-                (Persona: "billing clerk", Action: $"export and report on {titleClean.ToLowerInvariant()} data", Value: "revenue cycle operations run accurately and on time", Pts: 3, Labels: "Frontend,API,Reporting")
-            };
+            var storyOps = domainActors.Select(a => (
+                Persona: a.Persona,
+                Action: string.Format(a.ActionTemplate, titleClean.ToLowerInvariant()),
+                Value: a.ValueTemplate,
+                Pts: a.Pts,
+                Labels: a.Labels
+            )).ToArray();
 
             var storySeq = 0;
             foreach (var op in storyOps)

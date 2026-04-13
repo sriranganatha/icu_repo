@@ -18,6 +18,7 @@ public sealed class RequirementsExpanderAgent : IAgent
 {
     private readonly ILlmProvider _llm;
     private readonly ILogger<RequirementsExpanderAgent> _logger;
+    private string _domainHint = string.Empty;
     public AgentType Type => AgentType.RequirementsExpander;
     public string Name => "Requirements Expander";
     public string Description => "Expands high-level requirements into implementation-ready epics, user stories, use cases, and tasks with dependency chains and detailed specs.";
@@ -32,6 +33,7 @@ public sealed class RequirementsExpanderAgent : IAgent
     {
         var sw = Stopwatch.StartNew();
         context.AgentStatuses[Type] = AgentStatus.Running;
+        _domainHint = context.PipelineConfig?.ProjectDomain ?? string.Empty;
         _logger.LogInformation("RequirementsExpander starting — {Count} base requirements, iteration {Iter}",
             context.Requirements.Count, context.DevIteration);
 
@@ -112,7 +114,7 @@ public sealed class RequirementsExpanderAgent : IAgent
             // Phase 2: Each Epic → Stories + Use Cases (1-2 per LLM call)
             // Phase 3: Each Story → Tasks (2-3 per LLM call)
             // Phase 4: Recursive refinement — split large tasks until atomic
-            var domainCtx = BuildDomainContextForModule(module, context.DomainModel);
+            var domainCtx = BuildDomainContextForModule(module, context.DomainModel, context.DomainProfile);
             var phaseItems = await ExpandModuleWithPhasesAsync(
                 reqs, module, iteration, reqServiceMap, reqDeps, qualityInsights,
                 domainCtx, context.ReportProgress, context, ct);
@@ -545,6 +547,7 @@ public sealed class RequirementsExpanderAgent : IAgent
                     """,
                 Temperature = 0.2,
                 MaxTokens = 12288,
+                DomainHint = _domainHint,
                 RequestingAgent = Name
             };
 
@@ -681,6 +684,7 @@ public sealed class RequirementsExpanderAgent : IAgent
                     """,
                 Temperature = 0.3,
                 MaxTokens = 16384,
+                DomainHint = _domainHint,
                 RequestingAgent = Name
             };
 
@@ -827,6 +831,7 @@ public sealed class RequirementsExpanderAgent : IAgent
                     """,
                 Temperature = 0.2,
                 MaxTokens = 32768,
+                DomainHint = _domainHint,
                 RequestingAgent = Name
             };
 
@@ -923,6 +928,7 @@ public sealed class RequirementsExpanderAgent : IAgent
                     """,
                 Temperature = 0.1,
                 MaxTokens = 4096,
+                DomainHint = _domainHint,
                 RequestingAgent = Name
             };
 
@@ -1014,6 +1020,7 @@ public sealed class RequirementsExpanderAgent : IAgent
                     """,
                 Temperature = 0.2,
                 MaxTokens = 16384,
+                DomainHint = _domainHint,
                 RequestingAgent = Name
             };
 
@@ -1207,37 +1214,97 @@ public sealed class RequirementsExpanderAgent : IAgent
     }
 
     // ─── Domain Context Builder ────────────────────────────────────────
-    private static string BuildDomainContextForModule(string module, ParsedDomainModel? model)
+    private static string BuildDomainContextForModule(string module, ParsedDomainModel? model, DomainProfile? profile)
     {
-        if (model is null) return "(Domain model not yet built)";
+        if (model is null && profile is null) return "(Domain model not yet built)";
 
         var sb = new StringBuilder();
-        var relevantEntities = model.Entities
-            .Where(e => e.FeatureTags.Any(t => t.Contains(module, StringComparison.OrdinalIgnoreCase)) ||
-                        e.ServiceName.Contains(module.Replace("Service", ""), StringComparison.OrdinalIgnoreCase))
-            .ToList();
 
-        if (relevantEntities.Count == 0)
-            relevantEntities = model.Entities; // include all if no module match
-
-        foreach (var entity in relevantEntities.Take(15))
+        // ── DomainProfile context: glossary, business rules, quality attributes, events ──
+        if (profile is not null)
         {
-            sb.AppendLine($"  Entity: {entity.Name} (Service: {entity.ServiceName}, Schema: {entity.Schema})");
-            foreach (var f in entity.Fields.Take(15))
-                sb.AppendLine($"    - {f.Name}: {f.Type}{(f.IsKey ? " [PK]" : "")}{(f.IsRequired ? " [Required]" : "")}{(f.IsAuditField ? " [Audit]" : "")}");
-            sb.AppendLine();
+            if (!string.IsNullOrWhiteSpace(profile.Domain))
+                sb.AppendLine($"  Domain: {profile.Domain} — {profile.DomainDescription}");
+
+            if (profile.DomainGlossary is { Count: > 0 })
+            {
+                sb.AppendLine("  === DOMAIN GLOSSARY (use these terms consistently) ===");
+                foreach (var (term, definition) in profile.DomainGlossary.Take(25))
+                    sb.AppendLine($"    {term}: {definition}");
+                sb.AppendLine();
+            }
+
+            if (profile.BusinessRules is { Count: > 0 })
+            {
+                sb.AppendLine("  === BUSINESS RULES (must be reflected in requirements) ===");
+                foreach (var rule in profile.BusinessRules.Take(20))
+                    sb.AppendLine($"    • {rule}");
+                sb.AppendLine();
+            }
+
+            if (profile.QualityAttributes is { Count: > 0 })
+            {
+                sb.AppendLine("  === QUALITY ATTRIBUTES (NFR targets) ===");
+                foreach (var qa in profile.QualityAttributes.Take(15))
+                    sb.AppendLine($"    • {qa}");
+                sb.AppendLine();
+            }
+
+            if (profile.DomainEvents is { Count: > 0 })
+            {
+                sb.AppendLine("  === DOMAIN EVENTS (integration triggers) ===");
+                foreach (var evt in profile.DomainEvents.Take(20))
+                    sb.AppendLine($"    Event: {evt.Name} (Source: {evt.Source}) — {evt.Description}");
+                sb.AppendLine();
+            }
+
+            if (profile.Actors is { Count: > 0 })
+            {
+                sb.AppendLine("  === DOMAIN ACTORS ===");
+                foreach (var actor in profile.Actors.Take(15))
+                    sb.AppendLine($"    {actor.Name} ({actor.Role}): {actor.Description}");
+                sb.AppendLine();
+            }
+
+            if (profile.ComplianceFrameworks is { Count: > 0 })
+            {
+                sb.AppendLine("  === COMPLIANCE FRAMEWORKS ===");
+                foreach (var fw in profile.ComplianceFrameworks.Take(10))
+                    sb.AppendLine($"    {fw.Name}{(fw.IsUniversal ? " [Universal]" : "")}: {string.Join("; ", fw.KeyClauses.Take(5))}");
+                sb.AppendLine();
+            }
         }
 
-        // Relevant endpoints
-        var endpoints = model.ApiEndpoints
-            .Where(e => relevantEntities.Any(re => re.Name == e.EntityName))
-            .Take(20);
-        foreach (var ep in endpoints)
-            sb.AppendLine($"  API: {ep.Method} {ep.Path} → {ep.OperationName} ({ep.ServiceName})");
+        // ── Parsed domain model: entities, endpoints, NFRs ──
+        if (model is not null)
+        {
+            var relevantEntities = model.Entities
+                .Where(e => e.FeatureTags.Any(t => t.Contains(module, StringComparison.OrdinalIgnoreCase)) ||
+                            e.ServiceName.Contains(module.Replace("Service", ""), StringComparison.OrdinalIgnoreCase))
+                .ToList();
 
-        // Relevant NFRs
-        foreach (var nfr in model.NfrRequirements)
-            sb.AppendLine($"  NFR: {nfr.Id} ({nfr.Category}): {nfr.Description}");
+            if (relevantEntities.Count == 0)
+                relevantEntities = model.Entities; // include all if no module match
+
+            foreach (var entity in relevantEntities.Take(15))
+            {
+                sb.AppendLine($"  Entity: {entity.Name} (Service: {entity.ServiceName}, Schema: {entity.Schema})");
+                foreach (var f in entity.Fields.Take(15))
+                    sb.AppendLine($"    - {f.Name}: {f.Type}{(f.IsKey ? " [PK]" : "")}{(f.IsRequired ? " [Required]" : "")}{(f.IsAuditField ? " [Audit]" : "")}");
+                sb.AppendLine();
+            }
+
+            // Relevant endpoints
+            var endpoints = model.ApiEndpoints
+                .Where(e => relevantEntities.Any(re => re.Name == e.EntityName))
+                .Take(20);
+            foreach (var ep in endpoints)
+                sb.AppendLine($"  API: {ep.Method} {ep.Path} → {ep.OperationName} ({ep.ServiceName})");
+
+            // Relevant NFRs
+            foreach (var nfr in model.NfrRequirements)
+                sb.AppendLine($"  NFR: {nfr.Id} ({nfr.Category}): {nfr.Description}");
+        }
 
         return sb.ToString();
     }
@@ -1717,6 +1784,7 @@ public sealed class RequirementsExpanderAgent : IAgent
                 """,
             Temperature = 0.1,
             MaxTokens = 4096,
+            DomainHint = _domainHint,
             RequestingAgent = Name
         };
 
@@ -2345,6 +2413,7 @@ public sealed class RequirementsExpanderAgent : IAgent
                 UserPrompt = $"Evaluate these {batch.Count} requirements:\n{string.Join("\n", reqLines)}",
                 Temperature = 0.1,
                 MaxTokens = 4096,
+                DomainHint = _domainHint,
                 RequestingAgent = Name
             };
 

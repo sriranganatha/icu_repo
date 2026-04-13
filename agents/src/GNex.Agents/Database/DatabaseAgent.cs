@@ -78,6 +78,20 @@ public sealed class DatabaseAgent : IAgent
             if (context.ReportProgress is not null && !string.IsNullOrWhiteSpace(guidance))
                 await context.ReportProgress(Type, $"Applying architecture/platform guidance: {guidance}");
 
+            // Read feedback from downstream agents (Review, Supervisor, GapAnalysis)
+            var feedback = context.ReadFeedback(Type);
+            if (feedback.Count > 0)
+                _logger.LogInformation("DatabaseAgent received {Count} feedback items", feedback.Count);
+
+            // Read historical learnings from previous pipeline runs
+            var learnings = context.GetLearningsForAgent(Type);
+            if (learnings.Count > 0)
+            {
+                _logger.LogInformation("DatabaseAgent loaded {Count} historical learnings", learnings.Count);
+                if (context.ReportProgress is not null)
+                    await context.ReportProgress(Type, $"Applying {learnings.Count} historical learnings to avoid past issues");
+            }
+
             // Generate per-service database artifacts (only for NEW services)
             foreach (var svc in newServices)
             {
@@ -399,9 +413,9 @@ public sealed class DatabaseAgent : IAgent
 
         private static CodeArtifact GenerateDockerCompose(PipelineConfig? config, IEnumerable<MicroserviceDefinition> services)
         {
-                var dbUser = config?.DbUser ?? "hms";
+                var dbUser = config?.DbUser ?? "gnex_admin";
                 var dbPassword = config?.DbPassword ?? "gnex_dev_pw";
-                var dbName = config?.DbName ?? "hms";
+                var dbName = config?.DbName ?? "app_db";
                 var dbPort = config?.DbPort ?? 5432;
                 var serviceList = services.ToList();
 
@@ -602,6 +616,27 @@ public sealed class DatabaseAgent : IAgent
             .Take(80)
             .Select(r => $"- {r.Title}: {r.Description}"));
 
+        // Domain-specific guidance from PromptGeneratorAgent
+        var domainGuidance = "";
+        var profile = context.DomainProfile;
+        if (profile is not null)
+        {
+            var parts = new List<string>();
+            if (profile.AgentPrompts.TryGetValue("Database", out var agentPrompt))
+                parts.Add($"Domain Agent Guidance:\n{agentPrompt}");
+            if (profile.DomainGlossary is { Count: > 0 })
+                parts.Add("Domain Glossary (use these terms for field/entity naming):\n" +
+                    string.Join("\n", profile.DomainGlossary.Take(20).Select(kv => $"  {kv.Key}: {kv.Value}")));
+            if (profile.BusinessRules is { Count: > 0 })
+                parts.Add("Business Rules (reflect as validation fields/constraints):\n" +
+                    string.Join("\n", profile.BusinessRules.Take(15).Select(r => $"  • {r}")));
+            if (profile.SensitiveFieldPatterns is { Count: > 0 })
+                parts.Add("Sensitive Fields (mark with [PersonalData] attribute):\n" +
+                    string.Join(", ", profile.SensitiveFieldPatterns.Take(20)));
+            if (parts.Count > 0)
+                domainGuidance = "\n\n=== DOMAIN CONTEXT ===\n" + string.Join("\n\n", parts);
+        }
+
         var prompt = new LlmPrompt
         {
             SystemPrompt = """
@@ -617,8 +652,11 @@ public sealed class DatabaseAgent : IAgent
                 - [Required] public string UpdatedBy { get; set; } = null!;
                 - public int VersionNo { get; set; } = 1;
 
-                Add domain-specific fields based on the entity name and service context.
+                Add domain-specific fields based on the entity name, service context, and
+                domain glossary/business rules provided. Use domain terminology for field
+                names — match the exact terms in the glossary when applicable.
                 Use [Required] on non-nullable reference types. Use nullable types (?) for optional fields.
+                Mark sensitive/PII fields with [PersonalData] when they match sensitive field patterns.
                 Include navigation properties where parent-child relationships exist between entities in the SAME service.
 
                 DELIMITER FORMAT: Separate each entity with a line containing exactly:
@@ -633,7 +671,7 @@ public sealed class DatabaseAgent : IAgent
                 Generate entity classes for: {string.Join(", ", svc.Entities)}
 
                 Project requirements context (use these to infer appropriate domain fields):
-                {requirementsSummary}
+                {requirementsSummary}{domainGuidance}
                 """,
             Temperature = 0.2,
             MaxTokens = 4096,
@@ -728,6 +766,22 @@ public sealed class DatabaseAgent : IAgent
             .Take(50)
             .Select(r => $"- {r.Title}: {r.Description}"));
 
+        // Domain-specific context for migration generation
+        var domainMigrationCtx = "";
+        var profile = context.DomainProfile;
+        if (profile is not null)
+        {
+            var parts = new List<string>();
+            if (profile.DomainGlossary is { Count: > 0 })
+                parts.Add("Use these domain terms for column naming:\n" +
+                    string.Join("\n", profile.DomainGlossary.Take(15).Select(kv => $"  {kv.Key} → {kv.Value}")));
+            if (profile.SensitiveFieldPatterns is { Count: > 0 })
+                parts.Add("Add COMMENT ON COLUMN for sensitive fields:\n" +
+                    string.Join(", ", profile.SensitiveFieldPatterns.Take(15)));
+            if (parts.Count > 0)
+                domainMigrationCtx = "\n\nDomain Context:\n" + string.Join("\n", parts);
+        }
+
         var prompt = new LlmPrompt
         {
             SystemPrompt = """
@@ -755,7 +809,7 @@ public sealed class DatabaseAgent : IAgent
                 Entities: {string.Join(", ", svc.Entities)}
 
                 Project requirements context:
-                {requirementsSummary}
+                {requirementsSummary}{domainMigrationCtx}
 
                 Generate the complete migration SQL for all entities.
                 """,

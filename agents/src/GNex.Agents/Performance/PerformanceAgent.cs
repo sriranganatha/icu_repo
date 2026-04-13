@@ -314,7 +314,7 @@ public sealed class PerformanceAgent : IAgent
             namespace GNex.SharedKernel.Performance;
 
             /// <summary>
-            /// Standard cache profiles for HMS API responses.
+            /// Standard cache profiles for API responses.
             /// Applied via [ResponseCache(CacheProfileName = "...")] on endpoints.
             /// </summary>
             public static class CacheProfiles

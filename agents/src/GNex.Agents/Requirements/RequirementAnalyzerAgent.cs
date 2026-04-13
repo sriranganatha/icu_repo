@@ -227,7 +227,7 @@ public sealed class RequirementAnalyzerAgent : IAgent
         // If no specific service detected, infer from module
         if (affectedServices.Count == 0)
         {
-            var svc = InferServiceFromModule(req.Module);
+            var svc = InferServiceFromModule(req.Module, ServiceCatalogResolver.GetServices(context));
             if (svc is not null) affectedServices.Add(svc);
         }
 
@@ -633,21 +633,21 @@ public sealed class RequirementAnalyzerAgent : IAgent
         return "Shared";
     }
 
-    private static string? InferServiceFromModule(string module)
+    private static string? InferServiceFromModule(string module, IReadOnlyList<MicroserviceDefinition> services)
     {
-        return module.ToLowerInvariant() switch
+        // Dynamically match module names to derived services by checking
+        // if the module keyword appears in the service name or short name.
+        var lower = module.ToLowerInvariant();
+        if (lower is "requirements" or "epics" or "general") return null;
+
+        foreach (var svc in services)
         {
-            "requirements" or "epics" or "general" => null,
-            var m when m.Contains("patient") => "PatientService",
-            var m when m.Contains("encounter") || m.Contains("opd") => "EncounterService",
-            var m when m.Contains("inpatient") || m.Contains("admission") => "InpatientService",
-            var m when m.Contains("emergency") => "EmergencyService",
-            var m when m.Contains("diagnostic") || m.Contains("lab") => "DiagnosticsService",
-            var m when m.Contains("revenue") || m.Contains("billing") => "RevenueService",
-            var m when m.Contains("audit") || m.Contains("compliance") => "AuditService",
-            var m when m.Contains("ai") => "AiService",
-            _ => null
-        };
+            if (lower.Contains(svc.ShortName, StringComparison.OrdinalIgnoreCase) ||
+                svc.Name.Contains(module, StringComparison.OrdinalIgnoreCase))
+                return svc.Name;
+        }
+
+        return null;
     }
 
     private static List<string> ExtractKeywords(string text)

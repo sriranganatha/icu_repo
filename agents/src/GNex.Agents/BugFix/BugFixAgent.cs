@@ -47,6 +47,20 @@ public sealed class BugFixAgent : IAgent
         if (context.ReportProgress is not null)
             await context.ReportProgress(Type, $"Analyzing {findings.Count} fixable findings: {string.Join(", ", findings.GroupBy(f => f.Category).Select(g => $"{g.Key}({g.Count()})").Take(6))}");
 
+        // Read feedback addressed to BugFix from other agents
+        var feedback = context.ReadFeedback(Type);
+        if (feedback.Count > 0)
+            _logger.LogInformation("BugFixAgent received {Count} feedback items", feedback.Count);
+
+        // Read historical learnings — known fix patterns from prior runs
+        var learnings = context.GetLearningsForAgent(Type);
+        if (learnings.Count > 0)
+        {
+            _logger.LogInformation("BugFixAgent loaded {Count} historical learnings for fix guidance", learnings.Count);
+            if (context.ReportProgress is not null)
+                await context.ReportProgress(Type, $"Using {learnings.Count} historical fix patterns to guide repairs");
+        }
+
         var fixedCount = 0;
         var resolvedFindings = new List<string>();
 

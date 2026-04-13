@@ -52,6 +52,24 @@ public sealed class ApplicationAgent : IAgent
 
         try
         {
+            // Read feedback from downstream agents (Review, Monitor, Supervisor)
+            var feedback = context.ReadFeedback(Type);
+            if (feedback.Count > 0)
+            {
+                _logger.LogInformation("ApplicationAgent received {Count} feedback items from previous iterations", feedback.Count);
+                if (context.ReportProgress is not null)
+                    await context.ReportProgress(Type, $"Incorporating {feedback.Count} feedback items from Review/Monitor/Supervisor");
+            }
+
+            // Read historical learnings from previous pipeline runs
+            var learnings = context.GetLearningsForAgent(Type);
+            if (learnings.Count > 0)
+            {
+                _logger.LogInformation("ApplicationAgent loaded {Count} historical learnings", learnings.Count);
+                if (context.ReportProgress is not null)
+                    await context.ReportProgress(Type, $"Applying {learnings.Count} historical learnings to avoid past issues");
+            }
+
             // API Gateway (only on first run)
             if (_generatedPaths.Add("GNex.ApiGateway/Program.cs"))
             {

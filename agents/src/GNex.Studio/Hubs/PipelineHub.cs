@@ -27,9 +27,9 @@ public sealed class PipelineHub : Hub
 /// </summary>
 public sealed class SignalRBrdStatusNotifier(IHubContext<PipelineHub> hub) : IBrdStatusNotifier
 {
-    public async Task NotifyBrdStatusChangedAsync(string projectId, string status, string message, CancellationToken ct = default)
+    public async Task NotifyBrdStatusChangedAsync(string projectId, string brdId, string brdTitle, string status, string message, CancellationToken ct = default)
     {
-        await hub.Clients.All.SendAsync("BrdUpdated", new { projectId, status, message }, ct);
+        await hub.Clients.All.SendAsync("BrdUpdated", new { projectId, brdId, brdTitle, status, message }, ct);
     }
 }
 

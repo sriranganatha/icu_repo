@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using GNex.Core.Enums;
+using GNex.Core.Extensions;
 using GNex.Core.Interfaces;
 using GNex.Core.Models;
 using Microsoft.Extensions.Logging;
@@ -17,14 +18,16 @@ namespace GNex.Agents.DependencyAudit;
 public sealed class DependencyAgent : IAgent
 {
     private readonly ILogger<DependencyAgent> _logger;
+    private readonly ILlmProvider _llm;
 
     public AgentType Type => AgentType.DependencyAudit;
     public string Name => "Dependency Agent";
     public string Description => "NuGet vulnerability scanning, license compliance, and version pinning verification.";
 
-    public DependencyAgent(ILogger<DependencyAgent> logger)
+    public DependencyAgent(ILogger<DependencyAgent> logger, ILlmProvider llm)
     {
         _logger = logger;
+        _llm = llm;
     }
 
     public async Task<AgentResult> ExecuteAsync(AgentContext context, CancellationToken ct = default)
@@ -42,6 +45,20 @@ public sealed class DependencyAgent : IAgent
 
         try
         {
+            // ── Read feedback from previous iterations ──
+            var feedback = context.ReadFeedback(Type);
+            if (feedback.Count > 0)
+            {
+                _logger.LogInformation("DependencyAgent received {Count} feedback items", feedback.Count);
+                if (context.ReportProgress is not null)
+                    await context.ReportProgress(Type, $"Incorporating {feedback.Count} feedback items from previous iterations");
+            }
+
+            // ── Use DomainProfile for compliance-aware license checking ──
+            var profile = context.DomainProfile;
+            if (profile is not null && context.ReportProgress is not null)
+                await context.ReportProgress(Type, $"DomainProfile active: {profile.Domain} — {profile.ComplianceFrameworks?.Count ?? 0} compliance frameworks for license validation");
+
             var outputPath = context.OutputBasePath;
             var csprojFiles = Directory.Exists(outputPath)
                 ? Directory.GetFiles(outputPath, "*.csproj", SearchOption.AllDirectories)
@@ -179,9 +196,64 @@ public sealed class DependencyAgent : IAgent
             }
             report.AppendLine();
 
-            // ── Step 4: License check ──
+            // ── Step 4: LLM-based vulnerability impact analysis ──
+            if (findings.Any(f => f.Category == "Dependency-Vulnerability"))
+            {
+                var llmContext = context.BuildLlmContextBlock(Type);
+                var vulnSummary = string.Join("\n", findings
+                    .Where(f => f.Category == "Dependency-Vulnerability")
+                    .Take(15)
+                    .Select(f => $"- {f.Message}"));
+
+                var impactPrompt = new LlmPrompt
+                {
+                    SystemPrompt = $$"""
+                        You are a senior application security engineer performing dependency vulnerability impact analysis.
+                        Given a list of vulnerable NuGet packages and the domain context, provide:
+                        1. Impact assessment for each vulnerability in the context of this domain
+                        2. Prioritized upgrade path recommendations
+                        3. Mitigation strategies if immediate upgrade is not possible
+
+                        {{(!string.IsNullOrWhiteSpace(llmContext) ? llmContext : "")}}
+
+                        Output as markdown. Be concise.
+                        """,
+                    UserPrompt = $"Vulnerable packages found:\n{vulnSummary}",
+                    Temperature = 0.3,
+                    MaxTokens = 2000,
+                    RequestingAgent = "DependencyAgent"
+                };
+
+                try
+                {
+                    var response = await _llm.GenerateAsync(impactPrompt, ct);
+                    if (response.Success && !string.IsNullOrWhiteSpace(response.Content))
+                    {
+                        report.AppendLine();
+                        report.AppendLine("## Vulnerability Impact Analysis (LLM)");
+                        report.AppendLine(response.Content);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "LLM vulnerability impact analysis failed");
+                }
+            }
+
+            // ── Step 5: License check (domain-aware) ──
             report.AppendLine("## License Compliance");
-            var blockedLicenses = new[] { "GPL-3.0", "AGPL-3.0", "SSPL" };
+            var blockedLicenses = new List<string> { "GPL-3.0", "AGPL-3.0", "SSPL" };
+            // Add domain-specific blocked licenses from compliance frameworks
+            if (profile?.ComplianceFrameworks is { Count: > 0 })
+            {
+                foreach (var fw in profile.ComplianceFrameworks)
+                {
+                    if (fw.Name.Contains("HIPAA", StringComparison.OrdinalIgnoreCase) ||
+                        fw.Name.Contains("SOC2", StringComparison.OrdinalIgnoreCase))
+                        blockedLicenses.Add("EUPL-1.2");
+                }
+                report.AppendLine($"- Compliance frameworks: {string.Join(", ", profile.ComplianceFrameworks.Select(f => f.Name))}");
+            }
             report.AppendLine($"- Blocked licenses: {string.Join(", ", blockedLicenses)}");
             report.AppendLine("- Note: Full license detection requires `dotnet-project-licenses` tool.");
             report.AppendLine("- Recommendation: Add license allowlist to CI/CD pipeline.");
@@ -217,6 +289,9 @@ public sealed class DependencyAgent : IAgent
             context.Artifacts.AddRange(artifacts);
             context.Findings.AddRange(findings);
             context.AgentStatuses[Type] = AgentStatus.Completed;
+
+            // ── Dispatch findings as feedback for downstream agents ──
+            context.DispatchFindingsAsFeedback(Type, findings);
 
             // Agent completes its own claimed work items
             foreach (var item in context.CurrentClaimedItems)

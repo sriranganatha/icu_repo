@@ -27,6 +27,7 @@ using GNex.Agents.Orchestrator;
 using GNex.Agents.Performance;
 using GNex.Agents.Planning;
 using GNex.Agents.Platform;
+using GNex.Agents.PromptGeneration;
 using GNex.Agents.Refactoring;
 using GNex.Agents.Requirements;
 using GNex.Agents.Review;
@@ -95,6 +96,7 @@ builder.Services.AddScoped<IStarterKitService, StarterKitService>();
 builder.Services.AddScoped<IProjectRecipeService, ProjectRecipeService>();
 builder.Services.AddScoped<IBrdUploadService, BrdUploadService>();
 builder.Services.AddScoped<IBrdWorkflowService, BrdWorkflowService>();
+builder.Services.AddScoped<ILearningRepository, LearningRepository>();
 builder.Services.AddSingleton<IBrdStatusNotifier, SignalRBrdStatusNotifier>();
 
 // Workflow engine & agent resolver (Phase 9 — multi-project orchestration)
@@ -131,6 +133,9 @@ builder.Services.AddSingleton<IAgent, RequirementsExpanderAgent>();
 builder.Services.AddSingleton<IAgent, RequirementAnalyzerAgent>();
 builder.Services.AddSingleton<IAgent, GapAnalysisAgent>();
 builder.Services.AddSingleton<IAgent, BacklogAgent>();
+
+// Prompt generation — derives domain actors, compliance, integration, and agent prompts
+builder.Services.AddSingleton<IAgent, PromptGeneratorAgent>();
 
 // Deployment agent
 builder.Services.AddSingleton<IAgent, DeployAgent>();

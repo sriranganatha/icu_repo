@@ -93,7 +93,7 @@ public sealed class TraceabilityGateAgent : IAgent
         var prompt = new LlmPrompt
         {
             SystemPrompt = """
-                You are a quality assurance engineer analyzing traceability gaps in a healthcare HMS system.
+                You are a quality assurance engineer analyzing traceability gaps in a software system.
                 For each gap, suggest what artifacts or tests are missing and why they matter.
                 Be concise — one line per gap.
                 """,

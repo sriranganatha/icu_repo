@@ -5,6 +5,7 @@ using GNex.Database.Entities.Platform.Technology;
 using GNex.Services.Platform;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using GNex.Core.Interfaces;
 using Moq;
 
 namespace GNex.Tests;
@@ -22,7 +23,7 @@ public class BrdUploadServiceTests : IDisposable
             .UseInMemoryDatabase(Guid.NewGuid().ToString())
             .Options;
         _db = new GNexDbContext(options, new TestTenantProvider(TenantId));
-        _svc = new BrdUploadService(_db, new Mock<ILogger<BrdUploadService>>().Object);
+        _svc = new BrdUploadService(_db, new Mock<ILlmProvider>().Object, new Mock<ILogger<BrdUploadService>>().Object);
 
         // Seed a project
         _projectId = Guid.NewGuid().ToString("N");

@@ -38,25 +38,48 @@ public sealed partial class RequirementParser : IRequirementsReader
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<GNex.Database.GNexDbContext>();
 
+        // Multi-BRD: find all BrdDocument IDs for this project, then pull sections from ALL of them
+        var brdDocIds = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions
+            .ToListAsync(
+                db.BrdDocuments
+                    .Where(d => d.ProjectId == projectId && d.IsActive)
+                    .OrderBy(d => d.CreatedAt)
+                    .Select(d => new { d.Id, d.BrdType, d.Title }),
+                ct);
+
+        if (brdDocIds.Count == 0)
+        {
+            _logger.LogWarning("No BRD documents found for project {ProjectId}", projectId);
+            return [];
+        }
+
+        var docIdList = brdDocIds.Select(d => d.Id).ToList();
+
         var sections = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions
             .ToListAsync(
                 db.BrdSectionRecords
-                    .Where(s => s.BrdId == projectId && s.IsActive)
-                    .OrderBy(s => s.Order),
+                    .Where(s => docIdList.Contains(s.BrdId) && s.IsActive)
+                    .OrderBy(s => s.BrdId).ThenBy(s => s.Order),
                 ct);
 
         if (sections.Count == 0)
         {
-            _logger.LogWarning("No BRD sections found for project {ProjectId}", projectId);
+            _logger.LogWarning("No BRD sections found across {DocCount} documents for project {ProjectId}",
+                brdDocIds.Count, projectId);
             return [];
         }
+
+        // Build a lookup of BrdDocumentId → BrdType for richer module tagging
+        var docTypeMap = brdDocIds.ToDictionary(d => d.Id, d => d.BrdType);
 
         var requirements = new List<Requirement>();
         foreach (var section in sections)
         {
             ct.ThrowIfCancellationRequested();
             var lines = section.Content.Split('\n');
-            var parsed = ParseLines(lines, section.SectionType, "BRD");
+            var brdType = docTypeMap.GetValueOrDefault(section.BrdId, "general");
+            var moduleSuffix = brdType != "general" ? $" ({brdType.Replace('_', ' ')})" : "";
+            var parsed = ParseLines(lines, section.SectionType, $"BRD{moduleSuffix}");
             requirements.AddRange(parsed);
         }
 
@@ -64,8 +87,8 @@ public sealed partial class RequirementParser : IRequirementsReader
         foreach (var req in requirements)
             req.ProjectId = projectId;
 
-        _logger.LogInformation("Parsed {Count} requirements from BRD sections for project {ProjectId}",
-            requirements.Count, projectId);
+        _logger.LogInformation("Parsed {Count} requirements from {DocCount} BRD documents for project {ProjectId}",
+            requirements.Count, brdDocIds.Count, projectId);
         return requirements;
     }
 

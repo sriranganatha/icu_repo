@@ -9,31 +9,66 @@
         <a href="/Brd" class="btn btn-outline-secondary"><i class="bi bi-arrow-left me-1"></i>Back to BRD List</a>
     </div>
 
-    <!-- Project selector -->
-    <div class="card mb-4" id="projectCard">
-        <div class="card-header"><i class="bi bi-folder me-1"></i>Select Project</div>
+    <!-- BRD selector (shown when no brdId in URL) -->
+    <div class="card mb-4" id="brdSelectorCard">
+        <div class="card-header"><i class="bi bi-file-earmark-text me-1"></i>Select BRD Document</div>
         <div class="card-body">
-            <div id="projectLoading" class="text-muted"><i class="bi bi-hourglass-split me-1"></i>Loading projects...</div>
-            <div id="projectList" class="row g-3" style="display:none;"></div>
-            <div id="noProjects" class="text-center text-muted py-3" style="display:none;">
+            <div id="brdSelectorLoading" class="text-muted"><i class="bi bi-hourglass-split me-1"></i>Loading BRD documents...</div>
+            <div id="brdSelectorList" class="row g-3" style="display:none;"></div>
+            <div id="noBrds" class="text-center text-muted py-3" style="display:none;">
                 <i class="bi bi-inbox fs-3"></i>
-                <p class="mt-2 mb-0">No projects with BRD sections found. <a href="/Brd/Upload">Upload requirements first</a>.</p>
+                <p class="mt-2 mb-0">No BRD documents found. <a href="/Brd">Create one first</a>.</p>
             </div>
         </div>
     </div>
 
-    <!-- Active project header -->
-    <div id="activeProjectBar" class="alert alert-primary d-flex justify-content-between align-items-center mb-3" style="display:none!important;">
+    <!-- Active BRD header -->
+    <div id="activeBrdBar" class="alert alert-primary d-flex justify-content-between align-items-center mb-3" style="display:none!important;">
         <div>
-            <i class="bi bi-folder-fill me-1"></i>
-            <strong id="activeProjectName"></strong>
-            <span class="badge bg-secondary ms-2" id="activeProjectType"></span>
+            <i class="bi bi-file-earmark-text-fill me-1"></i>
+            <strong id="activeBrdTitle"></strong>
+            <span class="badge ms-2" id="activeBrdType"></span>
             <span class="badge bg-info ms-1" id="activeSectionCount"></span>
             <span class="badge ms-1" id="activeBrdStatus"></span>
         </div>
-        <button class="btn btn-sm btn-outline-primary" onclick="changeProject()">
-            <i class="bi bi-arrow-repeat me-1"></i>Change Project
-        </button>
+        <div class="d-flex gap-2">
+            <button class="btn btn-sm btn-outline-secondary" onclick="editBrdMeta()">
+                <i class="bi bi-gear me-1"></i>Settings
+            </button>
+            <button class="btn btn-sm btn-outline-primary" onclick="changeBrd()">
+                <i class="bi bi-arrow-repeat me-1"></i>Change BRD
+            </button>
+        </div>
+    </div>
+
+    <!-- BRD Metadata (collapsible) -->
+    <div class="card mb-3" id="brdMetaCard" style="display:none;">
+        <div class="card-header d-flex justify-content-between">
+            <span><i class="bi bi-info-circle me-1"></i>BRD Details</span>
+            <button class="btn btn-sm btn-outline-secondary" onclick="hideBrdMeta()"><i class="bi bi-x"></i></button>
+        </div>
+        <div class="card-body">
+            <div class="row g-3">
+                <div class="col-md-6">
+                    <label class="form-label fw-bold">Title</label>
+                    <input type="text" class="form-control" id="metaTitle">
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label fw-bold">Description</label>
+                    <input type="text" class="form-control" id="metaDescription">
+                </div>
+                <div class="col-12">
+                    <label class="form-label fw-bold">Custom AI Instructions</label>
+                    <textarea class="form-control" id="metaInstructions" rows="2"
+                              placeholder="e.g. Build BRD focused on UI and UX screens for patient registration"></textarea>
+                </div>
+                <div class="col-12">
+                    <button class="btn btn-primary btn-sm" onclick="saveBrdMeta()">
+                        <i class="bi bi-save me-1"></i>Save Changes
+                    </button>
+                </div>
+            </div>
+        </div>
     </div>
 
     <!-- BRD Workflow Status Bar -->
@@ -42,9 +77,10 @@
             <div class="d-flex justify-content-between align-items-center">
                 <div class="d-flex align-items-center gap-3">
                     <span class="fw-bold">BRD Status:</span>
-                    <!-- Status pipeline visual -->
                     <div class="d-flex align-items-center gap-1" id="statusPipeline">
                         <span class="badge rounded-pill" id="stepDraft">Draft</span>
+                        <i class="bi bi-arrow-right text-muted"></i>
+                        <span class="badge rounded-pill" id="stepEnriched">Enriched</span>
                         <i class="bi bi-arrow-right text-muted"></i>
                         <span class="badge rounded-pill" id="stepInReview">In Review</span>
                         <i class="bi bi-arrow-right text-muted"></i>
@@ -67,14 +103,6 @@
                     </button>
                 </div>
             </div>
-            <!-- Pipeline progress (shown after approval) -->
-            <div id="pipelineProgress" class="mt-2" style="display:none;">
-                <div class="d-flex align-items-center gap-2">
-                    <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
-                    <span class="small text-primary fw-bold">Pipeline running...</span>
-                    <span class="small text-muted" id="pipelineStatus"></span>
-                </div>
-            </div>
         </div>
     </div>
 
@@ -87,6 +115,9 @@
             <button class="btn btn-outline-secondary" id="btnCancelEdits" onclick="cancelEdits()" disabled>
                 <i class="bi bi-x-circle me-1"></i>Cancel Edits
             </button>
+            <button class="btn btn-primary" id="btnEnrich" onclick="enrichAllSections()">
+                <i class="bi bi-stars me-1"></i>Enrich with AI
+            </button>
         </div>
         <div class="d-flex gap-2">
             <button class="btn btn-outline-primary" onclick="expandAll()">
@@ -94,9 +125,6 @@
             </button>
             <button class="btn btn-outline-primary" onclick="collapseAll()">
                 <i class="bi bi-arrows-collapse me-1"></i>Collapse All
-            </button>
-            <button class="btn btn-outline-danger" id="btnClearAll" onclick="clearAllSections()">
-                <i class="bi bi-trash me-1"></i>Clear All
             </button>
         </div>
     </div>
@@ -107,100 +135,150 @@
 
 @section Scripts {
 <script>
-    let selectedProjectId = null;
+    let selectedBrdId = null;
+    let currentBrd = null;
     let loadedSections = [];
     let editedSections = {};
 
     // ── Init ──────────────────────────────────────────────
     (async function init() {
-        // Check URL for projectId query param
         const params = new URLSearchParams(window.location.search);
-        const pid = params.get('projectId');
-        if (pid) {
-            selectedProjectId = pid;
-            await loadSectionsForProject(pid);
+        const brdId = params.get('brdId');
+        if (brdId) {
+            selectedBrdId = brdId;
+            await loadBrdDocument(brdId);
         } else {
-            await loadProjects();
+            await loadBrdSelector();
         }
     })();
 
-    // ── Project listing ───────────────────────────────────
-    async function loadProjects() {
-        document.getElementById('projectCard').style.display = '';
+    // ── BRD Selector ─────────────────────────────────────
+    async function loadBrdSelector() {
+        document.getElementById('brdSelectorCard').style.display = '';
         document.getElementById('actionBar').style.display = 'none';
-        document.getElementById('activeProjectBar').style.cssText = 'display:none!important';
+        document.getElementById('activeBrdBar').style.cssText = 'display:none!important';
+        document.getElementById('workflowBar').style.display = 'none';
+        document.getElementById('brdMetaCard').style.display = 'none';
         document.getElementById('sectionsContainer').innerHTML = '';
 
         try {
-            const res = await fetch('/api/brd/projects');
+            const res = await fetch('/api/brd/documents');
             if (!res.ok) throw new Error('Failed to load');
-            const projects = await res.json();
+            const docs = await res.json();
 
-            document.getElementById('projectLoading').style.display = 'none';
+            document.getElementById('brdSelectorLoading').style.display = 'none';
 
-            if (projects.length === 0) {
-                document.getElementById('noProjects').style.display = '';
+            if (docs.length === 0) {
+                document.getElementById('noBrds').style.display = '';
                 return;
             }
 
-            const list = document.getElementById('projectList');
+            const list = document.getElementById('brdSelectorList');
             list.style.display = '';
-            list.innerHTML = projects.map(p => `
+            list.innerHTML = docs.map(d => `
                 <div class="col-md-4 col-lg-3">
-                    <div class="card h-100 project-pick-card" style="cursor:pointer"
-                         onclick="selectProject('${p.projectId}', '${escapeAttr(p.projectName)}', '${p.projectType}', ${p.sectionCount}, '${p.brdStatus || 'draft'}')">
+                    <div class="card h-100" style="cursor:pointer"
+                         onclick="selectBrd('${d.id}')">
                         <div class="card-body">
-                            <h6 class="card-title mb-1">${escapeHtml(p.projectName)}</h6>
-                            <span class="badge bg-secondary">${p.projectType}</span>
-                            <span class="badge bg-info ms-1">${p.sectionCount} sections</span>
-                            <span class="badge ${statusBadgeClass(p.brdStatus || 'draft')} ms-1">${formatStatus(p.brdStatus || 'draft')}</span>
-                            <div class="text-muted small mt-2">
-                                Updated: ${new Date(p.lastUpdated).toLocaleString()}
-                            </div>
+                            <h6 class="card-title mb-1">${escapeHtml(d.title)}</h6>
+                            <span class="badge ${typeBadgeClass(d.brdType)}">${d.brdTypeDisplay}</span>
+                            <span class="badge bg-info ms-1">${d.sectionCount} sections</span>
+                            <span class="badge ${statusBadgeClass(d.status)} ms-1">${formatStatus(d.status)}</span>
+                            <div class="text-muted small mt-2">${escapeHtml(d.projectName)}</div>
                         </div>
                     </div>
                 </div>
             `).join('');
         } catch (e) {
-            document.getElementById('projectLoading').innerHTML =
-                '<span class="text-danger"><i class="bi bi-exclamation-triangle me-1"></i>Error loading projects.</span>';
+            document.getElementById('brdSelectorLoading').innerHTML =
+                '<span class="text-danger"><i class="bi bi-exclamation-triangle me-1"></i>Error loading BRDs.</span>';
         }
     }
 
-    let currentBrdStatus = 'draft';
-
-    function selectProject(id, name, type, count, brdStatus) {
-        selectedProjectId = id;
-        currentBrdStatus = brdStatus || 'draft';
-        // Update URL without reload
-        history.replaceState(null, '', `/Brd/Edit?projectId=${id}`);
-        showActiveProject(name, type, count);
-        updateWorkflowBar(currentBrdStatus);
-        loadSectionsForProject(id);
+    async function selectBrd(brdId) {
+        selectedBrdId = brdId;
+        history.replaceState(null, '', `/Brd/Edit?brdId=${brdId}`);
+        await loadBrdDocument(brdId);
     }
 
-    function showActiveProject(name, type, count) {
-        document.getElementById('projectCard').style.display = 'none';
-        const bar = document.getElementById('activeProjectBar');
-        bar.style.cssText = '';
-        document.getElementById('activeProjectName').textContent = name;
-        document.getElementById('activeProjectType').textContent = type;
-        document.getElementById('activeSectionCount').textContent = `${count} sections`;
-    }
-
-    function changeProject() {
-        selectedProjectId = null;
+    function changeBrd() {
+        selectedBrdId = null;
+        currentBrd = null;
         editedSections = {};
         history.replaceState(null, '', '/Brd/Edit');
-        loadProjects();
+        loadBrdSelector();
+    }
+
+    // ── Load BRD Document ─────────────────────────────────
+    async function loadBrdDocument(brdId) {
+        try {
+            const res = await fetch(`/api/brd/documents/${brdId}`);
+            if (!res.ok) {
+                document.getElementById('sectionsContainer').innerHTML =
+                    '<div class="alert alert-warning">BRD document not found.</div>';
+                return;
+            }
+            currentBrd = await res.json();
+            selectedBrdId = currentBrd.id;
+
+            showActiveBrd(currentBrd);
+            updateWorkflowBar(currentBrd.status);
+            await loadSections(brdId);
+        } catch (e) {
+            document.getElementById('sectionsContainer').innerHTML =
+                '<div class="alert alert-danger">Error loading BRD: ' + e.message + '</div>';
+        }
+    }
+
+    function showActiveBrd(brd) {
+        document.getElementById('brdSelectorCard').style.display = 'none';
+        const bar = document.getElementById('activeBrdBar');
+        bar.style.cssText = '';
+        document.getElementById('activeBrdTitle').textContent = brd.title;
+        document.getElementById('activeBrdType').textContent = brd.brdTypeDisplay;
+        document.getElementById('activeBrdType').className = `badge ms-2 ${typeBadgeClass(brd.brdType)}`;
+        document.getElementById('activeSectionCount').textContent = `${brd.sectionCount} sections`;
+    }
+
+    // ── BRD Meta editing ──────────────────────────────────
+    function editBrdMeta() {
+        if (!currentBrd) return;
+        document.getElementById('metaTitle').value = currentBrd.title;
+        document.getElementById('metaDescription').value = currentBrd.description || '';
+        document.getElementById('metaInstructions').value = currentBrd.instructions || '';
+        document.getElementById('brdMetaCard').style.display = '';
+    }
+
+    function hideBrdMeta() {
+        document.getElementById('brdMetaCard').style.display = 'none';
+    }
+
+    async function saveBrdMeta() {
+        if (!selectedBrdId) return;
+        const res = await fetch(`/api/brd/documents/${selectedBrdId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                title: document.getElementById('metaTitle').value.trim() || null,
+                description: document.getElementById('metaDescription').value.trim() || null,
+                instructions: document.getElementById('metaInstructions').value.trim() || null
+            })
+        });
+        if (res.ok) {
+            showToast('BRD details updated.');
+            hideBrdMeta();
+            await loadBrdDocument(selectedBrdId);
+        } else {
+            alert('Update failed.');
+        }
     }
 
     // ── Section loading ───────────────────────────────────
-    async function loadSectionsForProject(projectId) {
-        const res = await fetch(`/api/brd/${projectId}/sections`);
+    async function loadSections(brdId) {
+        const res = await fetch(`/api/brd/documents/${brdId}/sections`);
         if (!res.ok) {
             document.getElementById('sectionsContainer').innerHTML =
-                '<div class="alert alert-warning">Could not load sections for this project.</div>';
+                '<div class="alert alert-warning">Could not load sections.</div>';
             return;
         }
 
@@ -208,18 +286,7 @@
         loadedSections = sections.map(s => ({ ...s }));
         editedSections = {};
 
-        // If we don't have project name from card click, show generic header
-        const bar = document.getElementById('activeProjectBar');
-        if (bar.style.cssText.includes('none')) {
-            showActiveProject(projectId, '', sections.length);
-            // Try to fetch project name
-            fetch('/api/brd/projects').then(r => r.json()).then(projects => {
-                const p = projects.find(x => x.projectId === projectId);
-                if (p) showActiveProject(p.projectName, p.projectType, p.sectionCount);
-            }).catch(() => {});
-        }
-
-        document.getElementById('projectCard').style.display = 'none';
+        document.getElementById('brdSelectorCard').style.display = 'none';
         document.getElementById('actionBar').style.display = '';
         renderSections(sections);
         updateActionButtons();
@@ -229,7 +296,7 @@
         const container = document.getElementById('sectionsContainer');
 
         if (sections.length === 0) {
-            container.innerHTML = '<div class="text-center text-muted py-5"><i class="bi bi-inbox fs-1"></i><p class="mt-2">No sections found for this project.</p></div>';
+            container.innerHTML = '<div class="text-center text-muted py-5"><i class="bi bi-inbox fs-1"></i><p class="mt-2">No sections in this BRD.</p></div>';
             return;
         }
 
@@ -362,29 +429,42 @@
         }
 
         showToast(`${saved} section(s) saved.${failed > 0 ? ` ${failed} failed.` : ''}`);
-        if (selectedProjectId) await loadSectionsForProject(selectedProjectId);
+        if (selectedBrdId) await loadSections(selectedBrdId);
     }
 
     function cancelEdits() {
         if (Object.keys(editedSections).length > 0 && !confirm('Discard all unsaved changes?')) return;
         editedSections = {};
-        if (selectedProjectId) loadSectionsForProject(selectedProjectId);
+        if (selectedBrdId) loadSections(selectedBrdId);
     }
 
-    async function clearAllSections() {
-        if (!selectedProjectId) return;
-        if (!confirm('This will remove all BRD sections for this project. This cannot be undone. Continue?')) return;
+    async function enrichAllSections() {
+        if (!selectedBrdId) return;
+        if (!confirm('This will use AI to enrich all draft sections with content generated from uploaded source documents. Continue?')) return;
 
-        const res = await fetch(`/api/brd/${selectedProjectId}/sections`, { method: 'DELETE' });
-        if (!res.ok) { alert('Clear failed: ' + res.statusText); return; }
+        const btn = document.getElementById('btnEnrich');
+        const origHtml = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Enriching...';
 
-        const data = await res.json();
-        loadedSections = [];
-        editedSections = {};
-        document.getElementById('sectionsContainer').innerHTML = '';
-        document.getElementById('actionBar').style.display = 'none';
-        showToast(`${data.count} section(s) cleared.`);
-        changeProject();
+        try {
+            const res = await fetch(`/api/brd/documents/${selectedBrdId}/enrich`, { method: 'POST' });
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                alert('Enrichment failed: ' + (err.error || res.statusText));
+                return;
+            }
+            const result = await res.json();
+            showToast(`AI enrichment complete: ${result.sectionsEnriched} enriched, ${result.sectionsFailed} failed.`);
+            if (selectedBrdId) {
+                await loadBrdDocument(selectedBrdId);
+            }
+        } catch (ex) {
+            alert('Enrichment error: ' + ex.message);
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = origHtml;
+        }
     }
 
     // ── Expand / Collapse ─────────────────────────────────
@@ -411,13 +491,10 @@
     }
 
     function escapeHtml(text) {
+        if (!text) return '';
         const d = document.createElement('div');
         d.textContent = text;
         return d.innerHTML;
-    }
-
-    function escapeAttr(text) {
-        return text.replace(/'/g, "\\'").replace(/"/g, '&quot;');
     }
 
     function showToast(message) {
@@ -443,7 +520,6 @@
         toastEl.addEventListener('hidden.bs.toast', () => toastEl.remove());
     }
 
-    // Warn on unsaved changes
     window.addEventListener('beforeunload', (e) => {
         if (Object.keys(editedSections).length > 0) {
             e.preventDefault();
@@ -452,15 +528,26 @@
     });
 
     // ── Workflow Status ───────────────────────────────────
+    let currentBrdStatus = 'draft';
+
     function statusBadgeClass(status) {
         switch (status) {
             case 'draft': return 'bg-secondary';
+            case 'enriched': return 'bg-info';
             case 'in_review': return 'bg-warning text-dark';
             case 'approved': return 'bg-success';
             case 'rejected': return 'bg-danger';
-            case 'superseded': return 'bg-dark';
             default: return 'bg-secondary';
         }
+    }
+
+    function typeBadgeClass(type) {
+        const map = {
+            'general': 'bg-secondary', 'web_application': 'bg-primary',
+            'mobile_application': 'bg-success', 'api_service': 'bg-warning text-dark',
+            'data_pipeline': 'bg-danger', 'integration': 'bg-dark'
+        };
+        return map[type] || 'bg-secondary';
     }
 
     function formatStatus(status) {
@@ -472,54 +559,42 @@
         const bar = document.getElementById('workflowBar');
         bar.style.display = '';
 
-        // Update status badge on project bar
         const badge = document.getElementById('activeBrdStatus');
         badge.className = `badge ms-1 ${statusBadgeClass(status)}`;
         badge.textContent = formatStatus(status);
 
-        // Update pipeline steps visual
+        const statusOrder = ['draft', 'enriched', 'in_review', 'approved'];
+        const currentIdx = statusOrder.indexOf(status);
+
         const steps = {
-            'stepDraft': status === 'draft' ? 'bg-primary' : (status !== 'draft' ? 'bg-primary bg-opacity-50' : 'bg-light text-muted'),
-            'stepInReview': status === 'in_review' ? 'bg-warning text-dark' : (status === 'approved' || status === 'rejected' ? 'bg-warning bg-opacity-50' : 'bg-light text-muted'),
-            'stepApproved': status === 'approved' ? 'bg-success' : 'bg-light text-muted'
+            'stepDraft':    currentIdx >= 0 ? (currentIdx === 0 ? 'bg-primary' : 'bg-primary bg-opacity-50') : 'bg-light text-muted',
+            'stepEnriched': currentIdx >= 1 ? (currentIdx === 1 ? 'bg-info' : 'bg-info bg-opacity-50') : 'bg-light text-muted',
+            'stepInReview': currentIdx >= 2 ? (currentIdx === 2 ? 'bg-warning text-dark' : 'bg-warning bg-opacity-50') : 'bg-light text-muted',
+            'stepApproved': currentIdx >= 3 ? 'bg-success' : 'bg-light text-muted'
         };
+        if (status === 'rejected') {
+            steps['stepApproved'] = 'bg-danger';
+            document.getElementById('stepApproved').textContent = 'Rejected';
+        } else {
+            document.getElementById('stepApproved').textContent = 'Approved';
+        }
         for (const [id, cls] of Object.entries(steps)) {
             document.getElementById(id).className = `badge rounded-pill ${cls}`;
         }
 
-        // Show/hide action buttons based on status
-        document.getElementById('btnSubmitReview').style.display = status === 'draft' ? '' : 'none';
+        document.getElementById('btnSubmitReview').style.display = (status === 'draft' || status === 'enriched') ? '' : 'none';
         document.getElementById('btnApprove').style.display = status === 'in_review' ? '' : 'none';
         document.getElementById('btnReject').style.display = status === 'in_review' ? '' : 'none';
         document.getElementById('btnRequestChanges').style.display = status === 'in_review' ? '' : 'none';
-
-        // Show pipeline progress if approved
-        document.getElementById('pipelineProgress').style.display = status === 'approved' ? '' : 'none';
-    }
-
-    async function loadBrdStatus() {
-        if (!selectedProjectId) return;
-        try {
-            const res = await fetch(`/api/brd/${selectedProjectId}/status`);
-            if (res.ok) {
-                const data = await res.json();
-                updateWorkflowBar(data.status);
-                if (data.approvedAt) {
-                    document.getElementById('approvalInfo').style.display = '';
-                    document.getElementById('approvalInfo').textContent =
-                        `Approved by ${data.approvedBy || 'user'} on ${new Date(data.approvedAt).toLocaleString()}`;
-                }
-            }
-        } catch (e) { /* silent */ }
     }
 
     async function submitForReview() {
-        if (!selectedProjectId) return;
+        if (!selectedBrdId) return;
         if (Object.keys(editedSections).length > 0) {
             if (!confirm('You have unsaved changes. Save them before submitting?')) return;
             await saveAllSections();
         }
-        const res = await fetch(`/api/brd/${selectedProjectId}/submit`, {
+        const res = await fetch(`/api/brd/documents/${selectedBrdId}/submit`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ reviewer: 'user' })
@@ -534,9 +609,9 @@
     }
 
     async function approveBrd() {
-        if (!selectedProjectId) return;
+        if (!selectedBrdId) return;
         const comment = prompt('Approval comment (optional):');
-        const res = await fetch(`/api/brd/${selectedProjectId}/approve`, {
+        const res = await fetch(`/api/brd/documents/${selectedBrdId}/approve`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ reviewer: 'user', comment: comment || null })
@@ -556,10 +631,10 @@
     }
 
     async function rejectBrd() {
-        if (!selectedProjectId) return;
+        if (!selectedBrdId) return;
         const reason = prompt('Rejection reason (required):');
         if (!reason) return;
-        const res = await fetch(`/api/brd/${selectedProjectId}/reject`, {
+        const res = await fetch(`/api/brd/documents/${selectedBrdId}/reject`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ reviewer: 'user', reason })
@@ -574,10 +649,10 @@
     }
 
     async function requestChanges() {
-        if (!selectedProjectId) return;
+        if (!selectedBrdId) return;
         const feedback = prompt('Feedback / changes needed (required):');
         if (!feedback) return;
-        const res = await fetch(`/api/brd/${selectedProjectId}/request-changes`, {
+        const res = await fetch(`/api/brd/documents/${selectedBrdId}/request-changes`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ reviewer: 'user', feedback })
@@ -590,42 +665,5 @@
             alert(data.error || 'Request changes failed');
         }
     }
-
-    // ── SignalR for pipeline events ───────────────────────
-    let hubConnection = null;
-    function connectSignalR() {
-        if (hubConnection) return;
-        if (typeof signalR === 'undefined') return;
-        hubConnection = new signalR.HubConnectionBuilder()
-            .withUrl('/hubs/pipeline')
-            .withAutomaticReconnect()
-            .build();
-
-        hubConnection.on('PipelineEvent', (evt) => {
-            if (currentBrdStatus === 'approved') {
-                const statusEl = document.getElementById('pipelineStatus');
-                if (statusEl) statusEl.textContent = evt.message || '';
-            }
-        });
-
-        hubConnection.on('BrdUpdated', (data) => {
-            if (data.projectId === selectedProjectId) {
-                showToast(`BRD updated: ${data.message || 'Status changed'}`);
-                loadBrdStatus();
-            }
-        });
-
-        hubConnection.start().catch(err => console.warn('SignalR connect failed:', err));
-    }
-
-    // Connect when project is selected
-    const origSelect = selectProject;
-    // Already wired — just ensure SignalR is up on section load
-    const origLoadSections = loadSectionsForProject;
-    loadSectionsForProject = async function(projectId) {
-        connectSignalR();
-        await origLoadSections(projectId);
-        await loadBrdStatus();
-    };
 </script>
 }

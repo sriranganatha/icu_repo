@@ -57,6 +57,7 @@ public sealed class ServiceLayerAgent : IAgent
             // Re-build domain model now that DatabaseAgent has produced entity artifacts
             context.DomainModel = EntityFieldExtractor.BuildDomainModel(context.Artifacts.ToList(), ServiceCatalogResolver.GetServices(context));
             var model = context.DomainModel;
+            var profile = context.DomainProfile;
 
             _logger.LogInformation("Domain model loaded: {Count} entities with field definitions",
                 model.Entities.Count(e => e.Fields.Count > 0));
@@ -66,6 +67,33 @@ public sealed class ServiceLayerAgent : IAgent
 
             if (context.ReportProgress is not null && !string.IsNullOrWhiteSpace(guidance))
                 await context.ReportProgress(Type, $"Applying architecture/platform guidance: {guidance}");
+
+            // Build domain context for service naming and validation
+            var domainGuidance = BuildDomainGuidance(profile);
+            if (context.ReportProgress is not null && profile is not null)
+                await context.ReportProgress(Type, $"DomainProfile active: {profile.Domain} — {profile.DomainGlossary?.Count ?? 0} glossary terms, {profile.BusinessRules?.Count ?? 0} business rules");
+
+            // Read feedback from downstream agents (Review, Supervisor, GapAnalysis)
+            var feedback = context.ReadFeedback(Type);
+            if (feedback.Count > 0)
+            {
+                _logger.LogInformation("ServiceLayerAgent received {Count} feedback items from previous iterations", feedback.Count);
+                if (context.ReportProgress is not null)
+                    await context.ReportProgress(Type, $"Incorporating {feedback.Count} feedback items from Review/Supervisor/GapAnalysis");
+            }
+
+            // Read historical learnings from previous pipeline runs
+            var learnings = context.GetLearningsForAgent(Type);
+            if (learnings.Count > 0)
+            {
+                _logger.LogInformation("ServiceLayerAgent loaded {Count} historical learnings (global: {G}, domain: {D}, project: {P})",
+                    learnings.Count,
+                    learnings.Count(l => l.Scope == LearningScope.Global),
+                    learnings.Count(l => l.Scope == LearningScope.Domain),
+                    learnings.Count(l => l.Scope == LearningScope.Project));
+                if (context.ReportProgress is not null)
+                    await context.ReportProgress(Type, $"Applying {learnings.Count} historical learnings to avoid past issues");
+            }
 
             foreach (var svc in newServices)
             {
@@ -81,9 +109,9 @@ public sealed class ServiceLayerAgent : IAgent
                     var fields = parsed?.Fields ?? [];
                     var featureTags = parsed?.FeatureTags ?? [];
 
-                    artifacts.Add(GenerateDto(svc, entityName, fields, featureTags));
+                    artifacts.Add(GenerateDto(svc, entityName, fields, featureTags, domainGuidance));
                     artifacts.Add(GenerateServiceInterface(svc, entityName, featureTags));
-                    artifacts.Add(GenerateServiceImpl(svc, entityName, fields, featureTags));
+                    artifacts.Add(GenerateServiceImpl(svc, entityName, fields, featureTags, domainGuidance));
                 }
 
                 artifacts.Add(GenerateKafkaEvents(svc));
@@ -97,7 +125,7 @@ public sealed class ServiceLayerAgent : IAgent
             if (_generatedPaths.Add("SharedKafkaBase"))
             {
                 artifacts.Add(GenerateKafkaConsumerBase());
-                artifacts.Add(GenerateKafkaTopicCatalog());
+                artifacts.Add(GenerateKafkaTopicCatalog(context.PipelineConfig?.ProjectPrefix ?? "app"));
             }
 
             context.Artifacts.AddRange(artifacts);
@@ -165,12 +193,21 @@ public sealed class ServiceLayerAgent : IAgent
     // ─── DTO (domain-model-driven — maps ALL entity fields) ────────────────
 
     private static CodeArtifact GenerateDto(MicroserviceDefinition svc, string entity,
-        List<EntityField> fields, List<string> featureTags)
+        List<EntityField> fields, List<string> featureTags, DomainGuidanceContext domainGuidance)
     {
         // DTO fields: all non-navigation, non-audit-write fields
         var dtoFields = fields
             .Where(f => !f.IsNavigation)
-            .Select(f => $"    public {f.Type} {f.Name} {{ get; init; }}{DefaultInitializer(f)}")
+            .Select(f =>
+            {
+                var sensitiveComment = domainGuidance.IsSensitiveField(f.Name)
+                    ? $"\n    /// <remarks>⚠️ Sensitive field — apply data masking in API responses</remarks>"
+                    : "";
+                var glossaryComment = domainGuidance.GlossaryTerms.TryGetValue(f.Name, out var def)
+                    ? $"\n    /// <summary>{def}</summary>"
+                    : "";
+                return $"{glossaryComment}{sensitiveComment}\n    public {f.Type} {f.Name} {{ get; init; }}{DefaultInitializer(f)}";
+            })
             .ToList();
 
         // Create request: required fields minus auto-generated ones (Id, audit timestamps)
@@ -249,7 +286,7 @@ public sealed class ServiceLayerAgent : IAgent
     // ─── Service Implementation (COMPLETE — no TODOs) ───────────────────────
 
     private static CodeArtifact GenerateServiceImpl(MicroserviceDefinition svc, string entity,
-        List<EntityField> fields, List<string> featureTags)
+        List<EntityField> fields, List<string> featureTags, DomainGuidanceContext domainGuidance)
     {
         // Build entity→DTO mapping (all non-navigation fields)
         var toDtoMap = fields
@@ -281,6 +318,23 @@ public sealed class ServiceLayerAgent : IAgent
             .Select(f => $"            if (request.{f.Name} is not null) entity.{f.Name} = request.{f.Name}{(f.IsNullable ? "" : "!")};" +
                          (f.Type.Contains("?") ? "" : ""))
             .ToList();
+
+        // Build validation rules from domain business rules
+        var validationBlock = "";
+        var relevantRules = domainGuidance.BusinessRules
+            .Where(r => r.Contains(entity, StringComparison.OrdinalIgnoreCase)
+                     || fields.Any(f => f.IsRequired && r.Contains(f.Name, StringComparison.OrdinalIgnoreCase)))
+            .Take(5)
+            .ToList();
+        if (relevantRules.Count > 0)
+        {
+            var ruleComments = string.Join("\n", relevantRules.Select(r => $"            // Rule: {r}"));
+            validationBlock = $"""
+
+                        // ── Domain Business Rules ──
+            {ruleComments}
+            """;
+        }
 
         return new CodeArtifact
         {
@@ -337,7 +391,7 @@ public sealed class ServiceLayerAgent : IAgent
                     public async Task<{{entity}}Dto> CreateAsync(Create{{entity}}Request request, CancellationToken ct = default)
                     {
                         _logger.LogInformation("Creating {{entity}} for tenant {Tenant}", request.TenantId);
-
+                {{validationBlock}}
                         var entity = new {{entity}}
                         {
                             Id = Guid.NewGuid().ToString("N"),
@@ -391,10 +445,10 @@ public sealed class ServiceLayerAgent : IAgent
 
     private static string DefaultClassification(MicroserviceDefinition svc) => svc.ShortName switch
     {
-        "revenue" => "financial_sensitive",
-        "audit" => "audit_immutable",
-        "ai" => "ai_evidence",
-        _ => "clinical_restricted"
+        var s when s.Contains("revenue") || s.Contains("billing") || s.Contains("payment") => "financial_sensitive",
+        var s when s.Contains("audit") || s.Contains("compliance") => "audit_immutable",
+        var s when s.Contains("ai") => "ai_evidence",
+        _ => "restricted"
     };
 
     // ─── Kafka Integration Events ───────────────────────────────────────────
@@ -534,41 +588,31 @@ public sealed class ServiceLayerAgent : IAgent
             """
     };
 
-    private static CodeArtifact GenerateKafkaTopicCatalog() => new()
+    private static CodeArtifact GenerateKafkaTopicCatalog(string topicPrefix) => new()
     {
         Layer = ArtifactLayer.Configuration,
         RelativePath = "GNex.SharedKernel/Kafka/KafkaTopics.cs",
         FileName = "KafkaTopics.cs",
         Namespace = "GNex.SharedKernel.Kafka",
         ProducedBy = AgentType.ServiceLayer,
-        Content = """
+        Content = $$"""
             namespace GNex.SharedKernel.Kafka;
 
             /// <summary>
             /// Central Kafka topic naming convention.
-            /// Pattern: hms.{service}.events — one topic per bounded context.
+            /// Pattern: {prefix}.{service}.events — one topic per bounded context.
             /// Partition key: {tenant_id}:{entity_id} — ordering per entity per tenant.
             /// </summary>
             public static class KafkaTopics
             {
-                public const string Patient     = "hms.patient.events";
-                public const string Encounter   = "hms.encounter.events";
-                public const string Inpatient   = "hms.inpatient.events";
-                public const string Emergency   = "hms.emergency.events";
-                public const string Diagnostics = "hms.diagnostics.events";
-                public const string Revenue     = "hms.revenue.events";
-                public const string Audit       = "hms.audit.events";
-                public const string Ai          = "hms.ai.events";
+                public const string Prefix = "{{topicPrefix}}";
 
                 /// <summary>Dead letter queue for failed event processing</summary>
-                public const string Dlq = "hms.dlq";
+                public const string Dlq = "{{topicPrefix}}.dlq";
 
                 /// <summary>Resolve topic name from service short name.</summary>
                 public static string For(string serviceShortName) =>
-                    $"hms.{serviceShortName}.events";
-
-                public static readonly string[] All =
-                    [Patient, Encounter, Inpatient, Emergency, Diagnostics, Revenue, Audit, Ai, Dlq];
+                    $"{{topicPrefix}}.{serviceShortName}.events";
             }
             """
     };
@@ -595,5 +639,59 @@ public sealed class ServiceLayerAgent : IAgent
     {
         if (type.EndsWith('?')) return type;
         return type + "?";
+    }
+
+    // ─── Domain Profile Guidance for Service Layer ─────────────────────────
+
+    /// <summary>
+    /// Builds domain-specific guidance from DomainProfile for service generation.
+    /// Used to enrich DTO comments, validation patterns, and Kafka event naming.
+    /// </summary>
+    private static DomainGuidanceContext BuildDomainGuidance(DomainProfile? profile)
+    {
+        if (profile is null) return new DomainGuidanceContext();
+
+        return new DomainGuidanceContext
+        {
+            Domain = profile.Domain ?? string.Empty,
+            GlossaryTerms = profile.DomainGlossary ?? new Dictionary<string, string>(),
+            BusinessRules = profile.BusinessRules ?? [],
+            SensitiveFields = profile.SensitiveFieldPatterns ?? [],
+            DomainEvents = profile.DomainEvents ?? [],
+            QualityAttributes = profile.QualityAttributes ?? [],
+            AgentPrompt = profile.AgentPrompts.TryGetValue("ServiceLayer", out var p) ? p : string.Empty
+        };
+    }
+
+    private sealed class DomainGuidanceContext
+    {
+        public string Domain { get; init; } = string.Empty;
+        public Dictionary<string, string> GlossaryTerms { get; init; } = new();
+        public List<string> BusinessRules { get; init; } = [];
+        public List<string> SensitiveFields { get; init; } = [];
+        public List<DomainEvent> DomainEvents { get; init; } = [];
+        public List<string> QualityAttributes { get; init; } = [];
+        public string AgentPrompt { get; init; } = string.Empty;
+
+        /// <summary>
+        /// Gets a validation comment block for a field, based on business rules
+        /// that mention the field name or entity name.
+        /// </summary>
+        public string GetValidationComment(string entityName, string fieldName)
+        {
+            var relevant = BusinessRules
+                .Where(r => r.Contains(fieldName, StringComparison.OrdinalIgnoreCase)
+                         || r.Contains(entityName, StringComparison.OrdinalIgnoreCase))
+                .Take(3)
+                .ToList();
+            if (relevant.Count == 0) return string.Empty;
+            return $"    // Business rules: {string.Join("; ", relevant)}";
+        }
+
+        /// <summary>
+        /// Checks if a field name matches a sensitive field pattern from DomainProfile.
+        /// </summary>
+        public bool IsSensitiveField(string fieldName)
+            => SensitiveFields.Any(p => fieldName.Contains(p, StringComparison.OrdinalIgnoreCase));
     }
 }

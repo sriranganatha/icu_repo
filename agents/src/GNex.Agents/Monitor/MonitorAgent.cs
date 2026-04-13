@@ -22,18 +22,13 @@ public sealed class MonitorAgent : IAgent
     public string Name => "Monitor Agent";
     public string Description => "Monitors deployed Docker containers and services — health checks, log inspection, issue detection, and automated feedback for remediation.";
 
-    private static readonly (string Name, string Project, int Port)[] Services =
-    [
-        ("PatientService",     "GNex.PatientService",     5101),
-        ("EncounterService",   "GNex.EncounterService",   5102),
-        ("InpatientService",   "GNex.InpatientService",   5103),
-        ("EmergencyService",   "GNex.EmergencyService",   5104),
-        ("DiagnosticsService", "GNex.DiagnosticsService", 5105),
-        ("RevenueService",     "GNex.RevenueService",     5106),
-        ("AuditService",       "GNex.AuditService",       5107),
-        ("AiService",          "GNex.AiService",          5108),
-        ("ApiGateway",         "GNex.ApiGateway",         5100),
-    ];
+    private static (string Name, string Project, int Port)[] ResolveServices(AgentContext context)
+    {
+        var derived = ServiceCatalogResolver.GetServices(context);
+        return derived.Count > 0
+            ? derived.Select(s => (s.Name, s.ProjectName, s.ApiPort)).ToArray()
+            : [("ApiGateway", "GNex.ApiGateway", 5100)];
+    }
 
     public MonitorAgent(ILogger<MonitorAgent> logger) => _logger = logger;
 
@@ -46,6 +41,7 @@ public sealed class MonitorAgent : IAgent
         var artifacts = new List<CodeArtifact>();
         var findings = new List<ReviewFinding>();
         var errors = new List<string>();
+        var Services = ResolveServices(context);
         var report = new StringBuilder();
         report.AppendLine("# Monitor Report");
         report.AppendLine($"**Timestamp**: {DateTime.UtcNow:u}");
@@ -90,7 +86,7 @@ public sealed class MonitorAgent : IAgent
             if (context.ReportProgress is not null)
                 await context.ReportProgress(Type, "Step 2: Running service health checks...");
 
-            var healthResults = await CheckServiceHealthAsync(ct);
+            var healthResults = await CheckServiceHealthAsync(Services, ct);
             var healthyCount = 0;
             foreach (var (name, port, healthy, statusCode, responseTime) in healthResults)
             {
@@ -207,6 +203,39 @@ public sealed class MonitorAgent : IAgent
 
             context.Artifacts.AddRange(artifacts);
             context.Findings.AddRange(findings);
+
+            // ── Dispatch runtime findings as feedback to responsible agents ──
+            context.DispatchFindingsAsFeedback(Type, findings);
+
+            // ── Record QualityMetrics for service health ──
+            context.QualityMetrics.Add(new QualityMetric
+            {
+                Source = Type,
+                Category = "HealthyServiceCount",
+                Description = "Number of services that passed health checks",
+                Value = healthyCount,
+                Target = Services.Length,
+                ArtifactPath = "monitor/monitor-report.md"
+            });
+            context.QualityMetrics.Add(new QualityMetric
+            {
+                Source = Type,
+                Category = "ContainerHealth",
+                Description = "Number of healthy Docker containers",
+                Value = containerResults.Count(c => c.Healthy),
+                Target = containerResults.Count,
+                ArtifactPath = "monitor/monitor-report.md"
+            });
+            context.QualityMetrics.Add(new QualityMetric
+            {
+                Source = Type,
+                Category = "RuntimeIssues",
+                Description = "Number of runtime issues detected in logs",
+                Value = logIssues.Count,
+                Target = 0,
+                ArtifactPath = "monitor/monitor-report.md"
+            });
+
             context.AgentStatuses[Type] = AgentStatus.Completed;
 
             // Agent completes its own claimed work items
@@ -279,11 +308,11 @@ public sealed class MonitorAgent : IAgent
                     var state = parts[2];
                     var healthy = state.Equals("running", StringComparison.OrdinalIgnoreCase);
 
-                    // Only include HMS-related containers
-                    if (name.Contains("hms", StringComparison.OrdinalIgnoreCase) ||
-                        name.Contains("gnex", StringComparison.OrdinalIgnoreCase) ||
-                        name.Contains("patient", StringComparison.OrdinalIgnoreCase) ||
-                        name.Contains("gateway", StringComparison.OrdinalIgnoreCase))
+                    // Only include project-related containers
+                    if (name.Contains("gnex", StringComparison.OrdinalIgnoreCase) ||
+                        name.Contains("gateway", StringComparison.OrdinalIgnoreCase) ||
+                        name.Contains("postgres", StringComparison.OrdinalIgnoreCase) ||
+                        name.Contains("kafka", StringComparison.OrdinalIgnoreCase))
                     {
                         var logs = "";
                         if (!healthy)
@@ -303,12 +332,12 @@ public sealed class MonitorAgent : IAgent
     // ─── Service health checks ─────────────────────────────────────
 
     private async Task<List<(string Name, int Port, bool Healthy, int StatusCode, long ResponseTimeMs)>> CheckServiceHealthAsync(
-        CancellationToken ct)
+        (string Name, string Project, int Port)[] services, CancellationToken ct)
     {
         var results = new List<(string, int, bool, int, long)>();
         using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
 
-        foreach (var (name, _, port) in Services)
+        foreach (var (name, _, port) in services)
         {
             var healthSw = Stopwatch.StartNew();
             try
@@ -356,9 +385,10 @@ public sealed class MonitorAgent : IAgent
             foreach (var containerName in psOut.Split('\n', StringSplitOptions.RemoveEmptyEntries))
             {
                 var name = containerName.Trim();
-                if (!name.Contains("hms", StringComparison.OrdinalIgnoreCase) &&
-                    !name.Contains("patient", StringComparison.OrdinalIgnoreCase) &&
-                    !name.Contains("gateway", StringComparison.OrdinalIgnoreCase))
+                if (!name.Contains("gnex", StringComparison.OrdinalIgnoreCase) &&
+                    !name.Contains("gateway", StringComparison.OrdinalIgnoreCase) &&
+                    !name.Contains("postgres", StringComparison.OrdinalIgnoreCase) &&
+                    !name.Contains("kafka", StringComparison.OrdinalIgnoreCase))
                     continue;
 
                 var (logExit, svcLogs) = await RunAsync("docker", $"logs --tail 50 --since 1h {name}", ct);
@@ -387,11 +417,11 @@ public sealed class MonitorAgent : IAgent
         var sb = new StringBuilder();
         foreach (var line in output.Split('\n', StringSplitOptions.RemoveEmptyEntries))
         {
-            if (line.Contains("hms", StringComparison.OrdinalIgnoreCase) ||
-                line.Contains("gnex", StringComparison.OrdinalIgnoreCase) ||
+            if (line.Contains("gnex", StringComparison.OrdinalIgnoreCase) ||
                 line.Contains("NAME", StringComparison.OrdinalIgnoreCase) ||
-                line.Contains("patient", StringComparison.OrdinalIgnoreCase) ||
-                line.Contains("gateway", StringComparison.OrdinalIgnoreCase))
+                line.Contains("gateway", StringComparison.OrdinalIgnoreCase) ||
+                line.Contains("postgres", StringComparison.OrdinalIgnoreCase) ||
+                line.Contains("kafka", StringComparison.OrdinalIgnoreCase))
             {
                 sb.AppendLine($"- {line.Trim()}");
             }

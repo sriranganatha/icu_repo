@@ -1,0 +1,286 @@
+using GNex.Core.Enums;
+using GNex.Core.Models;
+
+namespace GNex.Core.Extensions;
+
+/// <summary>
+/// Extension methods for converting ephemeral pipeline feedback and findings into
+/// persistent <see cref="AgentLearningRecord"/>s that accumulate across pipeline runs.
+///
+/// Flow:
+///   1. At pipeline end, orchestrator calls <see cref="HarvestLearnings"/> to extract learnings from feedback/findings.
+///   2. Orchestrator persists them via <see cref="ILearningRepository.SaveBatchAsync"/>.
+///   3. At next pipeline start, orchestrator loads combined learnings and calls <see cref="InjectHistoricalLearnings"/>.
+///   4. PromptGeneratorAgent calls <see cref="BuildLearningPromptBlock"/> to inject rules into agent prompts.
+///   5. Code-gen agents call <see cref="GetLearningsForAgent"/> to read actionable rules.
+/// </summary>
+public static class LearningAggregatorExtensions
+{
+    // ═══════════════════════════════════════════════════════════════
+    //  HARVEST: Extract learnings from the completed pipeline context
+    // ═══════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Harvest new learnings from the pipeline's feedback, findings, and diagnostics.
+    /// Call at pipeline end, BEFORE persisting to DB.
+    /// </summary>
+    public static List<AgentLearningRecord> HarvestLearnings(this AgentContext context)
+    {
+        var harvested = new List<AgentLearningRecord>();
+        var domain = context.DomainProfile?.Domain ?? string.Empty;
+
+        // 1. Convert Review findings into learnings
+        foreach (var finding in context.Findings.Where(f => f.Severity >= ReviewSeverity.Warning))
+        {
+            var targets = MapFindingToLearningTargets(finding.Category);
+            var suggestion = finding.Suggestion;
+            harvested.Add(new AgentLearningRecord
+            {
+                RunId = context.RunId,
+                ProjectId = context.ProjectId,
+                AgentType = "Review",
+                Category = finding.Category,
+                Problem = finding.Message,
+                Resolution = suggestion,
+                Impact = finding.Severity >= ReviewSeverity.Error ? "High" : "Medium",
+                TargetAgents = targets,
+                PromptRule = BuildPromptRule(finding.Category, finding.Message, suggestion
+                PromptRule = BuildPromptRule(finding.Category, finding.Message, suggestion),
+                Domain = domain,
+                Scope = LearningScope.Project
+            });
+        }
+
+        // 2. Convert feedback notes into learnings (agent-to-agent feedback)
+        foreach (var (agentType, feedbackBag) in context.AgentFeedback)
+        {
+            foreach (var msg in feedbackBag.Distinct().Take(20))
+            {
+                var (source, body) = ParseFeedback(msg);
+                harvested.Add(new AgentLearningRecord
+                {
+                    RunId = context.RunId,
+                    ProjectId = context.ProjectId,
+                    AgentType = source,
+                    Category = ClassifyFeedback(body),
+                    Problem = body,
+                    TargetAgents = [agentType.ToString()],
+                    PromptRule = $"Avoid: {TruncateForPrompt(body)}",
+                    Domain = domain,
+                    Scope = LearningScope.Project
+                });
+            }
+        }
+
+        // 3. Convert BugFix results into learnings (what was broken + how it was fixed)
+        if (context.AgentRuccess)
+        {
+            foreach (var artifact in context.Artifacts.Where(a =>
+                a.ProducedBy == AgentType.BugFix))
+            {
+                harvested.Add(new AgentLearningRecord
+                {
+                    RunId = context.RunId,
+                    ProjectId = context.ProjectId,
+                    AgentType = "BugFix",
+                    Category = "BugFix",
+                    Problem = $"Bug in {artifact.FileName} ({artifact.Layer})",
+                    Resolution = $"Fixed by BugFixAgent — {artifact.FileName}",
+                    Impact = "High",
+                    TargetAgents = MapArtifactToTargetAgents(artifact),
+                    PromptRule = $"When generating {artifact.Layer}: check {artifact.FileName} patterns
+                    PromptRule = $"When generating {artifact.Layer}: check {artifact.FileName} patterns",
+                    Domain = domain,
+                    Scope = LearningScope.Project
+                });
+            }
+        }
+test diagnostics into learnings
+        foreach (var diag in context.TestDiagnostics.Where(d => d.Outcome == TestOutcome.Failed))
+        {
+            harvested.Add(new AgentLearningRecord
+            {
+                RunId = context.RunId,
+                ProjectId = context.ProjectId,
+                AgentType = "Build",
+                Category = string.IsNullOrEmpty(diag.Category) ? "BuildFailure" : diag.Category,
+                Problem = $"{diag.TestName}: {diag.Diagnostic}",
+                Resolution = diag.Remediation,
+                Impact = "High",
+                TargetAgents = ["Database", "ServiceLayer", "Application", "Integration"],
+                PromptRule = $"Avoid test failure {diag.TestName}: {TruncateForPrompt(diag.Diagnostic
+                PromptRule = $"Avoid test failure {diag.TestName}: {TruncateForPrompt(diag.Diagnostic)}",
+                Domain = domain,
+                Scope = LearningScope.Project
+            });
+        }
+
+        // 5. Add any manually-created learning records from agents
+        foreach (var existing in context.LearningRecords)
+        {
+            if (string.IsNullOrEmpty(existing.Domain))
+            {
+                // Can't set init-only, but it's already in the bag — just ensure it's picked up
+            }
+            harvested.Add(existing);
+        }
+
+        return harvested;
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  INJECT: Load historical learnings into the context at pipeline start
+    // ═══════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Inject historically-persisted learnings into the AgentContext at pipeline start.
+    /// Code-gen agents can then read them via <see cref="GetLearningsForAgent"/>.
+    /// </summary>
+    public static void InjectHistoricalLearnings(this AgentContext context, IEnumerable<AgentLearningRecord> learnings)
+    {
+        foreach (var l in learnings)
+            context.LearningRecords.Add(l);
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  READ: Agents query learnings relevant to them
+    // ═══════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Get all learnings relevant to a specific agent, sorted by confidence.
+    /// Used by code-gen agents to avoid repeating past mistakes.
+    /// </summary>
+    public static List<AgentLearningRecord> GetLearningsForAgent(this AgentContext context, AgentType agentType)
+    {
+        var agentName = agentType.ToString();
+        return context.LearningRecords
+            .Where(l => !l.IsDeprecated &&
+                        (l.AgentType == agentName || l.TargetAgents.Contains(agentName)))
+            .OrderByDescending(l => l.Confidence)
+            .ThenByDescending(l => l.Recurrence)
+            .ToList();
+    }
+
+    /// <summary>
+    /// Build a prompt block from learnings for injection into LLM system prompts.
+    /// Groups by category, shows only high-confidence learnings with prompt rules.
+    /// </summary>
+    public static string BuildLearningPromptBlock(this AgentContext context, AgentType agentType, int maxItems = 15)
+    {
+        var learnings = GetLearningsForAgent(context, agentType)
+            .Where(l => l.Confidence >= 0.4 && !string.IsNullOrWhiteSpace(l.PromptRule))
+            .Take(maxItems)
+            .ToList();
+
+        if (learnings.Count == 0) return string.Empty;
+
+        var lines = new List<string>
+        {
+            "",
+            "IMPORTANT — Lessons learned from previous pipeline runs:",
+            "Apply these rules to avoid repeating past mistakes:"
+        };
+
+        // Group by scope for clarity
+        var globalRules = learnings.Where(l => l.Scope == LearningScope.Global).ToList();
+        var domainRules = learnings.Where(l => l.Scope == LearningScope.Domain).ToList();
+        var projectRules = learnings.Where(l => l.Scope == LearningScope.Project).ToList();
+
+        if (globalRules.Count > 0)
+        {
+            lines.Add("");
+            lines.Add("[Universal rules — apply to ALL projects]");
+            foreach (var r in globalRules)
+                lines.Add($"  • [{r.Category}] {r.PromptRule} (confidence: {r.Confidence:F1}, seen {r.Recurrence}x)");
+        }
+
+        if (domainRules.Count > 0)
+        {
+            lines.Add("");
+            lines.Add($"[Domain rules — {domainRules.First().Domain}]");
+            foreach (var r in domainRules)
+                lines.Add($"  • [{r.Category}] {r.PromptRule} (confidence: {r.Confidence:F1}, seen {r.Recurrence}x)");
+        }
+
+        if (projectRules.Count > 0)
+        {
+            lines.Add("");
+            lines.Add("[Project-specific rules]");
+            foreach (var r in projectRules)
+                lines.Add($"  • [{r.Category}] {r.PromptRule}");
+        }
+
+        return string.Join("\n", lines);
+    }
+
+    /// <summary>
+    /// Verify learnings whose problems were NOT reproduced in this pipeline run.
+    /// If a learning's problem category had zero findings this run, mark it verified.
+    /// </summary>
+    public static List<string> IdentifyVerifiedLearnings(this AgentContext context)
+    {
+        var currentCategories = context.Findings
+            .Select(f => f.CTestDiagnostics.Select(d => d.Categor
+            .Concat(context.TestDiagnostics.Select(d => d.Category))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        return context.LearningRecords
+            .Where(l => !l.IsVerified && !currentCategories.Contains(l.Category))
+            .Select(l => l.Id)
+            .ToList();
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  HELPERS
+    // ═══════════════════════════════════════════════════════════════
+
+    private static List<string> MapFindingToLearningTargets(string category) => category switch
+    {
+        "NFR-CODE-01" or "NFR-CODE-02" or "Implementation" => ["ServiceLayer", "BugFix"],
+        "NFR-TEST-01" or "TestCoverage" => ["Testing", "BugFix"],
+        "MultiTenant" or "Audit" => ["Database", "ServiceLayer"],
+        "Security" => ["Database", "ServiceLayer", "Application"],
+        "Coverage" or "FeatureCoverage" => ["ServiceLayer", "Testing", "Application"],
+        "Traceability" or "Conventions" => ["ServiceLayer", "Application"],
+        "Deployment" or "Runtime" => ["Application", "BugFix"],
+        "GapAnalysis" => ["Database", "ServiceLayer", "Testing", "Integration"],
+        _ => ["BugFix"]
+    };
+
+    private static List<string> MapArtifactToTargetAgents(CodeArtifact artifact) => artifact.Layer switch
+    {Database or ArtifactLayer.Repository or ArtifactLayer.Migration => ["Database"],
+        ArtifactLayer.Dto or ArtifactLayer.Service => ["ServiceLayer"],
+        ArtifactLayer.Configuration or ArtifactLayer.Infrastructure
+        ArtifactLayer.Configuration or ArtifactLayer.Infrastructure => ["Application"],
+        ArtifactLayer.Test => ["Testing"],
+        _ => ["ServiceLayer", "Application"]
+    };
+
+    private static string BuildPromptRule(string category, string problem, string fix)
+    {
+        if (!string.IsNullOrWhiteSpace(fix))
+            return TruncateForPrompt($"{category}: {fix}");
+        return TruncateForPrompt($"Avoid {category} issue: {problem}");
+    }
+
+    private static (string source, string body) ParseFeedback(string msg)
+    {
+        if (msg.StartsWith('[') && msg.IndexOf(']') is var idx and > 0)
+            return (msg[1..idx], msg[(idx + 2)..].Trim());
+        return ("Unknown", msg);
+    }
+
+    private static string ClassifyFeedback(string body)
+    {
+        if (body.Contains("security", StringComparison.OrdinalIgnoreCase)) return "Security";
+        if (body.Contains("test", StringComparison.OrdinalIgnoreCase)) return "Testing";
+        if (body.Contains("tenant", StringComparison.OrdinalIgnoreCase)) return "MultiTenant";
+        if (body.Contains("audit", StringComparison.OrdinalIgnoreCase)) return "Audit";
+        if (body.Contains("performance", StringComparison.OrdinalIgnoreCase)) return "Performance";
+        if (body.Contains("deploy", StringComparison.OrdinalIgnoreCase)) return "Deployment";
+        return "CodeQuality";
+    }
+
+    private static string TruncateForPrompt(string text, int maxLength = 120)
+        => text.Length <= maxLength ? text : text[..maxLength] + "…";
+}

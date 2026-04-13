@@ -8,7 +8,7 @@ namespace GNex.Agents.Migration;
 
 /// <summary>
 /// Migration agent — generates EF Core migration files, SQL seed data scripts,
-/// schema rollback scripts, and migration runner configurations for all HMS
+/// schema rollback scripts, and migration runner configurations for all
 /// microservices that have DbContext definitions.
 /// </summary>
 public sealed class MigrationAgent : IAgent
@@ -19,12 +19,6 @@ public sealed class MigrationAgent : IAgent
     public AgentType Type => AgentType.Migration;
     public string Name => "Migration Agent";
     public string Description => "Generates EF Core migrations, seed data scripts, and schema rollback scripts for all microservices.";
-
-    private static readonly string[] ServiceNames =
-    [
-        "PatientService", "EncounterService", "InpatientService", "EmergencyService",
-        "DiagnosticsService", "RevenueService", "AuditService", "AiService"
-    ];
 
     public MigrationAgent(ILlmProvider llm, ILogger<MigrationAgent> logger)
     {
@@ -42,7 +36,9 @@ public sealed class MigrationAgent : IAgent
 
         try
         {
-            foreach (var svc in ServiceNames)
+            var serviceNames = ServiceCatalogResolver.GetServices(context).Select(s => s.Name).ToArray();
+
+            foreach (var svc in serviceNames)
             {
                 ct.ThrowIfCancellationRequested();
 
@@ -143,7 +139,7 @@ public sealed class MigrationAgent : IAgent
             }
 
             // Generate migration runner configuration
-            artifacts.Add(GenerateMigrationRunnerConfig());
+            artifacts.Add(GenerateMigrationRunnerConfig(context));
 
             context.Artifacts.AddRange(artifacts);
             context.AgentStatuses[Type] = AgentStatus.Completed;
@@ -155,7 +151,7 @@ public sealed class MigrationAgent : IAgent
             return new AgentResult
             {
                 Agent = Type, Success = true,
-                Summary = $"Migration Agent: {artifacts.Count} artifacts — migrations, seed data, rollbacks for {ServiceNames.Length} services",
+                Summary = $"Migration Agent: {artifacts.Count} artifacts — migrations, seed data, rollbacks for {serviceNames.Length} services",
                 Artifacts = artifacts,
                 Duration = sw.Elapsed
             };
@@ -168,51 +164,59 @@ public sealed class MigrationAgent : IAgent
         }
     }
 
-    private static CodeArtifact GenerateMigrationRunnerConfig() => new()
+    private static CodeArtifact GenerateMigrationRunnerConfig(AgentContext context)
     {
-        Layer = ArtifactLayer.Configuration,
-        RelativePath = "scripts/run-migrations.ps1",
-        FileName = "run-migrations.ps1",
-        Namespace = string.Empty,
-        ProducedBy = AgentType.Migration,
-        TracedRequirementIds = ["NFR-MIGRATION-04"],
-        Content = """
-            # HMS Migration Runner
-            # Runs EF Core migrations for all microservices in order
-            param(
-                [string]$ConnectionString = "Host=localhost;Port=5432;Database=hms;Username=hms;Password=gnex_dev_pw",
-                [switch]$Rollback
-            )
+        var dbPort = context.PipelineConfig?.DbPort ?? 5432;
+        var dbName = context.PipelineConfig?.DbName ?? "app_db";
+        var dbUser = context.PipelineConfig?.DbUser ?? "app_admin";
+        var dbPw = context.PipelineConfig?.DbPassword ?? "gnex_dev_pw";
+        var connStr = $"Host=localhost;Port={dbPort};Database={dbName};Username={dbUser};Password={dbPw}";
+        var svcLines = string.Join("\n", ServiceCatalogResolver.GetServices(context).Select(s => $"    \"{s.ProjectName}\""));
 
-            $services = @(
-                "GNex.PatientService",
-                "GNex.EncounterService",
-                "GNex.InpatientService",
-                "GNex.EmergencyService",
-                "GNex.DiagnosticsService",
-                "GNex.RevenueService",
-                "GNex.AuditService",
-                "GNex.AiService"
-            )
+        var scriptHeader = $"""
+                # Migration Runner
+                # Runs EF Core migrations for all microservices in order
+                param(
+                    [string]$ConnectionString = "{connStr}",
+                    [switch]$Rollback
+                )
 
-            foreach ($svc in $services) {
-                Write-Host "Migrating $svc..." -ForegroundColor Cyan
-                $proj = "src/$svc/$svc.csproj"
-                if (Test-Path $proj) {
-                    if ($Rollback) {
-                        dotnet ef database update 0 --project $proj -- --connection "$ConnectionString"
+                $services = @(
+                {svcLines}
+                )
+
+                """;
+
+        var scriptBody = """
+                foreach ($svc in $services) {
+                    Write-Host "Migrating $svc..." -ForegroundColor Cyan
+                    $proj = "src/$svc/$svc.csproj"
+                    if (Test-Path $proj) {
+                        if ($Rollback) {
+                            dotnet ef database update 0 --project $proj -- --connection "$ConnectionString"
+                        } else {
+                            dotnet ef database update --project $proj -- --connection "$ConnectionString"
+                        }
+                        if ($LASTEXITCODE -ne 0) {
+                            Write-Host "FAILED: $svc" -ForegroundColor Red
+                        } else {
+                            Write-Host "OK: $svc" -ForegroundColor Green
+                        }
                     } else {
-                        dotnet ef database update --project $proj -- --connection "$ConnectionString"
+                        Write-Host "SKIPPED: $svc (project not found)" -ForegroundColor Yellow
                     }
-                    if ($LASTEXITCODE -ne 0) {
-                        Write-Host "FAILED: $svc" -ForegroundColor Red
-                    } else {
-                        Write-Host "OK: $svc" -ForegroundColor Green
-                    }
-                } else {
-                    Write-Host "SKIPPED: $svc (project not found)" -ForegroundColor Yellow
                 }
-            }
-            """
-    };
+                """;
+
+        return new CodeArtifact
+        {
+            Layer = ArtifactLayer.Configuration,
+            RelativePath = "scripts/run-migrations.ps1",
+            FileName = "run-migrations.ps1",
+            Namespace = string.Empty,
+            ProducedBy = AgentType.Migration,
+            TracedRequirementIds = ["NFR-MIGRATION-04"],
+            Content = scriptHeader + scriptBody
+        };
+    }
 }

@@ -59,7 +59,7 @@ public sealed class Soc2ComplianceAgent : IAgent
             artifacts.Add(await GenerateIncidentResponsePlan(ct));
             if (context.ReportProgress is not null)
                 await context.ReportProgress(Type, "AI-generating backup & DR policy — RPO/RTO targets, failover procedures, restore testing");
-            artifacts.Add(await GenerateBackupDrPolicy(ct));
+            artifacts.Add(await GenerateBackupDrPolicy(context, ct));
             if (context.ReportProgress is not null)
                 await context.ReportProgress(Type, "Generating SOC 2 control matrix — mapping CC1-CC9 criteria to implemented controls");
             artifacts.Add(GenerateSoc2ControlMatrix());
@@ -252,7 +252,7 @@ public sealed class Soc2ComplianceAgent : IAgent
         };
     }
 
-    private async Task<CodeArtifact> GenerateBackupDrPolicy(CancellationToken ct)
+    private async Task<CodeArtifact> GenerateBackupDrPolicy(AgentContext context, CancellationToken ct)
     {
         var response = await _llm.GenerateAsync(new LlmPrompt
         {
@@ -260,6 +260,16 @@ public sealed class Soc2ComplianceAgent : IAgent
             UserPrompt = "Generate a BackupDrPolicy class with: RPO/RTO targets per service tier, backup schedule configs, failover procedures, and recovery test schedule. Namespace: GNex.SharedKernel.Compliance.Soc2.",
             Temperature = 0.1, RequestingAgent = Name
         }, ct);
+
+        // Build dynamic service tier mapping for the fallback template
+        var services = ServiceCatalogResolver.GetServices(context);
+        var tierEntries = services.Select(s =>
+        {
+            var tier = s.DependsOn.Length > 2 || s.Entities.Length > 3 ? "Critical" :
+                       s.Entities.Length > 1 ? "Standard" : "NonCritical";
+            return $"                        [\"{s.Name}\"] = \"{tier}\",";
+        });
+        var tierMappingBlock = string.Join("\n", tierEntries);
 
         return new CodeArtifact
         {
@@ -269,7 +279,7 @@ public sealed class Soc2ComplianceAgent : IAgent
             Namespace = "GNex.SharedKernel.Compliance.Soc2",
             ProducedBy = AgentType.Soc2Compliance,
             TracedRequirementIds = ["SOC2-CC7", "SOC2-CC9"],
-            Content = response.Success ? response.Content : """
+            Content = response.Success ? response.Content : $$"""
                 namespace GNex.SharedKernel.Compliance.Soc2;
 
                 public static class BackupDrPolicy
@@ -285,14 +295,7 @@ public sealed class Soc2ComplianceAgent : IAgent
 
                     public static readonly Dictionary<string, string> ServiceTierMapping = new()
                     {
-                        ["PatientService"]     = "Critical",
-                        ["EncounterService"]   = "Critical",
-                        ["EmergencyService"]   = "Critical",
-                        ["InpatientService"]   = "Critical",
-                        ["DiagnosticsService"] = "Standard",
-                        ["RevenueService"]     = "Standard",
-                        ["AuditService"]       = "Standard",
-                        ["AiService"]          = "NonCritical",
+                {{tierMappingBlock}}
                     };
 
                     public static string RecoveryTestSchedule => "Quarterly DR test with full failover simulation";

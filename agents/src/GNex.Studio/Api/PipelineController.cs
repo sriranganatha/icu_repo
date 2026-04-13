@@ -105,7 +105,9 @@ public sealed class PipelineController : ControllerBase
             SpinUpDocker = request.SpinUpDocker,
             ExecuteDdl = request.ExecuteDdl,
             OrchestratorInstructions = request.OrchestratorInstructions ?? string.Empty,
-            ServicePorts = request.ServicePorts ?? new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase) { ["Gateway"] = 5100, ["Kafka"] = 9092 }
+            ServicePorts = request.ServicePorts ?? new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase) { ["Gateway"] = 5100, ["Kafka"] = 9092 },
+            ProjectDomain = request.ProjectDomain ?? string.Empty,
+            ProjectDomainDescription = request.ProjectDomainDescription ?? string.Empty
         };
 
         CancellationTokenSource runCts;
@@ -1867,6 +1869,8 @@ public sealed class PipelineRunRequest
     public int MaxInDevItems { get; init; } = 50;
     public string? OrchestratorInstructions { get; init; }
     public Dictionary<string, int>? ServicePorts { get; init; }
+    public string? ProjectDomain { get; init; }
+    public string? ProjectDomainDescription { get; init; }
 }
 
 public sealed class InstructionRequest

@@ -562,15 +562,17 @@ public sealed class CodeReasoningAgent : IAgent
 
         if (context.DomainModel is null) return findings;
 
-        // Identify sensitive entities
-        var phiKeywords = new[] { "patient", "encounter", "diagnosis", "medication", "observation", "vital", "allergy", "lab" };
+        // Identify sensitive entities by checking if they have a ClassificationCode field
+        // or contain common sensitive data keywords
+        var sensitiveKeywords = new[] { "personal", "private", "secret", "credential", "payment", "financial", "identity", "address", "phone", "email", "ssn", "birth" };
 
         foreach (var entity in context.DomainModel.Entities)
         {
-            var isPhi = phiKeywords.Any(k =>
-                entity.Name.Contains(k, StringComparison.OrdinalIgnoreCase));
+            var isSensitive = sensitiveKeywords.Any(k =>
+                entity.Name.Contains(k, StringComparison.OrdinalIgnoreCase)) ||
+                entity.Fields.Any(f => f.Name.Contains("Classification", StringComparison.OrdinalIgnoreCase));
 
-            if (!isPhi) continue;
+            if (!isSensitive) continue;
 
             // Query compliance requirements via broker
             var compResponse = await _broker.ResolveAsync(new ContextQuery

@@ -86,6 +86,42 @@
                         </div>
                     </div>
                 </div>
+                <!-- Project Domain -->
+                <hr class="my-3" />
+                <div class="d-flex align-items-center mb-2">
+                    <i class="bi bi-globe me-2 text-success"></i>
+                    <span class="fw-semibold">Project Domain</span>
+                    <small class="text-muted ms-2">Select the industry domain — agents will generate domain-appropriate artifacts, compliance, and terminology</small>
+                </div>
+                <div class="row g-2">
+                    <div class="col-md-4">
+                        <label class="form-label fw-semibold">Domain</label>
+                        <select id="selectDomain" class="form-select" onchange="onDomainChange()">
+                            <option value="">Generic (no specific domain)</option>
+                            <option value="Healthcare">Healthcare</option>
+                            <option value="FinTech">FinTech / Banking</option>
+                            <option value="E-Commerce">E-Commerce / Retail</option>
+                            <option value="Manufacturing">Manufacturing</option>
+                            <option value="Education">Education / EdTech</option>
+                            <option value="Logistics">Logistics / Supply Chain</option>
+                            <option value="RealEstate">Real Estate / PropTech</option>
+                            <option value="Insurance">Insurance / InsurTech</option>
+                            <option value="Telecom">Telecommunications</option>
+                            <option value="Government">Government / GovTech</option>
+                            <option value="HRTech">HR / Workforce Management</option>
+                            <option value="LegalTech">Legal / Compliance</option>
+                            <option value="MediaEntertainment">Media / Entertainment</option>
+                            <option value="Energy">Energy / Utilities</option>
+                            <option value="Agriculture">Agriculture / AgriTech</option>
+                            <option value="Travel">Travel / Hospitality</option>
+                            <option value="Other">Other (specify below)</option>
+                        </select>
+                    </div>
+                    <div class="col-md-8">
+                        <label class="form-label fw-semibold">Domain Description <small class="text-muted">(optional — give agents more context)</small></label>
+                        <input type="text" id="inputDomainDesc" class="form-control" placeholder="e.g. Hospital management system with HL7/FHIR interop, or B2B SaaS inventory platform" />
+                    </div>
+                </div>
                 <!-- WIP Limits -->
                 <hr class="my-3" />
                 <div class="d-flex align-items-center mb-2">
@@ -1139,6 +1175,33 @@
             return ports;
         }
 
+        function onDomainChange() {
+            const sel = document.getElementById('selectDomain');
+            const desc = document.getElementById('inputDomainDesc');
+            // Auto-fill description hint when user picks a domain
+            const domainHints = {
+                'Healthcare': 'Healthcare management — clinical workflows, patient records, diagnostics, compliance (HIPAA/HL7/FHIR)',
+                'FinTech': 'Financial technology — payments, transactions, regulatory compliance (PCI-DSS, SOX)',
+                'E-Commerce': 'E-commerce platform — product catalog, shopping cart, orders, payments, inventory',
+                'Manufacturing': 'Manufacturing — production planning, quality control, supply chain, IoT integration',
+                'Education': 'Education platform — courses, students, assessments, LMS, accreditation',
+                'Logistics': 'Logistics — shipment tracking, fleet management, warehouse operations, route optimization',
+                'RealEstate': 'Real estate — property listings, tenant management, lease tracking, maintenance',
+                'Insurance': 'Insurance — policy management, claims processing, underwriting, actuarial',
+                'Telecom': 'Telecommunications — subscriber management, billing, network operations, provisioning',
+                'Government': 'Government — citizen services, case management, permitting, regulatory compliance',
+                'HRTech': 'HR/Workforce — employee management, payroll, recruitment, performance reviews',
+                'LegalTech': 'Legal — case management, document review, contract lifecycle, compliance',
+                'MediaEntertainment': 'Media — content management, streaming, rights management, audience analytics',
+                'Energy': 'Energy/Utilities — asset management, grid operations, billing, regulatory compliance',
+                'Agriculture': 'Agriculture — farm management, crop monitoring, supply chain, IoT sensors',
+                'Travel': 'Travel/Hospitality — reservations, property management, guest services, loyalty'
+            };
+            if (!desc.value && domainHints[sel.value]) {
+                desc.value = domainHints[sel.value];
+            }
+        }
+
         // ─── NOC Update Functions ───────────────────────────────────────
         function nocUpdateAgentTiming(agentKey, status, elapsedMs) {
             const name = getAgentName(agentKey);
@@ -1546,7 +1609,8 @@
             'inputMaxQueue', 'inputMaxInDev',
             'portPatient', 'portEncounter', 'portInpatient', 'portEmergency',
             'portDiagnostics', 'portRevenue', 'portAudit', 'portAi',
-            'portGateway', 'portKafka'
+            'portGateway', 'portKafka',
+            'selectDomain', 'inputDomainDesc'
         ];
         const CONFIG_CHECKS = ['chkSpinDocker', 'chkExecDdl'];
 
@@ -1830,7 +1894,9 @@
                 maxQueueItems: parseInt(document.getElementById('inputMaxQueue').value) || 10,
                 maxInDevItems: parseInt(document.getElementById('inputMaxInDev').value) || 10,
                 orchestratorInstructions: document.getElementById('inputInstructions').value.trim(),
-                servicePorts: collectDynamicPorts()
+                servicePorts: collectDynamicPorts(),
+                projectDomain: document.getElementById('selectDomain').value || null,
+                projectDomainDescription: document.getElementById('inputDomainDesc').value.trim() || null
             };
 
             appendLog('system', `Starting pipeline — reqs: ${body.requirementsPath}, output: ${body.outputPath}`);

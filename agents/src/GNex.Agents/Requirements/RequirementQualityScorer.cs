@@ -91,7 +91,7 @@ internal static class RequirementQualityScorer
             questions.Add("Which measurable targets define this requirement (e.g., latency, throughput, accuracy, or SLA values)?");
         }
 
-        if (!ContainsAny(normalizedText, "nurse", "doctor", "admin", "patient", "system", "api", "service", "operator", "user"))
+        if (!ContainsAny(normalizedText, "user", "admin", "operator", "manager", "system", "api", "service", "staff", "customer", "client", "agent"))
         {
             questions.Add("Who is the primary actor for this flow, and which secondary actors/systems are impacted?");
         }

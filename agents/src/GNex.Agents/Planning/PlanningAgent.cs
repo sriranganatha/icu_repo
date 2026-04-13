@@ -186,8 +186,8 @@ public sealed class PlanningAgent : IAgent
     {
         var services = new Dictionary<string, ServicePlan>(StringComparer.OrdinalIgnoreCase);
 
-        // From microservice catalog + domain model entities
-        foreach (var svcDef in MicroserviceCatalog.All)
+        // From service catalog (derived by ArchitectAgent) + domain model entities
+        foreach (var svcDef in ServiceCatalogResolver.GetServices(context))
         {
             var entities = context.DomainModel?.Entities
                 .Where(e => e.ServiceName.Contains(svcDef.ShortName, StringComparison.OrdinalIgnoreCase) ||

@@ -8,15 +8,19 @@ namespace GNex.Agents.Brd;
 /// </summary>
 public static class BrdDiagramGenerator
 {
-    public static string GenerateContextDiagram(List<Requirement> requirements, ParsedDomainModel? domainModel)
+    public static string GenerateContextDiagram(List<Requirement> requirements, ParsedDomainModel? domainModel, DomainProfile? domainProfile = null)
     {
         var sb = new StringBuilder();
         sb.AppendLine("graph TB");
         var systemLabel = requirements.Select(r => r.Module).FirstOrDefault(m => !string.IsNullOrEmpty(m)) ?? "System";
         sb.AppendLine($"    SYS[{systemLabel}]");
 
-        var actors = ExtractActors(requirements);
-        var systems = ExtractExternalSystems(requirements);
+        var actors = domainProfile?.ActorNames is { Count: > 0 } profileActors
+            ? new HashSet<string>(profileActors, StringComparer.OrdinalIgnoreCase)
+            : ExtractActors(requirements);
+        var systems = domainProfile?.IntegrationPatterns is { Count: > 0 } patterns
+            ? new HashSet<string>(patterns.Select(p => p.Name), StringComparer.OrdinalIgnoreCase)
+            : ExtractExternalSystems(requirements);
 
         var idx = 0;
         foreach (var actor in actors)
@@ -112,32 +116,27 @@ public static class BrdDiagramGenerator
         return sb.ToString().TrimEnd();
     }
 
-    public static string GenerateErDiagram(ParsedDomainModel? domainModel)
+    public static string GenerateErDiagram(ParsedDomainModel? domainModel, DomainProfile? domainProfile = null)
     {
         if (domainModel?.Entities is not { Count: > 0 })
         {
+            // Use LLM-generated fallback from DomainProfile, or a minimal generic diagram
+            if (!string.IsNullOrWhiteSpace(domainProfile?.FallbackErDiagram))
+                return domainProfile.FallbackErDiagram;
+
             return @"erDiagram
-    PATIENT {
+    ENTITY {
         uuid Id PK
-        string FirstName
-        string LastName
-        date DateOfBirth
-        string MRN
-    }
-    ENCOUNTER {
-        uuid Id PK
-        uuid PatientId FK
-        datetime AdmitDate
+        string Name
         string Status
     }
-    CLAIM {
+    AUDIT_LOG {
         uuid Id PK
-        uuid EncounterId FK
-        decimal Amount
-        string Status
+        uuid EntityId FK
+        datetime Timestamp
+        string Action
     }
-    PATIENT ||--o{ ENCOUNTER : ""has""
-    ENCOUNTER ||--o{ CLAIM : ""generates""";
+    ENTITY ||--o{ AUDIT_LOG : ""tracked by""";
         }
 
         var sb = new StringBuilder();
@@ -177,27 +176,27 @@ public static class BrdDiagramGenerator
 
     private static HashSet<string> ExtractActors(List<Requirement> requirements)
     {
+        // Generic keyword-based fallback when DomainProfile is not available
         var actors = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var text = string.Join(" ", requirements.Select(r => $"{r.Title} {r.Description}")).ToLowerInvariant();
-        if (text.Contains("patient")) actors.Add("Patient");
-        if (text.Contains("nurse")) actors.Add("Nurse");
-        if (text.Contains("doctor") || text.Contains("physician")) actors.Add("Physician");
+        if (text.Contains("user") || text.Contains("customer") || text.Contains("client")) actors.Add("End User");
         if (text.Contains("admin")) actors.Add("Administrator");
-        if (text.Contains("billing") || text.Contains("claim")) actors.Add("Billing Staff");
-        if (text.Contains("lab")) actors.Add("Lab Technician");
+        if (text.Contains("manager") || text.Contains("supervisor")) actors.Add("Manager");
+        if (text.Contains("operator") || text.Contains("staff")) actors.Add("Operator");
+        if (text.Contains("analyst") || text.Contains("report")) actors.Add("Analyst");
         if (actors.Count == 0) actors.Add("User");
         return actors;
     }
 
     private static HashSet<string> ExtractExternalSystems(List<Requirement> requirements)
     {
+        // Generic keyword-based fallback when DomainProfile is not available
         var systems = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var text = string.Join(" ", requirements.Select(r => $"{r.Title} {r.Description}")).ToLowerInvariant();
-        if (text.Contains("fhir")) systems.Add("Integration Server");
-        if (text.Contains("hl7")) systems.Add("Legacy Gateway");
-        if (text.Contains("kafka")) systems.Add("Kafka Cluster");
+        if (text.Contains("kafka") || text.Contains("message queue")) systems.Add("Kafka Cluster");
         if (text.Contains("email") || text.Contains("smtp")) systems.Add("Email Service");
         if (text.Contains("ldap") || text.Contains("active directory")) systems.Add("Identity Provider");
+        if (text.Contains("api") || text.Contains("integration")) systems.Add("External API");
         return systems;
     }
 }

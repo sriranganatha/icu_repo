@@ -38,6 +38,9 @@ public sealed class LlmPrompt
     /// <summary>Max tokens in the response.</summary>
     public int MaxTokens { get; init; } = 4096;
 
+    /// <summary>Project domain hint (e.g. "Healthcare", "FinTech") for template-based fallback persona selection.</summary>
+    public string DomainHint { get; init; } = string.Empty;
+
     /// <summary>Requesting agent for telemetry.</summary>
     public string RequestingAgent { get; init; } = string.Empty;
 }

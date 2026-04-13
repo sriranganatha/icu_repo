@@ -59,6 +59,10 @@ public sealed class ReviewAgent : IAgent
             findings.AddRange(CheckFeatureMappingCoverage(context));
 
             context.Findings.AddRange(findings);
+
+            // ── Dispatch findings as targeted feedback to responsible agents ──
+            context.DispatchFindingsAsFeedback(Type, findings);
+
             context.AgentStatuses[Type] = AgentStatus.Completed;
 
             var errorCount = findings.Count(f => f.Severity >= ReviewSeverity.Error);
@@ -157,9 +161,11 @@ public sealed class ReviewAgent : IAgent
             .SelectMany(a => a.TracedRequirementIds)
             .ToHashSet();
 
-        var dbReqs = context.Requirements
-            .Where(r => r.Tags.Exists(t => t is "Patient" or "Encounter" or "Inpatient" or "Emergency" or "Revenue" or "Diagnostics"))
-            .ToList();
+        var dbReqs = context.DomainProfile?.DomainRequirementTags is { Count: > 0 } domainTags
+            ? context.Requirements
+                .Where(r => r.Tags.Exists(t => domainTags.Contains(t, StringComparer.OrdinalIgnoreCase)))
+                .ToList()
+            : context.Requirements; // No domain tags available — check ALL requirements
 
         var uncovered = dbReqs.Where(r => !coveredIds.Contains(r.Id)).ToList();
 

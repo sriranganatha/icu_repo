@@ -9,7 +9,7 @@ public class Project : PlatformEntityBase
     public string Description { get; set; } = string.Empty;
     [Required] public string ProjectType { get; set; } = "web_app"; // web_app | api | mobile_app | data_pipeline | ml_model | cli_tool | library | full_stack
     [Required] public string Status { get; set; } = "draft"; // draft | active | paused | completed | archived
-    public string BrdStatus { get; set; } = "draft"; // draft | in_review | approved | rejected | superseded
+    public string BrdStatus { get; set; } = "draft"; // legacy — per-BRD status is now on BrdDocument
     public DateTimeOffset? BrdApprovedAt { get; set; }
     public string? BrdApprovedBy { get; set; }
     public string? OrganizationId { get; set; }
@@ -28,7 +28,7 @@ public class Project : PlatformEntityBase
     public ICollection<ApiContract> ApiContracts { get; set; } = [];
     public ICollection<DataModelDefinition> DataModels { get; set; } = [];
     public ICollection<ArchitectureDecisionRecord> Adrs { get; set; } = [];
-    public ICollection<BrdSectionRecord> BrdSections { get; set; } = [];
+    public ICollection<BrdDocument> BrdDocuments { get; set; } = [];
     public ICollection<AgentAssignment> AgentAssignments { get; set; } = [];
     public ICollection<QualityReport> QualityReports { get; set; } = [];
     public ICollection<TraceabilityRecord> TraceabilityRecords { get; set; } = [];

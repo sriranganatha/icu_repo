@@ -7,29 +7,53 @@
     <div class="d-flex justify-content-between align-items-center mb-4">
         <h2><i class="bi bi-file-earmark-text me-2"></i>Business Requirements Documents</h2>
         <div class="d-flex gap-2 align-items-center">
-            <a href="/Brd/Upload" class="btn btn-primary"><i class="bi bi-cloud-upload me-1"></i>Upload Requirements</a>
+            <button class="btn btn-primary" onclick="showCreateModal()">
+                <i class="bi bi-plus-circle me-1"></i>New BRD
+            </button>
+            <a href="/Brd/Upload" class="btn btn-outline-primary">
+                <i class="bi bi-cloud-upload me-1"></i>Upload Files
+            </a>
             <span class="badge bg-primary fs-6" id="brdCount">0 documents</span>
         </div>
     </div>
 
     <!-- Status Filter Tabs -->
     <ul class="nav nav-tabs mb-3" id="statusTabs">
-        <li class="nav-item">
-            <a class="nav-link active" href="#" data-filter="all">All</a>
-        </li>
-        <li class="nav-item">
-            <a class="nav-link" href="#" data-filter="Draft"><i class="bi bi-pencil me-1"></i>Draft</a>
-        </li>
-        <li class="nav-item">
-            <a class="nav-link" href="#" data-filter="InReview"><i class="bi bi-eye me-1"></i>In Review</a>
-        </li>
-        <li class="nav-item">
-            <a class="nav-link" href="#" data-filter="Approved"><i class="bi bi-check-circle me-1"></i>Approved</a>
-        </li>
-        <li class="nav-item">
-            <a class="nav-link" href="#" data-filter="Rejected"><i class="bi bi-x-circle me-1"></i>Rejected</a>
-        </li>
+        <li class="nav-item"><a class="nav-link active" href="#" data-filter="all">All</a></li>
+        <li class="nav-item"><a class="nav-link" href="#" data-filter="draft"><i class="bi bi-pencil me-1"></i>Draft</a></li>
+        <li class="nav-item"><a class="nav-link" href="#" data-filter="enriched"><i class="bi bi-stars me-1"></i>Enriched</a></li>
+        <li class="nav-item"><a class="nav-link" href="#" data-filter="in_review"><i class="bi bi-eye me-1"></i>In Review</a></li>
+        <li class="nav-item"><a class="nav-link" href="#" data-filter="approved"><i class="bi bi-check-circle me-1"></i>Approved</a></li>
+        <li class="nav-item"><a class="nav-link" href="#" data-filter="rejected"><i class="bi bi-x-circle me-1"></i>Rejected</a></li>
     </ul>
+
+    <!-- Batch Action Bar (visible when BRDs are selected) -->
+    <div id="batchActionBar" class="alert alert-info d-flex justify-content-between align-items-center mb-3" style="display:none !important;">
+        <div class="d-flex align-items-center gap-2">
+            <input type="checkbox" class="form-check-input" id="selectAllBrds" onchange="toggleSelectAll(this.checked)"
+                   style="width:1.2em; height:1.2em;">
+            <label class="form-check-label fw-bold" for="selectAllBrds">
+                <span id="selectedCountLabel">0 selected</span>
+            </label>
+        </div>
+        <div class="d-flex gap-2">
+            <button class="btn btn-sm btn-primary" onclick="batchEnrich()" id="btnBatchEnrich">
+                <i class="bi bi-stars me-1"></i>Enrich Selected
+            </button>
+            <button class="btn btn-sm btn-success" onclick="batchApprove()" id="btnBatchApprove">
+                <i class="bi bi-check-circle me-1"></i>Approve Selected
+            </button>
+            <button class="btn btn-sm btn-warning" onclick="batchExport()" id="btnBatchExport">
+                <i class="bi bi-download me-1"></i>Export Selected
+            </button>
+            <button class="btn btn-sm btn-outline-danger" onclick="batchDelete()" id="btnBatchDelete">
+                <i class="bi bi-trash me-1"></i>Delete Selected
+            </button>
+            <button class="btn btn-sm btn-outline-secondary" onclick="clearSelection()">
+                <i class="bi bi-x-circle me-1"></i>Clear
+            </button>
+        </div>
+    </div>
 
     <!-- BRD Cards -->
     <div id="brdList" class="row g-3">
@@ -38,120 +62,301 @@
             <p class="mt-2">Loading BRD documents...</p>
         </div>
     </div>
+</div>
 
-    <!-- BRD Detail Modal -->
-    <div class="modal fade" id="brdModal" tabindex="-1">
-        <div class="modal-dialog modal-xl modal-dialog-scrollable">
-            <div class="modal-content">
-                <div class="modal-header" style="background: linear-gradient(135deg, #1a237e, #0d47a1);">
-                    <h5 class="modal-title text-white" id="brdModalTitle">BRD Details</h5>
-                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+<!-- Create BRD Modal -->
+<div class="modal fade" id="createBrdModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header" style="background: linear-gradient(135deg, #1a237e, #0d47a1);">
+                <h5 class="modal-title text-white"><i class="bi bi-plus-circle me-2"></i>Create New BRD</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <!-- Project Selection -->
+                <div class="mb-3">
+                    <label class="form-label fw-bold">Project</label>
+                    <select class="form-select" id="createProjectId">
+                        <option value="">Loading projects...</option>
+                    </select>
                 </div>
-                <div class="modal-body" id="brdModalBody">
+
+                <!-- Title -->
+                <div class="mb-3">
+                    <label class="form-label fw-bold">BRD Title</label>
+                    <input type="text" class="form-control" id="createTitle" placeholder="e.g. Patient Management Module">
                 </div>
-                <div class="modal-footer">
-                    <div class="btn-group" id="brdActions">
-                        <button class="btn btn-outline-primary" id="btnSubmitReview" onclick="submitForReview()">
-                            <i class="bi bi-send me-1"></i>Submit for Review
+
+                <!-- Description -->
+                <div class="mb-3">
+                    <label class="form-label fw-bold">Description <span class="text-muted fw-normal">(optional)</span></label>
+                    <textarea class="form-control" id="createDescription" rows="2" placeholder="Brief description of this BRD's scope"></textarea>
+                </div>
+
+                <!-- BRD Types (multi-select) -->
+                <div class="mb-3">
+                    <label class="form-label fw-bold">BRD Types <span class="text-muted fw-normal">(select one or more)</span></label>
+                    <div class="d-flex gap-2 mb-2">
+                        <button type="button" class="btn btn-sm btn-outline-primary" onclick="toggleAllBrdTypes(true)">
+                            <i class="bi bi-check-all me-1"></i>Select All
                         </button>
-                        <button class="btn btn-success" id="btnApprove" onclick="approveBrd()">
-                            <i class="bi bi-check-lg me-1"></i>Approve
-                        </button>
-                        <button class="btn btn-danger" id="btnReject" onclick="rejectBrd()">
-                            <i class="bi bi-x-lg me-1"></i>Reject
+                        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="toggleAllBrdTypes(false)">
+                            <i class="bi bi-x-circle me-1"></i>Deselect All
                         </button>
                     </div>
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                    <div id="brdTypeCheckboxes" class="row g-2"></div>
+                    <div class="form-text">Web Application and Mobile Application types include extensive UI/UX workflow sections.</div>
                 </div>
+
+                <!-- Instructions -->
+                <div class="mb-3">
+                    <label class="form-label fw-bold">Custom Instructions for AI <span class="text-muted fw-normal">(optional)</span></label>
+                    <textarea class="form-control" id="createInstructions" rows="3"
+                              placeholder="e.g. Build BRD focused on UI and UX screens for patient registration, appointment scheduling, and billing"></textarea>
+                    <div class="form-text">These instructions guide AI enrichment of the BRD sections.</div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" id="btnCreateBrd" onclick="createBrd()">
+                    <i class="bi bi-plus-circle me-1"></i>Create BRD
+                </button>
             </div>
         </div>
     </div>
 </div>
 
 @section Scripts {
-<script src="https://cdn.jsdelivr.net/npm/microsoft/signalr@8.0.0/dist/browser/signalr.min.js"></script>
+<style>
+    .brd-type-card { border: 2px solid #dee2e6 !important; }
+    .brd-type-card:hover { border-color: #0d6efd !important; background: #f8f9ff; }
+    .brd-type-card.selected { border-color: #0d6efd !important; background: #e7f0ff; box-shadow: 0 0 0 0.15rem rgba(13,110,253,.25); }
+</style>
 <script>
-    let brds = [];
-    let selectedBrdId = null;
+    function toggleTypeCardStyle(checkbox) {
+        const card = checkbox.closest('.brd-type-card');
+        if (card) card.classList.toggle('selected', checkbox.checked);
+    }
+    let brdDocuments = [];
+    let projects = [];
+    let brdTypes = [];
 
-    const connection = new signalR.HubConnectionBuilder()
-        .withUrl("/hubs/pipeline")
-        .withAutomaticReconnect()
-        .build();
+    // ── Init ──────────────────────────────────────────────
+    (async function init() {
+        await Promise.all([loadBrdDocuments(), loadProjects(), loadBrdTypes()]);
+    })();
 
-    connection.on("BrdUpdated", (brd) => {
-        const idx = brds.findIndex(b => b.id === brd.id);
-        if (idx >= 0) brds[idx] = brd;
-        else brds.push(brd);
-        renderBrds();
-    });
-
-    connection.on("PipelineState", (state) => {
-        if (state.brdDocuments) {
-            brds = state.brdDocuments;
-            renderBrds();
-        }
-    });
-
-    connection.start().catch(console.error);
-
-    // Load BRD projects from API
-    loadBrdProjects();
-
-    async function loadBrdProjects() {
+    // ── Load BRD documents ────────────────────────────────
+    async function loadBrdDocuments() {
         try {
-            const res = await fetch('/api/brd/projects');
+            const res = await fetch('/api/brd/documents');
             if (!res.ok) return;
-            const projects = await res.json();
-            if (projects.length > 0) {
-                const brdList = document.getElementById('brdList');
-                brdList.innerHTML = projects.map(p => `
+            brdDocuments = await res.json();
+            renderBrds();
+        } catch (e) {
+            console.warn('Could not load BRD documents:', e);
+            document.getElementById('brdList').innerHTML =
+                '<div class="col-12 text-center text-muted py-5"><i class="bi bi-exclamation-triangle fs-1 text-warning"></i><p class="mt-2">Error loading BRD documents.</p></div>';
+        }
+    }
+
+    async function loadProjects() {
+        try {
+            const res = await fetch('/api/projects');
+            if (!res.ok) return;
+            projects = await res.json();
+        } catch (e) { console.warn('Could not load projects:', e); }
+    }
+
+    async function loadBrdTypes() {
+        try {
+            const res = await fetch('/api/brd/types');
+            if (!res.ok) return;
+            brdTypes = await res.json();
+        } catch (e) { console.warn('Could not load BRD types:', e); }
+    }
+
+    // ── Render BRD cards ──────────────────────────────────
+    function renderBrds() {
+        const filter = getActiveFilter();
+        const filtered = filter === 'all' ? brdDocuments : brdDocuments.filter(b => b.status === filter);
+
+        document.getElementById('brdCount').textContent = `${filtered.length} document(s)`;
+
+        if (filtered.length === 0) {
+            document.getElementById('brdList').innerHTML =
+                `<div class="col-12 text-center text-muted py-5">
+                    <i class="bi bi-inbox fs-1"></i>
+                    <p class="mt-2">No BRD documents${filter !== 'all' ? ' matching this filter' : ' yet'}.</p>
+                    <button class="btn btn-primary mt-2" onclick="showCreateModal()">
+                        <i class="bi bi-plus-circle me-1"></i>Create your first BRD
+                    </button>
+                </div>`;
+            return;
+        }
+
+        // Group by project
+        const grouped = {};
+        for (const brd of filtered) {
+            if (!grouped[brd.projectId]) grouped[brd.projectId] = { name: brd.projectName, brds: [] };
+            grouped[brd.projectId].brds.push(brd);
+        }
+
+        let html = '';
+        for (const [projectId, group] of Object.entries(grouped)) {
+            html += `<div class="col-12 mb-2">
+                <h5 class="text-muted mb-3"><i class="bi bi-folder me-1"></i>${escapeHtml(group.name)}</h5>
+                <div class="row g-3">`;
+
+            for (const brd of group.brds) {
+                html += `
                     <div class="col-md-6 col-lg-4">
-                        <div class="card h-100">
+                        <div class="card h-100 border-start border-4 ${typeBorderColor(brd.brdType)} ${selectedBrdIds.has(brd.id) ? 'border-primary shadow' : ''}">
                             <div class="card-header d-flex justify-content-between align-items-center">
-                                <span class="fw-bold text-truncate">${p.projectName}</span>
-                                <span class="badge bg-secondary">${p.projectType}</span>
+                                <div class="d-flex align-items-center gap-2">
+                                    <input type="checkbox" class="form-check-input brd-select-cb mt-0"
+                                           value="${brd.id}" data-brd-title="${escapeAttr(brd.title)}"
+                                           ${selectedBrdIds.has(brd.id) ? 'checked' : ''}
+                                           onchange="toggleBrdSelection(this)"
+                                           style="width:1.1em; height:1.1em; cursor:pointer;">
+                                    <span class="fw-bold text-truncate" title="${escapeHtml(brd.title)}">${escapeHtml(brd.title)}</span>
+                                </div>
+                                ${statusBadge(brd.status)}
                             </div>
                             <div class="card-body">
                                 <div class="d-flex gap-2 flex-wrap mb-2">
-                                    <span class="badge bg-info"><i class="bi bi-list-check me-1"></i>${p.sectionCount} sections</span>
-                                    <span class="badge bg-light text-dark"><i class="bi bi-clock me-1"></i>${new Date(p.lastUpdated).toLocaleString()}</span>
+                                    ${typeBadge(brd.brdType, brd.brdTypeDisplay)}
+                                    <span class="badge bg-info"><i class="bi bi-list-check me-1"></i>${brd.sectionCount} sections</span>
+                                </div>
+                                ${brd.description ? `<p class="card-text text-muted small mb-2">${escapeHtml(brd.description).substring(0, 120)}</p>` : ''}
+                                ${brd.instructions ? `<div class="small text-primary"><i class="bi bi-robot me-1"></i>${escapeHtml(brd.instructions).substring(0, 80)}...</div>` : ''}
+                                <div class="text-muted small mt-2">
+                                    Updated: ${new Date(brd.updatedAt).toLocaleString()}
                                 </div>
                                 <div class="d-flex gap-2 mt-3">
-                                    <a href="/Brd/Edit?projectId=${p.projectId}" class="btn btn-sm btn-outline-primary flex-fill">
+                                    <a href="/Brd/Edit?brdId=${brd.id}" class="btn btn-sm btn-outline-primary flex-fill">
                                         <i class="bi bi-pencil-square me-1"></i>Edit
                                     </a>
-                                    <button class="btn btn-sm btn-outline-danger flex-fill" onclick="event.stopPropagation(); deleteBrd('${p.projectId}', '${(p.projectName || '').replace(/'/g, "\\'")}')">
+                                    <button class="btn btn-sm btn-outline-danger flex-fill"
+                                            onclick="event.stopPropagation(); deleteBrd('${brd.id}', '${escapeAttr(brd.title)}')">
                                         <i class="bi bi-trash me-1"></i>Delete
                                     </button>
                                 </div>
                             </div>
                         </div>
-                    </div>
-                `).join('');
-                document.getElementById('brdCount').textContent = `${projects.length} document(s)`;
-            } else {
-                document.getElementById('brdList').innerHTML = '<div class="col-12 text-center text-muted py-5"><i class="bi bi-inbox fs-1"></i><p class="mt-2">No BRD documents yet. <a href="/Brd/Upload">Upload requirements</a> to generate one.</p></div>';
+                    </div>`;
             }
-        } catch (e) { console.warn('Could not load BRD projects:', e); }
+            html += '</div></div>';
+        }
+
+        document.getElementById('brdList').innerHTML = html;
     }
 
-    async function deleteBrd(projectId, projectName) {
-        if (!confirm(`Delete BRD "${projectName}"? This will remove all sections and cannot be undone.`)) return;
+    // ── Create BRD Modal ──────────────────────────────────
+    function showCreateModal() {
+        // Populate project dropdown
+        const select = document.getElementById('createProjectId');
+        select.innerHTML = '<option value="">-- Select Project --</option>' +
+            projects.map(p => `<option value="${p.id}">${escapeHtml(p.name)} (${p.projectType})</option>`).join('');
+
+        // Auto-select if there's a global active project
+        const activeId = window.getActiveProjectId ? window.getActiveProjectId() : null;
+        if (activeId) select.value = activeId;
+
+        // Populate BRD type checkboxes — entire card is clickable
+        const container = document.getElementById('brdTypeCheckboxes');
+        container.innerHTML = brdTypes.map(t => `
+            <div class="col-md-6">
+                <label class="d-block border rounded p-3 mb-0 brd-type-card" for="type_${t.value}"
+                       style="cursor:pointer; user-select:none; transition: all 0.15s ease;">
+                    <div class="d-flex align-items-center gap-2">
+                        <input class="form-check-input mt-0 flex-shrink-0" type="checkbox"
+                               value="${t.value}" id="type_${t.value}"
+                               style="width:1.2em; height:1.2em;"
+                               onchange="toggleTypeCardStyle(this)">
+                        <div class="flex-grow-1">
+                            <span class="fw-semibold">
+                                ${typeIcon(t.value)} ${t.label}
+                            </span>
+                            ${t.value === 'web_application' || t.value === 'mobile_application'
+                                ? '<span class="badge bg-info ms-2">UI/UX</span>' : ''}
+                            <div class="text-muted small mt-1">${typeDescription(t.value)}</div>
+                        </div>
+                    </div>
+                </label>
+            </div>
+        `).join('');
+
+        // Clear fields
+        document.getElementById('createTitle').value = '';
+        document.getElementById('createDescription').value = '';
+        document.getElementById('createInstructions').value = '';
+
+        new bootstrap.Modal(document.getElementById('createBrdModal')).show();
+    }
+
+    async function createBrd() {
+        const projectId = document.getElementById('createProjectId').value;
+        const title = document.getElementById('createTitle').value.trim();
+        const description = document.getElementById('createDescription').value.trim();
+        const instructions = document.getElementById('createInstructions').value.trim();
+        const selectedTypes = [...document.querySelectorAll('#brdTypeCheckboxes input:checked')].map(c => c.value);
+
+        if (!projectId) { alert('Please select a project.'); return; }
+        if (!title) { alert('Please enter a title.'); return; }
+        if (selectedTypes.length === 0) { alert('Please select at least one BRD type.'); return; }
+
+        const btn = document.getElementById('btnCreateBrd');
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Creating...';
+
         try {
-            const res = await fetch(`/api/brd/${encodeURIComponent(projectId)}/sections`, { method: 'DELETE' });
-            if (res.ok) {
-                loadBrdProjects();
-            } else {
+            const res = await fetch('/api/brd/documents', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    projectId, title, description,
+                    brdTypes: selectedTypes,
+                    instructions: instructions || null
+                })
+            });
+
+            if (!res.ok) {
                 const err = await res.json().catch(() => ({}));
-                alert('Failed to delete: ' + (err.error || res.statusText));
+                alert('Create failed: ' + (err.error || res.statusText));
+                return;
             }
-        } catch (e) {
-            alert('Error deleting BRD: ' + e.message);
+
+            const result = await res.json();
+            bootstrap.Modal.getInstance(document.getElementById('createBrdModal')).hide();
+            showToast(`Created ${result.brdsCreated} BRD document(s)`);
+            await loadBrdDocuments();
+        } catch (ex) {
+            alert('Error: ' + ex.message);
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-plus-circle me-1"></i>Create BRD';
         }
     }
 
-    // Tab filtering
+    // ── Delete BRD ────────────────────────────────────────
+    async function deleteBrd(brdId, title) {
+        if (!confirm(`Delete BRD "${title}"? This will remove all sections and cannot be undone.`)) return;
+        try {
+            const res = await fetch(`/api/brd/documents/${encodeURIComponent(brdId)}`, { method: 'DELETE' });
+            if (res.ok) {
+                showToast('BRD deleted.');
+                await loadBrdDocuments();
+            } else {
+                const err = await res.json().catch(() => ({}));
+                alert('Delete failed: ' + (err.error || res.statusText));
+            }
+        } catch (e) {
+            alert('Error: ' + e.message);
+        }
+    }
+
+    // ── Tab filtering ─────────────────────────────────────
     document.querySelectorAll('#statusTabs a').forEach(tab => {
         tab.addEventListener('click', (e) => {
             e.preventDefault();
@@ -165,109 +370,255 @@
         return document.querySelector('#statusTabs a.active')?.dataset.filter || 'all';
     }
 
-    function renderBrds() {
-        const filter = getActiveFilter();
-        const filtered = filter === 'all' ? brds : brds.filter(b => b.status === filter);
-        document.getElementById('brdCount').textContent = `${filtered.length} document(s)`;
-
-        if (filtered.length === 0) {
-            document.getElementById('brdList').innerHTML =
-                '<div class="col-12 text-center text-muted py-5"><i class="bi bi-hourglass-split fs-1"></i><p class="mt-2">No BRD documents match this filter.</p></div>';
-            return;
-        }
-
-        document.getElementById('brdList').innerHTML = filtered.map(brd => `
-            <div class="col-md-6 col-lg-4">
-                <div class="card h-100" style="cursor:pointer" onclick="showBrd('${brd.id}')">
-                    <div class="card-header d-flex justify-content-between align-items-center">
-                        <span class="fw-bold text-truncate">${brd.title || 'Untitled BRD'}</span>
-                        ${statusBadge(brd.status)}
-                    </div>
-                    <div class="card-body">
-                        <p class="card-text text-muted small">${(brd.executiveSummary || '').substring(0, 150)}…</p>
-                        <div class="d-flex gap-2 flex-wrap">
-                            <span class="badge bg-light text-dark"><i class="bi bi-list-check me-1"></i>${brd.tracedRequirementIds?.length || 0} reqs</span>
-                            <span class="badge bg-light text-dark"><i class="bi bi-chat-dots me-1"></i>${brd.reviewComments?.length || 0} comments</span>
-                            <span class="badge bg-light text-dark"><i class="bi bi-exclamation-triangle me-1"></i>${brd.risks?.length || 0} risks</span>
-                        </div>
-                    </div>
-                    <div class="card-footer text-muted small">
-                        Created: ${new Date(brd.createdAt).toLocaleDateString()}
-                    </div>
-                </div>
-            </div>
-        `).join('');
-    }
-
+    // ── Helpers ───────────────────────────────────────────
     function statusBadge(status) {
         const map = {
-            'Draft': 'bg-secondary',
-            'InReview': 'bg-warning text-dark',
-            'Approved': 'bg-success',
-            'Rejected': 'bg-danger',
-            'Superseded': 'bg-dark'
+            'draft': 'bg-secondary', 'enriched': 'bg-info',
+            'in_review': 'bg-warning text-dark', 'approved': 'bg-success', 'rejected': 'bg-danger'
         };
-        return `<span class="badge ${map[status] || 'bg-info'}">${status}</span>`;
+        const label = (status || 'draft').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+        return `<span class="badge ${map[status] || 'bg-secondary'}">${label}</span>`;
     }
 
-    function showBrd(id) {
-        const brd = brds.find(b => b.id === id);
-        if (!brd) return;
-        selectedBrdId = id;
+    function typeBadge(type, display) {
+        const colors = {
+            'general': 'bg-secondary', 'web_application': 'bg-primary',
+            'mobile_application': 'bg-success', 'api_service': 'bg-warning text-dark',
+            'data_pipeline': 'bg-danger', 'integration': 'bg-dark'
+        };
+        return `<span class="badge ${colors[type] || 'bg-secondary'}">${typeIcon(type)} ${display}</span>`;
+    }
 
-        document.getElementById('brdModalTitle').textContent = brd.title || 'BRD Details';
+    function typeIcon(type) {
+        const icons = {
+            'general': '<i class="bi bi-file-text"></i>',
+            'web_application': '<i class="bi bi-globe"></i>',
+            'mobile_application': '<i class="bi bi-phone"></i>',
+            'api_service': '<i class="bi bi-plug"></i>',
+            'data_pipeline': '<i class="bi bi-diagram-3"></i>',
+            'integration': '<i class="bi bi-link-45deg"></i>'
+        };
+        return icons[type] || '<i class="bi bi-file-text"></i>';
+    }
 
-        const body = document.getElementById('brdModalBody');
-        body.innerHTML = `
-            <div class="row mb-3">
-                <div class="col-md-4"><strong>Status:</strong> ${statusBadge(brd.status)}</div>
-                <div class="col-md-4"><strong>Run ID:</strong> <code>${brd.runId}</code></div>
-                <div class="col-md-4"><strong>Created:</strong> ${new Date(brd.createdAt).toLocaleString()}</div>
+    function typeBorderColor(type) {
+        const colors = {
+            'general': 'border-secondary', 'web_application': 'border-primary',
+            'mobile_application': 'border-success', 'api_service': 'border-warning',
+            'data_pipeline': 'border-danger', 'integration': 'border-dark'
+        };
+        return colors[type] || 'border-secondary';
+    }
+
+    function escapeHtml(text) {
+        if (!text) return '';
+        const d = document.createElement('div');
+        d.textContent = text;
+        return d.innerHTML;
+    }
+
+    function escapeAttr(text) {
+        return (text || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+    }
+
+    function showToast(message) {
+        let container = document.getElementById('toastContainer');
+        if (!container) {
+            container = document.createElement('div');
+            container.id = 'toastContainer';
+            container.className = 'toast-container position-fixed bottom-0 end-0 p-3';
+            container.style.zIndex = 1090;
+            document.body.appendChild(container);
+        }
+        const id = 'toast-' + Date.now();
+        container.insertAdjacentHTML('beforeend', `
+            <div id="${id}" class="toast align-items-center text-bg-success border-0" role="alert">
+                <div class="d-flex">
+                    <div class="toast-body"><i class="bi bi-check-circle me-1"></i>${message}</div>
+                    <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+                </div>
             </div>
-            <h5>Executive Summary</h5><p>${brd.executiveSummary || '<em>Empty</em>'}</p>
-            <h5>Scope</h5><p>${brd.projectScope || '<em>Empty</em>'}</p>
-            <div class="row">
-                <div class="col-md-6"><h6>In Scope</h6><pre class="bg-light p-2 small">${brd.inScope || '-'}</pre></div>
-                <div class="col-md-6"><h6>Out of Scope</h6><pre class="bg-light p-2 small">${brd.outOfScope || '-'}</pre></div>
-            </div>
-            <h5>Stakeholders</h5><ul>${(brd.stakeholders||[]).map(s => `<li>${s}</li>`).join('')}</ul>
-            <h5>Functional Requirements</h5><ul>${(brd.functionalRequirements||[]).map(r => `<li class="small">${r}</li>`).join('')}</ul>
-            <h5>Non-Functional Requirements</h5><ul>${(brd.nonFunctionalRequirements||[]).map(r => `<li class="small">${r}</li>`).join('')}</ul>
-            <h5>Risks</h5>
-            <table class="table table-sm table-striped">
-                <thead><tr><th>Risk</th><th>Impact</th><th>Likelihood</th><th>Mitigation</th></tr></thead>
-                <tbody>${(brd.risks||[]).map(r => `<tr><td>${r.description}</td><td>${r.impact}</td><td>${r.likelihood}</td><td>${r.mitigation}</td></tr>`).join('')}</tbody>
-            </table>
-            <h5>Review Comments</h5>
-            ${(brd.reviewComments||[]).length === 0 ? '<p class="text-muted">No comments yet.</p>' :
-              (brd.reviewComments||[]).map(c => `<div class="border-start border-3 ps-2 mb-2 ${c.action === 'Approve' ? 'border-success' : c.action === 'Reject' ? 'border-danger' : 'border-primary'}">
-                <strong>${c.author}</strong> <span class="badge bg-secondary">${c.action}</span> <small class="text-muted">${new Date(c.timestamp).toLocaleString()}</small>
-                <p class="mb-0">${c.content}</p>
-              </div>`).join('')}
-        `;
-
-        // Toggle action buttons based on status
-        document.getElementById('btnSubmitReview').style.display = brd.status === 'Draft' ? '' : 'none';
-        document.getElementById('btnApprove').style.display = brd.status === 'InReview' ? '' : 'none';
-        document.getElementById('btnReject').style.display = brd.status === 'InReview' ? '' : 'none';
-
-        new bootstrap.Modal(document.getElementById('brdModal')).show();
+        `);
+        const toastEl = document.getElementById(id);
+        new bootstrap.Toast(toastEl, { delay: 3000 }).show();
+        toastEl.addEventListener('hidden.bs.toast', () => toastEl.remove());
     }
 
-    async function submitForReview() {
-        if (!selectedBrdId) return;
-        await connection.invoke("BrdAction", selectedBrdId, "SubmitForReview", "");
+    // ── BRD type descriptions for create modal ────────────
+    function typeDescription(type) {
+        const descs = {
+            'general': 'Standard business requirements without specific technology focus.',
+            'web_application': 'Full web app with pages, navigation, forms, and responsive layouts.',
+            'mobile_application': 'Native/hybrid mobile app with screens, gestures, and offline support.',
+            'api_service': 'REST/gRPC APIs, endpoints, request/response schemas, and versioning.',
+            'data_pipeline': 'ETL workflows, data transformations, scheduling, and monitoring.',
+            'integration': 'Third-party system integrations, protocols, and data exchange.'
+        };
+        return descs[type] || 'General business requirements document.';
     }
 
-    async function approveBrd() {
-        if (!selectedBrdId) return;
-        await connection.invoke("BrdAction", selectedBrdId, "Approve", "Approved via dashboard.");
+    // ── Select All / Deselect All BRD types in create modal ──
+    function toggleAllBrdTypes(selectAll) {
+        document.querySelectorAll('#brdTypeCheckboxes input[type="checkbox"]').forEach(cb => {
+            cb.checked = selectAll;
+            toggleTypeCardStyle(cb);
+        });
     }
 
-    async function rejectBrd() {
-        const reason = prompt("Rejection reason:");
-        if (!reason || !selectedBrdId) return;
-        await connection.invoke("BrdAction", selectedBrdId, "Reject", reason);
+    // ── BRD multi-select state ────────────────────────────
+    const selectedBrdIds = new Set();
+
+    function toggleBrdSelection(cb) {
+        if (cb.checked) {
+            selectedBrdIds.add(cb.value);
+        } else {
+            selectedBrdIds.delete(cb.value);
+        }
+        updateBatchBar();
+        // Update card highlight
+        const card = cb.closest('.card');
+        if (card) {
+            card.classList.toggle('border-primary', cb.checked);
+            card.classList.toggle('shadow', cb.checked);
+        }
+    }
+
+    function toggleSelectAll(checked) {
+        document.querySelectorAll('.brd-select-cb').forEach(cb => {
+            cb.checked = checked;
+            if (checked) selectedBrdIds.add(cb.value);
+            else selectedBrdIds.delete(cb.value);
+            const card = cb.closest('.card');
+            if (card) {
+                card.classList.toggle('border-primary', checked);
+                card.classList.toggle('shadow', checked);
+            }
+        });
+        updateBatchBar();
+    }
+
+    function clearSelection() {
+        selectedBrdIds.clear();
+        document.querySelectorAll('.brd-select-cb').forEach(cb => {
+            cb.checked = false;
+            const card = cb.closest('.card');
+            if (card) { card.classList.remove('border-primary', 'shadow'); }
+        });
+        document.getElementById('selectAllBrds').checked = false;
+        updateBatchBar();
+    }
+
+    function updateBatchBar() {
+        const bar = document.getElementById('batchActionBar');
+        const count = selectedBrdIds.size;
+        document.getElementById('selectedCountLabel').textContent = `${count} selected`;
+        bar.style.display = count > 0 ? 'flex' : 'none';
+        bar.style.setProperty('display', count > 0 ? 'flex' : 'none', 'important');
+
+        // Update Select All checkbox state
+        const allCbs = document.querySelectorAll('.brd-select-cb');
+        const selectAllCb = document.getElementById('selectAllBrds');
+        if (allCbs.length > 0) {
+            selectAllCb.checked = count === allCbs.length;
+            selectAllCb.indeterminate = count > 0 && count < allCbs.length;
+        }
+    }
+
+    // ── Batch operations ──────────────────────────────────
+    async function batchEnrich() {
+        if (selectedBrdIds.size === 0) return;
+        const ids = [...selectedBrdIds];
+        const btn = document.getElementById('btnBatchEnrich');
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Enriching...';
+
+        let enriched = 0;
+        for (const id of ids) {
+            try {
+                const res = await fetch(`/api/brd/documents/${encodeURIComponent(id)}/enrich`, { method: 'POST' });
+                if (res.ok) enriched++;
+            } catch (e) { console.warn('Enrich failed for', id, e); }
+        }
+
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-stars me-1"></i>Enrich Selected';
+        showToast(`Enriched ${enriched}/${ids.length} BRD(s)`);
+        clearSelection();
+        await loadBrdDocuments();
+    }
+
+    async function batchApprove() {
+        if (selectedBrdIds.size === 0) return;
+        const ids = [...selectedBrdIds];
+        const btn = document.getElementById('btnBatchApprove');
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Approving...';
+
+        let approved = 0;
+        for (const id of ids) {
+            try {
+                const res = await fetch(`/api/brd/documents/${encodeURIComponent(id)}/status`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ status: 'approved' })
+                });
+                if (res.ok) approved++;
+            } catch (e) { console.warn('Approve failed for', id, e); }
+        }
+
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-check-circle me-1"></i>Approve Selected';
+        showToast(`Approved ${approved}/${ids.length} BRD(s)`);
+        clearSelection();
+        await loadBrdDocuments();
+    }
+
+    async function batchExport() {
+        if (selectedBrdIds.size === 0) return;
+        const ids = [...selectedBrdIds];
+        let exported = 0;
+        for (const id of ids) {
+            try {
+                const brd = brdDocuments.find(b => b.id === id);
+                const res = await fetch(`/api/brd/documents/${encodeURIComponent(id)}`);
+                if (res.ok) {
+                    const data = await res.json();
+                    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+                    const a = document.createElement('a');
+                    a.href = URL.createObjectURL(blob);
+                    a.download = `${(brd?.title || id).replace(/[^a-zA-Z0-9]/g, '_')}.json`;
+                    a.click();
+                    URL.revokeObjectURL(a.href);
+                    exported++;
+                }
+            } catch (e) { console.warn('Export failed for', id, e); }
+        }
+        showToast(`Exported ${exported}/${ids.length} BRD(s)`);
+    }
+
+    async function batchDelete() {
+        if (selectedBrdIds.size === 0) return;
+        const count = selectedBrdIds.size;
+        if (!confirm(`Delete ${count} selected BRD(s)? This cannot be undone.`)) return;
+
+        const ids = [...selectedBrdIds];
+        const btn = document.getElementById('btnBatchDelete');
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Deleting...';
+
+        let deleted = 0;
+        for (const id of ids) {
+            try {
+                const res = await fetch(`/api/brd/documents/${encodeURIComponent(id)}`, { method: 'DELETE' });
+                if (res.ok) deleted++;
+            } catch (e) { console.warn('Delete failed for', id, e); }
+        }
+
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-trash me-1"></i>Delete Selected';
+        showToast(`Deleted ${deleted}/${ids.length} BRD(s)`);
+        clearSelection();
+        await loadBrdDocuments();
     }
 </script>
 }

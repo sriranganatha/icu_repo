@@ -113,7 +113,7 @@ public sealed class SprintPlannerAgent : IAgent
         var prompt = new LlmPrompt
         {
             SystemPrompt = """
-                You are an agile estimation expert for a healthcare HMS system.
+                You are an agile estimation expert for a software system.
                 Estimate story points using Fibonacci: 1, 2, 3, 5, 8, 13.
                 Output ONLY lines in format: ID|POINTS
                 No explanations.
@@ -123,7 +123,7 @@ public sealed class SprintPlannerAgent : IAgent
                 {summary}
 
                 Consider: database stories = 2-5, API stories = 3-5, integration stories = 5-8,
-                security/HIPAA stories = 5-8, simple CRUD = 2-3.
+                security/compliance stories = 5-8, simple CRUD = 2-3.
                 """,
             Temperature = 0.2,
             MaxTokens = 500,

@@ -30,13 +30,13 @@ public sealed class RequirementsReaderAgent : IAgent
 
         var useBrd = !string.IsNullOrWhiteSpace(context.ProjectId);
         _logger.LogInformation("RequirementsReaderAgent starting — {Source}",
-            useBrd ? $"reading BRD for project {context.ProjectId}" : $"scanning {context.RequirementsBasePath}");
+            useBrd ? $"reading BRD documents for project {context.ProjectId}" : $"scanning {context.RequirementsBasePath}");
 
         try
         {
             if (context.ReportProgress is not null)
                 await context.ReportProgress(Type, useBrd
-                    ? $"Reading BRD sections for project: {context.ProjectId}"
+                    ? $"Reading all BRD documents for project: {context.ProjectId}"
                     : $"Scanning docs folder: {context.RequirementsBasePath}");
 
             var requirements = useBrd
@@ -47,6 +47,20 @@ public sealed class RequirementsReaderAgent : IAgent
             await EnrichRequirementsWithLlmAsync(requirements, ct);
             
             context.Requirements = requirements;
+
+            // ── Run conflict detection on parsed requirements (LLM-enhanced) ──
+            var conflictFindings = await RequirementConflictDetector.DetectAsync(requirements, _llm, context, ct);
+            if (conflictFindings.Count > 0)
+            {
+                context.Findings.AddRange(conflictFindings);
+                _logger.LogWarning("RequirementConflictDetector found {Count} issues (duplicates/contradictions)", conflictFindings.Count);
+                if (context.ReportProgress is not null)
+                    await context.ReportProgress(Type, $"Conflict detection: {conflictFindings.Count} issues — {conflictFindings.Count(f => f.Category == "RequirementDuplicate")} duplicates, {conflictFindings.Count(f => f.Category == "RequirementContradiction")} contradictions");
+            }
+            else if (context.ReportProgress is not null)
+            {
+                await context.ReportProgress(Type, "Conflict detection: no duplicates or contradictions found");
+            }
 
             if (context.ReportProgress is not null)
             {

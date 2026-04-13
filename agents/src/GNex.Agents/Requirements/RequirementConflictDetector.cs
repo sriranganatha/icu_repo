@@ -1,16 +1,138 @@
 using GNex.Core.Enums;
+using GNex.Core.Extensions;
+using GNex.Core.Interfaces;
 using GNex.Core.Models;
 
 namespace GNex.Agents.Requirements;
 
 /// <summary>
-/// Detects duplicate and contradictory requirements using text similarity
-/// and semantic heuristics. Flags issues and suggests merges.
+/// Detects duplicate and contradictory requirements using LLM-based semantic analysis
+/// with a static Jaccard/opposition fallback when LLM is unavailable.
 /// </summary>
 public static class RequirementConflictDetector
 {
     /// <summary>
-    /// Scans a requirement set and returns findings for duplicates and contradictions.
+    /// Scans a requirement set using LLM for semantic duplicate and contradiction detection.
+    /// Falls back to static analysis if LLM is unavailable.
+    /// </summary>
+    public static async Task<List<ReviewFinding>> DetectAsync(
+        List<Requirement> requirements, ILlmProvider? llm, AgentContext? context, CancellationToken ct = default)
+    {
+        if (requirements.Count < 2) return [];
+
+        // Try LLM-based analysis first
+        if (llm is not null && requirements.Count >= 2)
+        {
+            try
+            {
+                var llmFindings = await DetectWithLlmAsync(requirements, llm, context, ct);
+                if (llmFindings.Count > 0)
+                    return llmFindings;
+            }
+            catch
+            {
+                // Fall through to static analysis
+            }
+        }
+
+        return Detect(requirements);
+    }
+
+    /// <summary>
+    /// LLM-based semantic conflict detection — analyzes requirement pairs for duplicates,
+    /// contradictions, and ambiguities using domain context.
+    /// </summary>
+    private static async Task<List<ReviewFinding>> DetectWithLlmAsync(
+        List<Requirement> requirements, ILlmProvider llm, AgentContext? context, CancellationToken ct)
+    {
+        var reqSummary = string.Join("\n", requirements
+            .Take(80)
+            .Select(r => $"- [{r.Id}] {r.Title}: {r.Description}"));
+
+        var llmContext = context is not null
+            ? context.BuildLlmContextBlock(AgentType.RequirementsReader)
+            : "";
+
+        var prompt = new LlmPrompt
+        {
+            SystemPrompt = $$"""
+                You are a senior business analyst expert at detecting requirement conflicts.
+                Analyze the given requirements for:
+                1. DUPLICATES: Requirements that express the same thing in different words (semantic similarity)
+                2. CONTRADICTIONS: Requirements that conflict with each other (opposing constraints, conflicting behavior)
+                3. AMBIGUITIES: Requirements that are vague enough to cause implementation confusion
+
+                {{(!string.IsNullOrWhiteSpace(llmContext) ? llmContext : "")}}
+
+                For each issue found, output a JSON array with objects:
+                { "type": "duplicate|contradiction|ambiguity", "reqA": "REQ-ID-A", "reqB": "REQ-ID-B", "description": "explanation", "suggestion": "how to fix" }
+
+                Output ONLY valid JSON array. Empty array [] if no issues found.
+                """,
+            UserPrompt = $"Analyze these requirements:\n\n{reqSummary}",
+            Temperature = 0.2,
+            MaxTokens = 3000,
+            RequestingAgent = "RequirementConflictDetector"
+        };
+
+        var response = await llm.GenerateAsync(prompt, ct);
+        if (!response.Success || string.IsNullOrWhiteSpace(response.Content))
+            return [];
+
+        return ParseConflictFindings(response.Content);
+    }
+
+    private static List<ReviewFinding> ParseConflictFindings(string json)
+    {
+        var findings = new List<ReviewFinding>();
+        try
+        {
+            json = json.Trim();
+            if (json.StartsWith("```")) json = json[(json.IndexOf('\n') + 1)..];
+            if (json.EndsWith("```")) json = json[..^3].Trim();
+
+            var items = System.Text.Json.JsonSerializer.Deserialize<List<ConflictDto>>(json,
+                new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            if (items is null) return findings;
+
+            foreach (var item in items)
+            {
+                findings.Add(new ReviewFinding
+                {
+                    Category = item.Type?.ToLowerInvariant() switch
+                    {
+                        "duplicate" => "RequirementDuplicate",
+                        "contradiction" => "RequirementContradiction",
+                        "ambiguity" => "RequirementAmbiguity",
+                        _ => "RequirementConflict"
+                    },
+                    Severity = item.Type?.ToLowerInvariant() switch
+                    {
+                        "contradiction" => ReviewSeverity.Error,
+                        "duplicate" => ReviewSeverity.Warning,
+                        _ => ReviewSeverity.Info
+                    },
+                    Message = $"Requirements {item.ReqA} and {item.ReqB}: {item.Description}",
+                    FilePath = "docs/requirements",
+                    Suggestion = item.Suggestion ?? "Review and resolve the conflict."
+                });
+            }
+        }
+        catch { /* fallback will handle */ }
+        return findings;
+    }
+
+    private sealed class ConflictDto
+    {
+        public string? Type { get; set; }
+        public string? ReqA { get; set; }
+        public string? ReqB { get; set; }
+        public string? Description { get; set; }
+        public string? Suggestion { get; set; }
+    }
+
+    /// <summary>
+    /// Static fallback: scans a requirement set using Jaccard similarity and opposition words.
     /// </summary>
     public static List<ReviewFinding> Detect(List<Requirement> requirements)
     {

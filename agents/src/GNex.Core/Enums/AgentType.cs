@@ -43,5 +43,6 @@ public enum AgentType
     ConflictResolver,
     TraceabilityGate,
     SprintPlanner,
-    LearningLoop
+    LearningLoop,
+    PromptGenerator
 }

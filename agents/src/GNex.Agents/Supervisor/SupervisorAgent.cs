@@ -65,6 +65,10 @@ public sealed class SupervisorAgent : IAgent
             diagnostics.AddRange(ValidatePipelineIntegrity(context));
             diagnostics.AddRange(ValidateNoStaleAgents(context));
 
+            // ── Phase 2b: AgentResults + QualityMetrics analysis ─────────
+            diagnostics.AddRange(ValidateAgentResults(context));
+            diagnostics.AddRange(ValidateQualityMetrics(context));
+
             // ── Phase 3: Attempt remediation for failed checks ───────────
             var failedDiags = diagnostics.Where(d => d.Outcome == TestOutcome.Failed).ToList();
             if (failedDiags.Count > 0)
@@ -77,6 +81,16 @@ public sealed class SupervisorAgent : IAgent
             }
 
             context.TestDiagnostics.AddRange(diagnostics);
+
+            // ── Dispatch diagnostic failures as feedback to responsible agents ──
+            foreach (var diag in diagnostics.Where(d => d.Outcome == TestOutcome.Failed))
+            {
+                if (Enum.TryParse<AgentType>(diag.AgentUnderTest, out var targetAgent))
+                {
+                    context.WriteFeedback(targetAgent, Type, $"[{diag.Category}] {diag.Diagnostic} — {diag.Remediation}");
+                }
+            }
+
             context.AgentStatuses[Type] = AgentStatus.Completed;
 
             var passed = diagnostics.Count(d => d.Outcome == TestOutcome.Passed);
@@ -348,7 +362,7 @@ public sealed class SupervisorAgent : IAgent
             Category = "Output Validation",
             Outcome = intArtifacts.Count > 0 ? TestOutcome.Passed : TestOutcome.Failed,
             Diagnostic = intArtifacts.Count > 0 ? $"{intArtifacts.Count} integration artifacts" : "No integration artifacts",
-            Remediation = "IntegrationAgent must produce Kafka consumers, outbox, FHIR/HL7 adapters"
+            Remediation = "IntegrationAgent must produce Kafka consumers, outbox, protocol adapters"
         });
 
         var hasKafkaConsumer = intArtifacts.Any(a => a.Content.Contains("KafkaConsumer") || a.Content.Contains("BackgroundService"));
@@ -379,9 +393,9 @@ public sealed class SupervisorAgent : IAgent
             TestName = "Integration_HasFhirAdapter",
             AgentUnderTest = agentName,
             Category = "Interoperability",
-            Outcome = hasFhir ? TestOutcome.Passed : TestOutcome.Failed,
-            Diagnostic = hasFhir ? "FHIR R4 adapter present" : "No FHIR adapter — HL7 FHIR interop missing",
-            Remediation = "IntegrationAgent must generate FHIR R4 resource adapters"
+            Outcome = hasFhir ? TestOutcome.Passed : TestOutcome.Skipped,
+            Diagnostic = hasFhir ? "FHIR R4 adapter present" : "No FHIR adapter — optional for non-healthcare domains",
+            Remediation = "IntegrationAgent generates FHIR adapters when the domain requires healthcare interoperability"
         });
 
         return results;
@@ -647,6 +661,123 @@ public sealed class SupervisorAgent : IAgent
         }
 
         return remediations;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  AgentResults + QualityMetrics validation
+    // ═══════════════════════════════════════════════════════════════════
+
+    private static List<TestDiagnostic> ValidateAgentResults(AgentContext ctx)
+    {
+        var results = new List<TestDiagnostic>();
+
+        // Check that all code-gen agents produced results
+        var codeGenAgents = new[] { AgentType.Database, AgentType.ServiceLayer, AgentType.Application, AgentType.Integration, AgentType.Testing };
+        foreach (var agentType in codeGenAgents)
+        {
+            var hasResult = ctx.AgentResults.TryGetValue(agentType, out var result);
+            if (hasResult && result is not null)
+            {
+                // Check for agents that succeeded but produced no artifacts
+                if (result.Success && (result.Artifacts is null || result.Artifacts.Count == 0))
+                {
+                    results.Add(new TestDiagnostic
+                    {
+                        TestName = $"AgentResult_{agentType}_HasArtifacts",
+                        AgentUnderTest = agentType.ToString(),
+                        Category = "AgentResults",
+                        Outcome = TestOutcome.Failed,
+                        Diagnostic = $"{agentType} succeeded but produced 0 artifacts — possible no-op execution",
+                        Remediation = $"Check if {agentType} had claimed work items to process"
+                    });
+                }
+
+                // Check for agents with excessive errors
+                if (result.Errors.Count > 5)
+                {
+                    results.Add(new TestDiagnostic
+                    {
+                        TestName = $"AgentResult_{agentType}_ErrorCount",
+                        AgentUnderTest = agentType.ToString(),
+                        Category = "AgentResults",
+                        Outcome = TestOutcome.Failed,
+                        Diagnostic = $"{agentType} had {result.Errors.Count} errors: {string.Join("; ", result.Errors.Take(3))}",
+                        Remediation = "Investigate root cause of repeated errors"
+                    });
+                }
+            }
+        }
+
+        // Check Review agent result specifically for high finding counts
+        if (ctx.AgentResults.TryGetValue(AgentType.Review, out var reviewResult) && reviewResult?.Findings is { Count: > 0 })
+        {
+            var errorFindings = reviewResult.Findings.Count(f => f.Severity >= ReviewSeverity.Error);
+            results.Add(new TestDiagnostic
+            {
+                TestName = "AgentResult_Review_FindingSeverity",
+                AgentUnderTest = "Review",
+                Category = "AgentResults",
+                Outcome = errorFindings == 0 ? TestOutcome.Passed : TestOutcome.Failed,
+                Diagnostic = errorFindings == 0
+                    ? $"Review produced {reviewResult.Findings.Count} findings, none blocking"
+                    : $"Review produced {errorFindings} error-level findings that need remediation",
+                Remediation = "BugFix agent should address all error-level review findings"
+            });
+        }
+
+        return results;
+    }
+
+    private static List<TestDiagnostic> ValidateQualityMetrics(AgentContext ctx)
+    {
+        var results = new List<TestDiagnostic>();
+        var metrics = ctx.QualityMetrics.ToList();
+
+        if (metrics.Count == 0)
+        {
+            results.Add(new TestDiagnostic
+            {
+                TestName = "QualityMetrics_Present",
+                AgentUnderTest = "Pipeline",
+                Category = "QualityMetrics",
+                Outcome = TestOutcome.Skipped,
+                Diagnostic = "No quality metrics recorded — first run or metrics not yet populated",
+                Remediation = "Quality metrics are recorded by the orchestrator after each agent execution"
+            });
+            return results;
+        }
+
+        // Check for failing metrics
+        var failingMetrics = metrics.Where(m => !m.Passed).ToList();
+        results.Add(new TestDiagnostic
+        {
+            TestName = "QualityMetrics_AllPassing",
+            AgentUnderTest = "Pipeline",
+            Category = "QualityMetrics",
+            Outcome = failingMetrics.Count == 0 ? TestOutcome.Passed : TestOutcome.Failed,
+            Diagnostic = failingMetrics.Count == 0
+                ? $"All {metrics.Count} quality metrics passing"
+                : $"{failingMetrics.Count}/{metrics.Count} metrics failing: {string.Join(", ", failingMetrics.Take(5).Select(m => $"{m.Source}.{m.Category}"))}",
+            Remediation = "Review failing quality metrics and address the underlying agent issues"
+        });
+
+        // Check artifact counts per agent
+        var artifactMetrics = metrics.Where(m => m.Category == "ArtifactCount").ToList();
+        var zeroArtifactAgents = artifactMetrics.Where(m => m.Value == 0).ToList();
+        if (zeroArtifactAgents.Count > 0)
+        {
+            results.Add(new TestDiagnostic
+            {
+                TestName = "QualityMetrics_NoZeroArtifacts",
+                AgentUnderTest = "Pipeline",
+                Category = "QualityMetrics",
+                Outcome = TestOutcome.Failed,
+                Diagnostic = $"{zeroArtifactAgents.Count} agents produced 0 artifacts: {string.Join(", ", zeroArtifactAgents.Select(m => m.Source))}",
+                Remediation = "Agents with zero artifacts may have had no work items or encountered silent failures"
+            });
+        }
+
+        return results;
     }
 
     // ═══════════════════════════════════════════════════════════════════

@@ -10,6 +10,6 @@ public class BrdSectionRecord : PlatformEntityBase
     [Required] public string Content { get; set; } = string.Empty;
     public string DiagramsJson { get; set; } = "[]";
 
-    public Project? Brd { get; set; }
+    public BrdDocument? Brd { get; set; }
     public ICollection<BrdFeedbackRecord> Feedbacks { get; set; } = [];
 }

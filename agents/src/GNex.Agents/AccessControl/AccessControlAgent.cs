@@ -9,8 +9,8 @@ namespace GNex.Agents.AccessControl;
 
 /// <summary>
 /// AI-powered RBAC/ABAC agent. Generates role definitions, permission
-/// matrices, resource-level authorization policies, break-the-glass emergency access,
-/// and consent management for the HMS platform.
+/// matrices, resource-level authorization policies, emergency elevated access,
+/// and consent management for the platform.
 /// </summary>
 public sealed class AccessControlAgent : IAgent
 {
@@ -19,7 +19,7 @@ public sealed class AccessControlAgent : IAgent
 
     public AgentType Type => AgentType.AccessControl;
     public string Name => "Access Control Agent";
-    public string Description => "Generates RBAC roles, permission matrices, resource-level authorization, break-the-glass emergency access, and consent management.";
+    public string Description => "Generates RBAC roles, permission matrices, resource-level authorization, emergency elevated access, and consent management.";
 
     public AccessControlAgent(ILlmProvider llm, ILogger<AccessControlAgent> logger)
     {
@@ -39,11 +39,11 @@ public sealed class AccessControlAgent : IAgent
         {
             if (context.ReportProgress is not null)
                 await context.ReportProgress(Type, "Generating role definitions from domain requirements");
-            artifacts.Add(GenerateRoleDefinitions());
+            artifacts.Add(await GenerateRoleDefinitions(context, ct));
 
             if (context.ReportProgress is not null)
                 await context.ReportProgress(Type, "Building permission matrix — mapping roles to resources with CRUD granularity");
-            artifacts.Add(GeneratePermissionMatrix());
+            artifacts.Add(await GeneratePermissionMatrix(context, ct));
 
             if (context.ReportProgress is not null)
                 await context.ReportProgress(Type, "AI-generating authorization policy provider — resource-level ABAC with Gemini LLM");
@@ -83,170 +83,183 @@ public sealed class AccessControlAgent : IAgent
         }
     }
 
-    private static CodeArtifact GenerateRoleDefinitions() => new()
+    private async Task<CodeArtifact> GenerateRoleDefinitions(AgentContext context, CancellationToken ct)
     {
-        Layer = ArtifactLayer.Security,
-        RelativePath = "GNex.SharedKernel/AccessControl/GNexRoles.cs",
-        FileName = "GNexRoles.cs",
-        Namespace = "GNex.SharedKernel.AccessControl",
-        ProducedBy = AgentType.AccessControl,
-        TracedRequirementIds = ["NFR-SEC-01", "OWASP-A01"],
-        Content = """
-            namespace GNex.SharedKernel.AccessControl;
+        var domain = context.PipelineConfig?.DomainContext ?? "enterprise application";
+        var services = ServiceCatalogResolver.GetServices(context);
+        var serviceList = string.Join(", ", services.Select(s => s.Name));
 
-            /// <summary>
-            /// Role definitions following least-privilege principle.
-            /// Each role has a defined scope of access to HMS resources.
-            /// </summary>
-            public static class GNexRoles
-            {
-                // Clinical roles
-                public const string Physician = "Physician";
-                public const string Nurse = "Nurse";
-                public const string Pharmacist = "Pharmacist";
-                public const string LabTechnician = "LabTechnician";
-                public const string Radiologist = "Radiologist";
-                public const string Therapist = "Therapist";
-                public const string Surgeon = "Surgeon";
+        var response = await _llm.GenerateAsync(new LlmPrompt
+        {
+            SystemPrompt = "You are a .NET security expert. Generate role definitions for an RBAC system. Output only a single valid C# file.",
+            UserPrompt = $"""
+                Generate a GNexRoles static class for a {domain} with services: {serviceList}.
+                Include domain-appropriate roles (e.g. operational, administrative, compliance, technical, end-user roles).
+                Each role is a string constant. Include AllRoles array. Group roles by category with comments.
+                Namespace: GNex.SharedKernel.AccessControl.
+                """,
+            Temperature = 0.1, RequestingAgent = Name
+        }, ct);
 
-                // Administrative roles
-                public const string Admin = "Admin";
-                public const string FacilityAdmin = "FacilityAdmin";
-                public const string DepartmentHead = "DepartmentHead";
+        return new CodeArtifact
+        {
+            Layer = ArtifactLayer.Security,
+            RelativePath = "GNex.SharedKernel/AccessControl/GNexRoles.cs",
+            FileName = "GNexRoles.cs",
+            Namespace = "GNex.SharedKernel.AccessControl",
+            ProducedBy = AgentType.AccessControl,
+            TracedRequirementIds = ["NFR-SEC-01", "OWASP-A01"],
+            Content = response.Success ? response.Content : """
+                namespace GNex.SharedKernel.AccessControl;
 
-                // Financial roles
-                public const string BillingClerk = "BillingClerk";
-                public const string InsuranceProcessor = "InsuranceProcessor";
-                public const string FinanceManager = "FinanceManager";
-
-                // Compliance & audit
-                public const string Auditor = "Auditor";
-                public const string ComplianceOfficer = "ComplianceOfficer";
-                public const string PrivacyOfficer = "PrivacyOfficer";
-
-                // Technical roles
-                public const string SystemAdmin = "SystemAdmin";
-                public const string SupportStaff = "SupportStaff";
-
-                // Patient-facing
-                public const string Patient = "Patient";
-                public const string PatientRepresentative = "PatientRepresentative";
-
-                public static readonly string[] AllRoles =
-                [
-                    Physician, Nurse, Pharmacist, LabTechnician, Radiologist, Therapist, Surgeon,
-                    Admin, FacilityAdmin, DepartmentHead,
-                    BillingClerk, InsuranceProcessor, FinanceManager,
-                    Auditor, ComplianceOfficer, PrivacyOfficer,
-                    SystemAdmin, SupportStaff,
-                    Patient, PatientRepresentative
-                ];
-
-                public static readonly string[] ClinicalRoles =
-                    [Physician, Nurse, Pharmacist, LabTechnician, Radiologist, Therapist, Surgeon];
-
-                public static readonly string[] AdminRoles =
-                    [Admin, FacilityAdmin, DepartmentHead, SystemAdmin];
-            }
-            """
-    };
-
-    private static CodeArtifact GeneratePermissionMatrix() => new()
-    {
-        Layer = ArtifactLayer.Security,
-        RelativePath = "GNex.SharedKernel/AccessControl/PermissionMatrix.cs",
-        FileName = "PermissionMatrix.cs",
-        Namespace = "GNex.SharedKernel.AccessControl",
-        ProducedBy = AgentType.AccessControl,
-        TracedRequirementIds = ["NFR-SEC-01", "SOC2-CC6"],
-        Content = """
-            namespace GNex.SharedKernel.AccessControl;
-
-            public enum GNexPermission
-            {
-                PatientRead, PatientWrite, PatientDelete,
-                EncounterRead, EncounterWrite, EncounterClose,
-                OrderCreate, OrderCancel, OrderApprove,
-                ResultRead, ResultWrite, ResultVerify,
-                PrescriptionRead, PrescriptionWrite, PrescriptionDispense,
-                ClaimRead, ClaimSubmit, ClaimAdjudicate,
-                AuditRead, AuditExport,
-                AiInteract, AiOverride,
-                SystemConfig, UserManage, RoleManage,
-                BreakTheGlass, ConsentManage,
-            }
-
-            /// <summary>
-            /// Role → Permission mapping for the HMS platform.
-            /// Enforces least-privilege access per compliance standards.
-            /// </summary>
-            public static class PermissionMatrix
-            {
-                private static readonly Dictionary<string, HashSet<GNexPermission>> RolePermissions = new()
+                /// <summary>
+                /// Role definitions following least-privilege principle.
+                /// Each role has a defined scope of access to platform resources.
+                /// </summary>
+                public static class GNexRoles
                 {
-                    [GNexRoles.Physician] = [
-                        GNexPermission.PatientRead, GNexPermission.PatientWrite,
-                        GNexPermission.EncounterRead, GNexPermission.EncounterWrite, GNexPermission.EncounterClose,
-                        GNexPermission.OrderCreate, GNexPermission.OrderApprove,
-                        GNexPermission.ResultRead, GNexPermission.ResultVerify,
-                        GNexPermission.PrescriptionRead, GNexPermission.PrescriptionWrite,
-                        GNexPermission.AiInteract, GNexPermission.AiOverride,
-                        GNexPermission.BreakTheGlass,
-                    ],
-                    [GNexRoles.Nurse] = [
-                        GNexPermission.PatientRead, GNexPermission.PatientWrite,
-                        GNexPermission.EncounterRead, GNexPermission.EncounterWrite,
-                        GNexPermission.OrderCreate,
-                        GNexPermission.ResultRead,
-                        GNexPermission.PrescriptionRead,
-                        GNexPermission.AiInteract,
-                    ],
-                    [GNexRoles.BillingClerk] = [
-                        GNexPermission.PatientRead,
-                        GNexPermission.ClaimRead, GNexPermission.ClaimSubmit,
-                    ],
-                    [GNexRoles.Auditor] = [
-                        GNexPermission.PatientRead,
-                        GNexPermission.AuditRead, GNexPermission.AuditExport,
-                    ],
-                    [GNexRoles.SystemAdmin] = [
-                        GNexPermission.SystemConfig, GNexPermission.UserManage, GNexPermission.RoleManage,
-                        GNexPermission.AuditRead,
-                    ],
-                    [GNexRoles.Patient] = [
-                        GNexPermission.PatientRead,
-                        GNexPermission.EncounterRead,
-                        GNexPermission.ResultRead,
-                        GNexPermission.ConsentManage,
-                    ],
-                };
+                    // Operational roles
+                    public const string Operator = "Operator";
+                    public const string Supervisor = "Supervisor";
+                    public const string Manager = "Manager";
+                    public const string DepartmentHead = "DepartmentHead";
 
-                public static bool HasPermission(string role, GNexPermission permission)
-                    => RolePermissions.TryGetValue(role, out var perms) && perms.Contains(permission);
+                    // Administrative roles
+                    public const string Admin = "Admin";
+                    public const string SystemAdmin = "SystemAdmin";
+                    public const string SupportStaff = "SupportStaff";
 
-                public static HashSet<GNexPermission> GetPermissions(string role)
-                    => RolePermissions.TryGetValue(role, out var perms) ? perms : [];
+                    // Compliance & audit
+                    public const string Auditor = "Auditor";
+                    public const string ComplianceOfficer = "ComplianceOfficer";
 
-                public static bool CanAccessEntity(string role, string entityType)
-                    => entityType switch
+                    // Technical roles
+                    public const string Developer = "Developer";
+                    public const string Analyst = "Analyst";
+
+                    // End-user roles
+                    public const string User = "User";
+                    public const string ReadOnlyUser = "ReadOnlyUser";
+
+                    public static readonly string[] AllRoles =
+                    [
+                        Operator, Supervisor, Manager, DepartmentHead,
+                        Admin, SystemAdmin, SupportStaff,
+                        Auditor, ComplianceOfficer,
+                        Developer, Analyst,
+                        User, ReadOnlyUser
+                    ];
+
+                    public static readonly string[] AdminRoles =
+                        [Admin, SystemAdmin, DepartmentHead];
+
+                    public static readonly string[] OperationalRoles =
+                        [Operator, Supervisor, Manager];
+                }
+                """
+        };
+    }
+
+    private async Task<CodeArtifact> GeneratePermissionMatrix(AgentContext context, CancellationToken ct)
+    {
+        var domain = context.PipelineConfig?.DomainContext ?? "enterprise application";
+        var services = ServiceCatalogResolver.GetServices(context);
+        var entityList = services.SelectMany(s => s.Entities).Distinct().ToList();
+        var serviceList = string.Join(", ", services.Select(s => s.Name));
+
+        var response = await _llm.GenerateAsync(new LlmPrompt
+        {
+            SystemPrompt = "You are a .NET security expert. Generate a permission matrix with an enum and role-to-permission mapping. Output only a single valid C# file.",
+            UserPrompt = $"""
+                Generate a PermissionMatrix for a {domain} with services: {serviceList}.
+                Entities: {string.Join(", ", entityList)}.
+                Include:
+                1. GNexPermission enum with CRUD permissions per entity + system-level permissions (SystemConfig, UserManage, RoleManage, AuditRead, AuditExport, EmergencyAccess, ConsentManage)
+                2. PermissionMatrix static class with HasPermission, GetPermissions, CanAccessEntity methods
+                3. Role-to-permission Dictionary mapping using GNexRoles constants
+                Namespace: GNex.SharedKernel.AccessControl.
+                """,
+            Temperature = 0.1, RequestingAgent = Name
+        }, ct);
+
+        return new CodeArtifact
+        {
+            Layer = ArtifactLayer.Security,
+            RelativePath = "GNex.SharedKernel/AccessControl/PermissionMatrix.cs",
+            FileName = "PermissionMatrix.cs",
+            Namespace = "GNex.SharedKernel.AccessControl",
+            ProducedBy = AgentType.AccessControl,
+            TracedRequirementIds = ["NFR-SEC-01", "SOC2-CC6"],
+            Content = response.Success ? response.Content : """
+                namespace GNex.SharedKernel.AccessControl;
+
+                public enum GNexPermission
+                {
+                    // Generic CRUD permissions
+                    EntityRead, EntityWrite, EntityDelete,
+                    AuditRead, AuditExport,
+                    AiInteract, AiOverride,
+                    SystemConfig, UserManage, RoleManage,
+                    EmergencyAccess, ConsentManage,
+                }
+
+                /// <summary>
+                /// Role → Permission mapping for the platform.
+                /// Enforces least-privilege access per compliance standards.
+                /// </summary>
+                public static class PermissionMatrix
+                {
+                    private static readonly Dictionary<string, HashSet<GNexPermission>> RolePermissions = new()
                     {
-                        "PatientProfile" => HasPermission(role, GNexPermission.PatientRead),
-                        "Encounter" => HasPermission(role, GNexPermission.EncounterRead),
-                        "DiagnosticOrder" or "DiagnosticResult" => HasPermission(role, GNexPermission.OrderCreate) || HasPermission(role, GNexPermission.ResultRead),
-                        "Claim" or "Payment" => HasPermission(role, GNexPermission.ClaimRead),
-                        "AiInteraction" => HasPermission(role, GNexPermission.AiInteract),
-                        "AuditEntry" => HasPermission(role, GNexPermission.AuditRead),
-                        _ => false
+                        [GNexRoles.Operator] = [
+                            GNexPermission.EntityRead, GNexPermission.EntityWrite,
+                            GNexPermission.AiInteract,
+                        ],
+                        [GNexRoles.Supervisor] = [
+                            GNexPermission.EntityRead, GNexPermission.EntityWrite,
+                            GNexPermission.AiInteract, GNexPermission.AiOverride,
+                            GNexPermission.EmergencyAccess,
+                        ],
+                        [GNexRoles.Manager] = [
+                            GNexPermission.EntityRead, GNexPermission.EntityWrite, GNexPermission.EntityDelete,
+                            GNexPermission.AuditRead,
+                            GNexPermission.AiInteract, GNexPermission.AiOverride,
+                        ],
+                        [GNexRoles.Auditor] = [
+                            GNexPermission.EntityRead,
+                            GNexPermission.AuditRead, GNexPermission.AuditExport,
+                        ],
+                        [GNexRoles.SystemAdmin] = [
+                            GNexPermission.SystemConfig, GNexPermission.UserManage, GNexPermission.RoleManage,
+                            GNexPermission.AuditRead,
+                        ],
+                        [GNexRoles.User] = [
+                            GNexPermission.EntityRead,
+                            GNexPermission.ConsentManage,
+                        ],
+                        [GNexRoles.ReadOnlyUser] = [
+                            GNexPermission.EntityRead,
+                        ],
                     };
-            }
-            """
-    };
+
+                    public static bool HasPermission(string role, GNexPermission permission)
+                        => RolePermissions.TryGetValue(role, out var perms) && perms.Contains(permission);
+
+                    public static HashSet<GNexPermission> GetPermissions(string role)
+                        => RolePermissions.TryGetValue(role, out var perms) ? perms : [];
+
+                    public static bool CanAccessEntity(string role, string entityType)
+                        => HasPermission(role, GNexPermission.EntityRead);
+                }
+                """
+        };
+    }
 
     private async Task<CodeArtifact> GenerateAuthorizationPolicyProvider(CancellationToken ct)
     {
         var response = await _llm.GenerateAsync(new LlmPrompt
         {
-            SystemPrompt = "You are a .NET security expert. Generate an ASP.NET Core authorization policy provider that enforces the HMS permission matrix.",
+            SystemPrompt = "You are a .NET security expert. Generate an ASP.NET Core authorization policy provider that enforces the permission matrix.",
             UserPrompt = "Generate an GNexAuthorizationPolicyProvider that maps GNexPermission to ASP.NET Core policies. Include a RequirePermissionAttribute and an GNexAuthorizationHandler. Namespace: GNex.SharedKernel.AccessControl.",
             Temperature = 0.1, RequestingAgent = Name
         }, ct);
@@ -307,13 +320,13 @@ public sealed class AccessControlAgent : IAgent
             namespace GNex.SharedKernel.AccessControl;
 
             /// <summary>
-            /// Emergency override access ("Break the Glass") for life-threatening situations.
+            /// Emergency override access ("Break the Glass") for time-critical situations.
             /// All overrides are logged, require justification, and trigger immediate audit review.
             /// </summary>
             public sealed record BreakTheGlassRequest
             {
                 public required string UserId { get; init; }
-                public required string PatientId { get; init; }
+                public required string ResourceId { get; init; }
                 public required string Justification { get; init; }
                 public required string TenantId { get; init; }
                 public DateTimeOffset RequestedAt { get; init; } = DateTimeOffset.UtcNow;
@@ -323,7 +336,7 @@ public sealed class AccessControlAgent : IAgent
             {
                 public string GrantId { get; init; } = Guid.NewGuid().ToString("N");
                 public string UserId { get; init; } = string.Empty;
-                public string PatientId { get; init; } = string.Empty;
+                public string ResourceId { get; init; } = string.Empty;
                 public string Justification { get; init; } = string.Empty;
                 public DateTimeOffset GrantedAt { get; init; } = DateTimeOffset.UtcNow;
                 public DateTimeOffset ExpiresAt { get; init; }
@@ -349,7 +362,7 @@ public sealed class AccessControlAgent : IAgent
                     var grant = new BreakTheGlassGrant
                     {
                         UserId = request.UserId,
-                        PatientId = request.PatientId,
+                        ResourceId = request.ResourceId,
                         Justification = request.Justification,
                         ExpiresAt = DateTimeOffset.UtcNow.Add(GrantDuration)
                     };
@@ -388,13 +401,13 @@ public sealed class AccessControlAgent : IAgent
         Content = """
             namespace GNex.SharedKernel.AccessControl;
 
-            public enum ConsentType { Treatment, Research, DataSharing, Marketing, AiProcessing }
+            public enum ConsentType { DataProcessing, Research, DataSharing, Marketing, AiProcessing }
             public enum ConsentStatus { Granted, Revoked, Expired, Pending }
 
-            public sealed record PatientConsent
+            public sealed record DataConsent
             {
                 public string Id { get; init; } = Guid.NewGuid().ToString("N");
-                public required string PatientId { get; init; }
+                public required string SubjectId { get; init; }
                 public required string TenantId { get; init; }
                 public required ConsentType Type { get; init; }
                 public ConsentStatus Status { get; set; } = ConsentStatus.Pending;
@@ -407,11 +420,11 @@ public sealed class AccessControlAgent : IAgent
 
             public interface IConsentService
             {
-                Task<PatientConsent> RequestConsentAsync(PatientConsent consent, CancellationToken ct = default);
+                Task<DataConsent> RequestConsentAsync(DataConsent consent, CancellationToken ct = default);
                 Task GrantConsentAsync(string consentId, CancellationToken ct = default);
                 Task RevokeConsentAsync(string consentId, string reason, CancellationToken ct = default);
-                Task<bool> HasConsentAsync(string patientId, ConsentType type, CancellationToken ct = default);
-                Task<List<PatientConsent>> GetPatientConsentsAsync(string patientId, CancellationToken ct = default);
+                Task<bool> HasConsentAsync(string subjectId, ConsentType type, CancellationToken ct = default);
+                Task<List<DataConsent>> GetSubjectConsentsAsync(string subjectId, CancellationToken ct = default);
             }
             """
     };

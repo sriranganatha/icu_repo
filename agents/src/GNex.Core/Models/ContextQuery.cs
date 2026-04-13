@@ -16,7 +16,7 @@ public sealed class ContextQuery
     /// <summary>The category of information requested.</summary>
     public QueryIntent Intent { get; init; }
 
-    /// <summary>Specific question or data request (e.g., "Patient entity fields", "EncounterService API contract").</summary>
+    /// <summary>Specific question or data request (e.g., "Entity fields", "Service API contract").</summary>
     public string Question { get; init; } = string.Empty;
 
     /// <summary>Module or service scope for the query.</summary>
@@ -45,7 +45,7 @@ public sealed class ContextResponse
     /// <summary>Code snippets relevant to the query (e.g., entity definitions, DTOs, interfaces).</summary>
     public List<string> CodeSnippets { get; init; } = [];
 
-    /// <summary>Key-value facts (e.g., "PrimaryKey" → "PatientId", "TenantColumn" → "TenantId").</summary>
+    /// <summary>Key-value facts (e.g., "PrimaryKey" → "EntityId", "TenantColumn" → "TenantId").</summary>
     public Dictionary<string, string> Facts { get; init; } = [];
 
     /// <summary>Related artifact IDs the requesting agent should reference.</summary>

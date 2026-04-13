@@ -206,8 +206,8 @@ public sealed class ContextBroker : IContextBroker
             if (events.Count > 0)
                 facts["Events"] = string.Join(", ", events.Select(e => e.EventName));
 
-            var svcDef = MicroserviceCatalog.ByName(module) ??
-                MicroserviceCatalog.All.FirstOrDefault(s => s.Name.Contains(module, StringComparison.OrdinalIgnoreCase));
+            var svcDef = ServiceCatalogResolver.ByName(context, module) ??
+                ServiceCatalogResolver.GetServices(context).FirstOrDefault(s => s.Name.Contains(module, StringComparison.OrdinalIgnoreCase));
             if (svcDef is not null)
             {
                 facts["DependsOn"] = string.Join(", ", svcDef.DependsOn);
@@ -254,8 +254,8 @@ public sealed class ContextBroker : IContextBroker
             snippets.Add(art.Content);
 
         // Sensitive field detection from entity schema
-        var phiFields = new[] { "SSN", "DateOfBirth", "MedicalRecord", "Insurance", "Diagnosis", "Medication",
-            "LabResult", "VitalSign", "Allergy", "PatientName", "Email", "Phone", "Address" };
+        var sensitiveFields = new[] { "SSN", "DateOfBirth", "TaxId", "CreditCard", "Password", "Secret",
+            "Email", "Phone", "Address", "AccountNumber", "SocialSecurity", "Salary", "BankAccount" };
 
         if (context.DomainModel is not null && !string.IsNullOrEmpty(entity))
         {
@@ -263,12 +263,12 @@ public sealed class ContextBroker : IContextBroker
             var ent = allEntities.FirstOrDefault(e => e.Name.Equals(entity, StringComparison.OrdinalIgnoreCase));
             if (ent is not null)
             {
-                var phiMatches = ent.Fields
-                    .Where(f => phiFields.Any(phi => f.Name.Contains(phi, StringComparison.OrdinalIgnoreCase)))
+                var sensitiveMatches = ent.Fields
+                    .Where(f => sensitiveFields.Any(sf => f.Name.Contains(sf, StringComparison.OrdinalIgnoreCase)))
                     .Select(f => f.Name)
                     .ToList();
-                if (phiMatches.Count > 0)
-                    facts["PHI_Fields"] = string.Join(", ", phiMatches);
+                if (sensitiveMatches.Count > 0)
+                    facts["SensitiveFields"] = string.Join(", ", sensitiveMatches);
             }
         }
 
@@ -281,7 +281,7 @@ public sealed class ContextBroker : IContextBroker
             QueryId = query.Id,
             RespondedBy = AgentType.Security,
             Success = true,
-            Answer = $"Security: {secFindings.Count} findings, Sensitive fields: {facts.GetValueOrDefault("PHI_Fields", "none detected")}",
+            Answer = $"Security: {secFindings.Count} findings, Sensitive fields: {facts.GetValueOrDefault("SensitiveFields", "none detected")}",
             CodeSnippets = snippets,
             Facts = facts
         };
@@ -482,8 +482,8 @@ public sealed class ContextBroker : IContextBroker
         var facts = new Dictionary<string, string>();
 
         {
-            var svcDef = MicroserviceCatalog.ByName(module) ??
-                MicroserviceCatalog.All.FirstOrDefault(s => s.Name.Contains(module, StringComparison.OrdinalIgnoreCase));
+            var svcDef = ServiceCatalogResolver.ByName(context, module) ??
+                ServiceCatalogResolver.GetServices(context).FirstOrDefault(s => s.Name.Contains(module, StringComparison.OrdinalIgnoreCase));
 
             if (svcDef is not null)
             {
@@ -502,7 +502,7 @@ public sealed class ContextBroker : IContextBroker
             }
 
             // Find reverse dependencies (who depends on this service)
-            var dependents = MicroserviceCatalog.All
+            var dependents = ServiceCatalogResolver.GetServices(context)
                 .Where(s => s.DependsOn.Any(d => d.Contains(module, StringComparison.OrdinalIgnoreCase)))
                 .Select(s => s.Name)
                 .ToList();

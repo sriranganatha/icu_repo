@@ -44,6 +44,14 @@ public sealed class AgentContext
     public ConcurrentBag<AgentFailureRecord> FailureRecords { get; set; } = [];
     public PipelineConfig? PipelineConfig { get; set; }
     public ParsedDomainModel? DomainModel { get; set; }
+
+    /// <summary>
+    /// LLM-derived domain profile populated by <c>PromptGeneratorAgent</c>.
+    /// Contains actors/personas, compliance frameworks, integration patterns,
+    /// and generated system prompts that downstream agents consume dynamically.
+    /// </summary>
+    public DomainProfile? DomainProfile { get; set; }
+
     public int ReviewIteration { get; set; }
     /// <summary>Live instruction queue — new directives can be pushed mid-pipeline.</summary>
     public List<string> OrchestratorInstructions { get; set; } = [];
@@ -96,6 +104,29 @@ public sealed class AgentContext
 
     // ── Learning records ──
     public ConcurrentBag<AgentLearningRecord> LearningRecords { get; set; } = [];
+
+    // ── Agent execution history (for feedback loops) ──────────
+
+    /// <summary>
+    /// History of agent execution results. Agents can inspect earlier results
+    /// to make better decisions (e.g. SecurityAgent checks if ComplianceAgent
+    /// already flagged PHI issues, TestingAgent checks ReviewAgent findings).
+    /// </summary>
+    public ConcurrentDictionary<AgentType, AgentResult> AgentResults { get; set; } = new();
+
+    /// <summary>
+    /// Accumulated code quality metrics from previous iterations.
+    /// Code-gen agents consult this to avoid repeating patterns that were flagged.
+    /// Populated by ReviewAgent, CodeQualityAgent, and BuildAgent.
+    /// </summary>
+    public ConcurrentBag<QualityMetric> QualityMetrics { get; set; } = [];
+
+    /// <summary>
+    /// Agent-to-agent feedback notes. An agent can leave a note for a specific
+    /// target agent (e.g. ReviewAgent leaves "ServiceLayer: missing validation on X"
+    /// and ServiceLayerAgent reads it on requeue).
+    /// </summary>
+    public ConcurrentDictionary<AgentType, ConcurrentBag<string>> AgentFeedback { get; set; } = new();
 
     // ── Project-scoping helper ──────────────────────────────────
 

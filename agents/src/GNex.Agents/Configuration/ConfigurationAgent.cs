@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using GNex.Core.Enums;
+using GNex.Core.Extensions;
 using GNex.Core.Interfaces;
 using GNex.Core.Models;
 using Microsoft.Extensions.Logging;
@@ -40,33 +41,67 @@ public sealed class ConfigurationAgent : IAgent
 
         try
         {
+            // ── Read feedback from previous iterations ──
+            var feedback = context.ReadFeedback(Type);
+            if (feedback.Count > 0)
+            {
+                _logger.LogInformation("ConfigurationAgent received {Count} feedback items", feedback.Count);
+                if (context.ReportProgress is not null)
+                    await context.ReportProgress(Type, $"Incorporating {feedback.Count} feedback items from previous iterations");
+            }
+
+            // ── Use DomainProfile for domain-aware config generation ──
+            var profile = context.DomainProfile;
+            if (profile is not null)
+            {
+                _logger.LogInformation("ConfigurationAgent using DomainProfile: {Domain}, {ComplianceCount} compliance frameworks",
+                    profile.Domain, profile.ComplianceFrameworks?.Count ?? 0);
+                if (context.ReportProgress is not null)
+                    await context.ReportProgress(Type, $"DomainProfile active: {profile.Domain} — configuring {profile.ComplianceFrameworks?.Count ?? 0} compliance frameworks, {profile.SensitiveFieldPatterns?.Count ?? 0} sensitive data rules");
+            }
+
             // ── Per-service, per-environment appsettings ──
+            var llmContext = context.BuildLlmContextBlock(Type);
+
             foreach (var svc in services)
             {
                 ct.ThrowIfCancellationRequested();
                 foreach (var env in Environments)
                 {
-                    var prompt = $"""
-                        Generate an appsettings.{env}.json for a .NET 8 microservice "{svc.Name}" (port {svc.ApiPort})
-                        in a microservices platform. Service description: {svc.Description}
-                        
-                        Include:
-                        - ConnectionStrings (PostgreSQL, Redis)
-                        - Logging levels (appropriate for {env})
-                        - JWT authentication settings
-                        - Kafka messaging endpoints
-                        - Health check endpoints
-                        - CORS policy (appropriate for {env})
-                        - Rate limiting (appropriate for {env})
-                        - Feature flags section
-                        - OpenTelemetry/tracing settings
-                        - Secrets reference placeholders for {env} (use Azure Key Vault pattern for Production)
-                        
-                        Return ONLY valid JSON, no comments or explanations.
-                        Use environment-appropriate values (e.g., stricter logging in Production, verbose in Development).
-                        """;
+                    var configPrompt = new LlmPrompt
+                    {
+                        SystemPrompt = $$"""
+                            You are a senior .NET 8 DevOps engineer generating per-environment configuration.
+                            Generate production-quality appsettings JSON for microservices.
+                            Return ONLY valid JSON, no comments or explanations.
 
-                    var config = await _llm.GenerateAsync(prompt, ct);
+                            {{(!string.IsNullOrWhiteSpace(llmContext) ? llmContext : "")}}
+                            """,
+                        UserPrompt = $"""
+                            Generate an appsettings.{env}.json for a .NET 8 microservice "{svc.Name}" (port {svc.ApiPort})
+                            in a microservices platform. Service description: {svc.Description}
+                            
+                            Include:
+                            - ConnectionStrings (PostgreSQL, Redis)
+                            - Logging levels (appropriate for {env})
+                            - JWT authentication settings
+                            - Kafka messaging endpoints
+                            - Health check endpoints
+                            - CORS policy (appropriate for {env})
+                            - Rate limiting (appropriate for {env})
+                            - Feature flags section
+                            - OpenTelemetry/tracing settings
+                            - Secrets reference placeholders for {env} (use Azure Key Vault pattern for Production)
+
+                            Use environment-appropriate values (e.g., stricter logging in Production, verbose in Development).
+                            """,
+                        Temperature = 0.3,
+                        MaxTokens = 3000,
+                        RequestingAgent = "ConfigurationAgent"
+                    };
+
+                    var response = await _llm.GenerateAsync(configPrompt, ct);
+                    var config = response.Success ? response.Content ?? "{}" : "{}";
                     config = config.Replace("```json", "").Replace("```", "").Trim();
 
                     artifacts.Add(new CodeArtifact
@@ -84,15 +119,27 @@ public sealed class ConfigurationAgent : IAgent
 
             // ── Feature flags configuration ──
             var serviceNames = string.Join(", ", services.Select(s => s.Name));
-            var ffPrompt = $"""
-                Generate a feature-flags.json for a microservices platform with these services: {serviceNames}.
-                Include flags for:
-                - DarkMode, MaintenanceMode, BulkImport, RealTimeAlerts, AiCopilot
-                - Per-service feature toggles based on service capabilities
-                Each flag has: name, description, enabled (bool), rolloutPercentage (0-100), environments (array)
-                Return ONLY valid JSON.
-                """;
-            var ffContent = await _llm.GenerateAsync(ffPrompt, ct);
+            var ffPrompt = new LlmPrompt
+            {
+                SystemPrompt = $$"""
+                    You are a senior .NET 8 DevOps engineer designing feature flag configurations.
+                    Return ONLY valid JSON array of feature flag objects.
+
+                    {{(!string.IsNullOrWhiteSpace(llmContext) ? llmContext : "")}}
+                    """,
+                UserPrompt = $"""
+                    Generate a feature-flags.json for a microservices platform with these services: {serviceNames}.
+                    Include flags for:
+                    - DarkMode, MaintenanceMode, BulkImport, RealTimeAlerts, AiCopilot
+                    - Per-service feature toggles based on service capabilities
+                    Each flag has: name, description, enabled (bool), rolloutPercentage (0-100), environments (array)
+                    """,
+                Temperature = 0.3,
+                MaxTokens = 2000,
+                RequestingAgent = "ConfigurationAgent"
+            };
+            var ffResponse = await _llm.GenerateAsync(ffPrompt, ct);
+            var ffContent = ffResponse.Success ? ffResponse.Content ?? "[]" : "[]";
             ffContent = ffContent.Replace("```json", "").Replace("```", "").Trim();
             artifacts.Add(new CodeArtifact
             {

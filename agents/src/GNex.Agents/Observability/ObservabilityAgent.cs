@@ -9,7 +9,7 @@ namespace GNex.Agents.Observability;
 /// <summary>
 /// AI-powered observability agent. Generates OpenTelemetry instrumentation,
 /// Prometheus metrics, structured logging, distributed tracing, health checks,
-/// Grafana dashboards, and alerting rules for all HMS microservices.
+/// Grafana dashboards, and alerting rules for all derived microservices.
 /// </summary>
 public sealed class ObservabilityAgent : IAgent
 {
@@ -18,13 +18,7 @@ public sealed class ObservabilityAgent : IAgent
 
     public AgentType Type => AgentType.Observability;
     public string Name => "Observability Agent";
-    public string Description => "Generates OpenTelemetry tracing, Prometheus metrics, structured logging, Grafana dashboards, and alerting rules for all HMS services.";
-
-    private static readonly string[] HmsServices =
-    [
-        "PatientService", "EncounterService", "InpatientService", "EmergencyService",
-        "DiagnosticsService", "RevenueService", "AuditService", "AiService", "ApiGateway"
-    ];
+    public string Description => "Generates OpenTelemetry tracing, Prometheus metrics, structured logging, Grafana dashboards, and alerting rules for all services.";
 
     public ObservabilityAgent(ILlmProvider llm, ILogger<ObservabilityAgent> logger)
     {
@@ -42,17 +36,22 @@ public sealed class ObservabilityAgent : IAgent
 
         try
         {
+            var prefix = context.PipelineConfig?.ProjectPrefix ?? "app";
+            var label = context.PipelineConfig?.ProjectLabel ?? "Application Platform";
+            var services = ServiceCatalogResolver.GetServices(context);
+            var serviceNames = services.Select(s => s.Name).ToArray();
+
             if (context.ReportProgress is not null)
-                await context.ReportProgress(Type, "Generating OpenTelemetry bootstrap — ActivitySource, Meter, counters, histograms for all 9 services");
-            artifacts.Add(GenerateOpenTelemetryBootstrap());
+                await context.ReportProgress(Type, $"Generating OpenTelemetry bootstrap — ActivitySource, Meter, counters, histograms for {serviceNames.Length} services");
+            artifacts.Add(GenerateOpenTelemetryBootstrap(prefix, label));
 
             if (context.ReportProgress is not null)
                 await context.ReportProgress(Type, "Generating metrics — request counters, duration histograms, access tracking, Kafka latency");
-            artifacts.Add(GenerateGNexMetrics());
+            artifacts.Add(GenerateGNexMetrics(prefix));
 
             if (context.ReportProgress is not null)
-                await context.ReportProgress(Type, "AI-generating request tracing middleware — distributed trace propagation with Gemini LLM");
-            artifacts.Add(await GenerateRequestTracingMiddleware(ct));
+                await context.ReportProgress(Type, "AI-generating request tracing middleware — distributed trace propagation");
+            artifacts.Add(await GenerateRequestTracingMiddleware(prefix, ct));
 
             if (context.ReportProgress is not null)
                 await context.ReportProgress(Type, "Generating composite health check — DB, Kafka, Redis, downstream service liveness/readiness probes");
@@ -60,11 +59,11 @@ public sealed class ObservabilityAgent : IAgent
 
             if (context.ReportProgress is not null)
                 await context.ReportProgress(Type, "AI-generating Grafana dashboard JSON — service overview, latency heatmap, error rate panels");
-            artifacts.Add(await GenerateGrafanaDashboard(ct));
+            artifacts.Add(await GenerateGrafanaDashboard(prefix, label, serviceNames, ct));
 
             if (context.ReportProgress is not null)
                 await context.ReportProgress(Type, "Generating Prometheus alerting rules — SLA violation, error spike, unauthorized access alerts");
-            artifacts.Add(GenerateAlertingRules());
+            artifacts.Add(GenerateAlertingRules(prefix));
 
             context.Artifacts.AddRange(artifacts);
             context.AgentStatuses[Type] = AgentStatus.Completed;
@@ -92,7 +91,7 @@ public sealed class ObservabilityAgent : IAgent
         }
     }
 
-    private static CodeArtifact GenerateOpenTelemetryBootstrap() => new()
+    private static CodeArtifact GenerateOpenTelemetryBootstrap(string prefix, string label) => new()
     {
         Layer = ArtifactLayer.Observability,
         RelativePath = "GNex.SharedKernel/Observability/OpenTelemetryBootstrap.cs",
@@ -100,15 +99,15 @@ public sealed class ObservabilityAgent : IAgent
         Namespace = "GNex.SharedKernel.Observability",
         ProducedBy = AgentType.Observability,
         TracedRequirementIds = ["NFR-OBS-01"],
-        Content = """
+        Content = $$"""
             using System.Diagnostics;
             using System.Diagnostics.Metrics;
 
             namespace GNex.SharedKernel.Observability;
 
             /// <summary>
-            /// Centralized OpenTelemetry bootstrap for all HMS microservices.
-            /// Call AddHmsObservability() in each service's Program.cs.
+            /// Centralized OpenTelemetry bootstrap for all microservices.
+            /// Call AddObservability() in each service's Program.cs.
             /// </summary>
             public static class OpenTelemetryBootstrap
             {
@@ -120,19 +119,19 @@ public sealed class ObservabilityAgent : IAgent
 
                 // Standard counters
                 public static readonly Counter<long> RequestCounter =
-                    ServiceMeter.CreateCounter<long>("hms.requests.total", "request", "Total HTTP requests");
+                    ServiceMeter.CreateCounter<long>("{{prefix}}.requests.total", "request", "Total HTTP requests");
                 public static readonly Histogram<double> RequestDuration =
-                    ServiceMeter.CreateHistogram<double>("hms.requests.duration_ms", "ms", "Request duration in ms");
+                    ServiceMeter.CreateHistogram<double>("{{prefix}}.requests.duration_ms", "ms", "Request duration in ms");
                 public static readonly Counter<long> ErrorCounter =
-                    ServiceMeter.CreateCounter<long>("hms.errors.total", "error", "Total errors");
+                    ServiceMeter.CreateCounter<long>("{{prefix}}.errors.total", "error", "Total errors");
 
                 // Domain-specific metrics
-                public static readonly Counter<long> PhiAccessCounter =
-                    ServiceMeter.CreateCounter<long>("app.sensitive_data.access_total", "access", "Total sensitive data access events");
+                public static readonly Counter<long> SensitiveDataAccessCounter =
+                    ServiceMeter.CreateCounter<long>("{{prefix}}.sensitive_data.access_total", "access", "Total sensitive data access events");
                 public static readonly Counter<long> BreachAttemptCounter =
-                    ServiceMeter.CreateCounter<long>("hms.security.breach_attempts", "attempt", "Potential breach attempts");
+                    ServiceMeter.CreateCounter<long>("{{prefix}}.security.breach_attempts", "attempt", "Potential breach attempts");
                 public static readonly Histogram<double> KafkaPublishLatency =
-                    ServiceMeter.CreateHistogram<double>("hms.kafka.publish_ms", "ms", "Kafka publish latency");
+                    ServiceMeter.CreateHistogram<double>("{{prefix}}.kafka.publish_ms", "ms", "Kafka publish latency");
 
                 /// <summary>
                 /// Creates a new Activity (span) for tracing a service operation.
@@ -143,7 +142,7 @@ public sealed class ObservabilityAgent : IAgent
             """
     };
 
-    private static CodeArtifact GenerateGNexMetrics() => new()
+    private static CodeArtifact GenerateGNexMetrics(string prefix) => new()
     {
         Layer = ArtifactLayer.Observability,
         RelativePath = "GNex.SharedKernel/Observability/GNexMetrics.cs",
@@ -155,31 +154,21 @@ public sealed class ObservabilityAgent : IAgent
             namespace GNex.SharedKernel.Observability;
 
             /// <summary>
-            /// Application-domain Prometheus metrics for clinical and operational monitoring.
+            /// Application-domain Prometheus metrics for operational monitoring.
             /// </summary>
             public static class GNexMetrics
             {
-                // Patient metrics
-                public static void RecordPatientRegistration(string tenantId)
-                    => OpenTelemetryBootstrap.RequestCounter.Add(1, new("operation", "patient.register"), new("tenant", tenantId));
-
-                public static void RecordEncounterCreated(string tenantId, string encounterType)
-                    => OpenTelemetryBootstrap.RequestCounter.Add(1, new("operation", "encounter.create"), new("tenant", tenantId), new("type", encounterType));
-
-                // Emergency metrics (time-critical)
-                public static void RecordEmergencyArrival(string tenantId, string triageLevel)
-                    => OpenTelemetryBootstrap.RequestCounter.Add(1, new("operation", "emergency.arrival"), new("tenant", tenantId), new("triage", triageLevel));
-
-                // Diagnostics metrics
-                public static void RecordOrderCreated(string tenantId, string orderType)
-                    => OpenTelemetryBootstrap.RequestCounter.Add(1, new("operation", "order.create"), new("tenant", tenantId), new("type", orderType));
-
-                public static void RecordResultReceived(string tenantId, bool isCritical)
-                    => OpenTelemetryBootstrap.RequestCounter.Add(1, new("operation", "result.receive"), new("tenant", tenantId), new("critical", isCritical.ToString()));
-
-                // Revenue metrics
-                public static void RecordClaimSubmitted(string tenantId, decimal amount)
-                    => OpenTelemetryBootstrap.RequestCounter.Add(1, new("operation", "claim.submit"), new("tenant", tenantId));
+                // Domain operation metrics
+                public static void RecordOperation(string tenantId, string operation, string? subType = null)
+                {
+                    var tags = new List<KeyValuePair<string, object?>>
+                    {
+                        new("operation", operation),
+                        new("tenant", tenantId)
+                    };
+                    if (subType is not null) tags.Add(new("type", subType));
+                    OpenTelemetryBootstrap.RequestCounter.Add(1, tags.ToArray());
+                }
 
                 // AI metrics
                 public static void RecordAiInteraction(string tenantId, string model, double latencyMs)
@@ -189,8 +178,8 @@ public sealed class ObservabilityAgent : IAgent
                 }
 
                 // Security metrics
-                public static void RecordPhiAccess(string tenantId, string entityType, string accessType)
-                    => OpenTelemetryBootstrap.PhiAccessCounter.Add(1, new("tenant", tenantId), new("entity", entityType), new("access", accessType));
+                public static void RecordSensitiveDataAccess(string tenantId, string entityType, string accessType)
+                    => OpenTelemetryBootstrap.SensitiveDataAccessCounter.Add(1, new("tenant", tenantId), new("entity", entityType), new("access", accessType));
 
                 public static void RecordBreachAttempt(string tenantId, string reason)
                     => OpenTelemetryBootstrap.BreachAttemptCounter.Add(1, new("tenant", tenantId), new("reason", reason));
@@ -198,7 +187,7 @@ public sealed class ObservabilityAgent : IAgent
             """
     };
 
-    private async Task<CodeArtifact> GenerateRequestTracingMiddleware(CancellationToken ct)
+    private async Task<CodeArtifact> GenerateRequestTracingMiddleware(string prefix, CancellationToken ct)
     {
         var response = await _llm.GenerateAsync(new LlmPrompt
         {
@@ -281,8 +270,8 @@ public sealed class ObservabilityAgent : IAgent
     private static CodeArtifact GenerateHealthCheckComposite() => new()
     {
         Layer = ArtifactLayer.Observability,
-        RelativePath = "GNex.SharedKernel/Observability/HmsHealthChecks.cs",
-        FileName = "HmsHealthChecks.cs",
+        RelativePath = "GNex.SharedKernel/Observability/AppHealthChecks.cs",
+        FileName = "AppHealthChecks.cs",
         Namespace = "GNex.SharedKernel.Observability",
         ProducedBy = AgentType.Observability,
         TracedRequirementIds = ["NFR-OBS-01", "SOC2-CC7"],
@@ -330,41 +319,41 @@ public sealed class ObservabilityAgent : IAgent
             """
     };
 
-    private async Task<CodeArtifact> GenerateGrafanaDashboard(CancellationToken ct)
+    private async Task<CodeArtifact> GenerateGrafanaDashboard(string prefix, string label, string[] serviceNames, CancellationToken ct)
     {
         var response = await _llm.GenerateAsync(new LlmPrompt
         {
             SystemPrompt = "You are a Grafana dashboarding expert for application monitoring. Generate a Grafana dashboard JSON.",
-            UserPrompt = $"Generate a Grafana dashboard JSON for HMS with panels: 1) Request rate per service, 2) P50/P95/P99 latency, 3) Error rate, 4) Sensitive data access events, 5) Domain-specific operational metrics, 6) AI interaction latency, 7) Kafka publish latency, 8) Database connection pool. Services: {string.Join(", ", HmsServices)}. Use Prometheus data source.",
+            UserPrompt = $"Generate a Grafana dashboard JSON for {label} with panels: 1) Request rate per service, 2) P50/P95/P99 latency, 3) Error rate, 4) Sensitive data access events, 5) Domain-specific operational metrics, 6) AI interaction latency, 7) Kafka publish latency, 8) Database connection pool. Services: {string.Join(", ", serviceNames)}. Metric prefix: {prefix}. Use Prometheus data source.",
             Temperature = 0.2, RequestingAgent = Name
         }, ct);
 
         return new CodeArtifact
         {
             Layer = ArtifactLayer.Observability,
-            RelativePath = "infrastructure/grafana/hms-dashboard.json",
-            FileName = "hms-dashboard.json",
+            RelativePath = $"infrastructure/grafana/{prefix}-dashboard.json",
+            FileName = $"{prefix}-dashboard.json",
             Namespace = string.Empty,
             ProducedBy = AgentType.Observability,
             TracedRequirementIds = ["NFR-OBS-01"],
-            Content = response.Success ? response.Content : GenerateGrafanaDashboardFallback()
+            Content = response.Success ? response.Content : GenerateGrafanaDashboardFallback(prefix, label)
         };
     }
 
-    private static CodeArtifact GenerateAlertingRules() => new()
+    private static CodeArtifact GenerateAlertingRules(string prefix) => new()
     {
         Layer = ArtifactLayer.Observability,
-        RelativePath = "infrastructure/prometheus/hms-alerts.yml",
-        FileName = "hms-alerts.yml",
+        RelativePath = $"infrastructure/prometheus/{prefix}-alerts.yml",
+        FileName = $"{prefix}-alerts.yml",
         Namespace = string.Empty,
         ProducedBy = AgentType.Observability,
         TracedRequirementIds = ["NFR-OBS-01", "SOC2-CC7"],
-        Content = """
+        Content = $$$"""
             groups:
-              - name: hms_critical_alerts
+              - name: {{{prefix}}}_critical_alerts
                 rules:
                   - alert: HighErrorRate
-                    expr: rate(hms_errors_total[5m]) > 0.05
+                    expr: rate({{{prefix}}}_errors_total[5m]) > 0.05
                     for: 2m
                     labels:
                       severity: critical
@@ -373,28 +362,20 @@ public sealed class ObservabilityAgent : IAgent
                       description: "Error rate is {{ $value }} errors/sec (threshold: 0.05)"
 
                   - alert: SlowResponses
-                    expr: histogram_quantile(0.95, rate(hms_requests_duration_ms_bucket[5m])) > 2000
+                    expr: histogram_quantile(0.95, rate({{{prefix}}}_requests_duration_ms_bucket[5m])) > 2000
                     for: 5m
                     labels:
                       severity: warning
                     annotations:
                       summary: "P95 latency above 2s on {{ $labels.service }}"
 
-                  - alert: EmergencyBacklog
-                    expr: increase(hms_requests_total{operation="emergency.arrival"}[1h]) > 50
+                  - alert: UnauthorizedAccess
+                    expr: rate({{{prefix}}}_security_breach_attempts[5m]) > 0
                     for: 1m
                     labels:
                       severity: critical
                     annotations:
-                      summary: "Emergency department surge: {{ $value }} arrivals in 1h"
-
-                  - alert: UnauthorizedPhiAccess
-                    expr: rate(hms_security_breach_attempts[5m]) > 0
-                    for: 1m
-                    labels:
-                      severity: critical
-                    annotations:
-                      summary: "Potential unauthorized sensitive data access detected ({{ $value }}/sec)"
+                      summary: "Potential unauthorized access detected ({{ $value }}/sec)"
 
                   - alert: ServiceDown
                     expr: up == 0
@@ -405,7 +386,7 @@ public sealed class ObservabilityAgent : IAgent
                       summary: "Service {{ $labels.instance }} is down"
 
                   - alert: KafkaPublishSlow
-                    expr: histogram_quantile(0.95, rate(hms_kafka_publish_ms_bucket[5m])) > 500
+                    expr: histogram_quantile(0.95, rate({{{prefix}}}_kafka_publish_ms_bucket[5m])) > 500
                     for: 5m
                     labels:
                       severity: warning
@@ -413,38 +394,30 @@ public sealed class ObservabilityAgent : IAgent
                       summary: "Kafka publish P95 latency above 500ms"
 
                   - alert: AiResponseSlow
-                    expr: histogram_quantile(0.95, rate(hms_requests_duration_ms_bucket{operation="ai.interact"}[5m])) > 10000
+                    expr: histogram_quantile(0.95, rate({{{prefix}}}_requests_duration_ms_bucket{operation="ai.interact"}[5m])) > 10000
                     for: 5m
                     labels:
                       severity: warning
                     annotations:
                       summary: "AI interaction P95 latency above 10s"
 
-              - name: hms_compliance_alerts
+              - name: {{{prefix}}}_compliance_alerts
                 rules:
-                  - alert: PhiAccessSpike
-                    expr: rate(hms_phi_access_total[5m]) > 100
+                  - alert: SensitiveDataAccessSpike
+                    expr: rate({{{prefix}}}_sensitive_data_access_total[5m]) > 100
                     for: 2m
                     labels:
                       severity: warning
                     annotations:
                       summary: "Unusual sensitive data access rate: {{ $value }}/sec from {{ $labels.user }}"
-
-                  - alert: BreakTheGlassUsed
-                    expr: increase(hms_requests_total{operation="break_the_glass"}[1h]) > 0
-                    for: 0m
-                    labels:
-                      severity: warning
-                    annotations:
-                      summary: "Break-the-glass emergency access activated"
             """
     };
 
-    private static string GenerateGrafanaDashboardFallback() => """
+    private static string GenerateGrafanaDashboardFallback(string prefix, string label) => $$$"""
         {
           "dashboard": {
-            "title": "Application Platform",
-            "uid": "hms-overview",
+            "title": "{{{label}}}",
+            "uid": "{{{prefix}}}-overview",
             "timezone": "UTC",
             "refresh": "10s",
             "panels": [
@@ -452,42 +425,42 @@ public sealed class ObservabilityAgent : IAgent
                 "title": "Request Rate (per service)",
                 "type": "timeseries",
                 "datasource": "Prometheus",
-                "targets": [{ "expr": "rate(hms_requests_total[5m])", "legendFormat": "{{ service }}" }],
+                "targets": [{ "expr": "rate({{{prefix}}}_requests_total[5m])", "legendFormat": "{{ service }}" }],
                 "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 }
               },
               {
                 "title": "P95 Latency (ms)",
                 "type": "timeseries",
                 "datasource": "Prometheus",
-                "targets": [{ "expr": "histogram_quantile(0.95, rate(hms_requests_duration_ms_bucket[5m]))", "legendFormat": "{{ service }}" }],
+                "targets": [{ "expr": "histogram_quantile(0.95, rate({{{prefix}}}_requests_duration_ms_bucket[5m]))", "legendFormat": "{{ service }}" }],
                 "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 }
               },
               {
                 "title": "Error Rate",
                 "type": "timeseries",
                 "datasource": "Prometheus",
-                "targets": [{ "expr": "rate(hms_errors_total[5m])", "legendFormat": "{{ service }}" }],
+                "targets": [{ "expr": "rate({{{prefix}}}_errors_total[5m])", "legendFormat": "{{ service }}" }],
                 "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 }
               },
               {
                 "title": "Sensitive Data Access Events",
                 "type": "timeseries",
                 "datasource": "Prometheus",
-                "targets": [{ "expr": "rate(hms_phi_access_total[5m])", "legendFormat": "{{ entity }} - {{ access }}" }],
+                "targets": [{ "expr": "rate({{{prefix}}}_sensitive_data_access_total[5m])", "legendFormat": "{{ entity }} - {{ access }}" }],
                 "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 }
-              },
-              {
-                "title": "Emergency Arrivals by Triage",
-                "type": "barchart",
-                "datasource": "Prometheus",
-                "targets": [{ "expr": "increase(hms_requests_total{operation='emergency.arrival'}[1h])", "legendFormat": "{{ triage }}" }],
-                "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 }
               },
               {
                 "title": "AI Interaction Latency",
                 "type": "timeseries",
                 "datasource": "Prometheus",
-                "targets": [{ "expr": "histogram_quantile(0.95, rate(hms_requests_duration_ms_bucket{operation='ai.interact'}[5m]))", "legendFormat": "{{ model }}" }],
+                "targets": [{ "expr": "histogram_quantile(0.95, rate({{{prefix}}}_requests_duration_ms_bucket{operation='ai.interact'}[5m]))", "legendFormat": "{{ model }}" }],
+                "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 }
+              },
+              {
+                "title": "Kafka Publish Latency",
+                "type": "timeseries",
+                "datasource": "Prometheus",
+                "targets": [{ "expr": "histogram_quantile(0.95, rate({{{prefix}}}_kafka_publish_ms_bucket[5m]))", "legendFormat": "{{ service }}" }],
                 "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 }
               }
             ]

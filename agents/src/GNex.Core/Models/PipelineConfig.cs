@@ -6,6 +6,19 @@ public sealed class PipelineConfig
     public string OutputPath { get; init; } = string.Empty;
     public string? ProjectId { get; init; }
     public string SolutionNamespace { get; init; } = "GNex";
+
+    /// <summary>
+    /// The project domain (e.g. "Healthcare", "IT", "Manufacturing", "E-Commerce", "FinTech", "Education").
+    /// Used by agents to generate domain-appropriate artifacts, prompts, and compliance policies.
+    /// When empty, agents generate fully generic artifacts.
+    /// </summary>
+    public string ProjectDomain { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Optional free-text description of the domain to give agents richer context.
+    /// Example: "Hospital management system with HL7/FHIR interoperability" or "B2B SaaS inventory platform".
+    /// </summary>
+    public string ProjectDomainDescription { get; init; } = string.Empty;
     public string DbConnectionString { get; init; } = string.Empty;
     public bool EnableIntegrationLayer { get; init; } = true;
     public bool EnableTestGeneration { get; init; } = true;
@@ -35,4 +48,17 @@ public sealed class PipelineConfig
         ["Gateway"] = 5100,
         ["Kafka"] = 9092
     };
+
+    // ── Convenience helpers for agents ──
+
+    /// <summary>Short lowercase prefix for metrics, Kafka topics, file names (e.g. "app", "hms", "fintech").</summary>
+    public string ProjectPrefix => string.IsNullOrWhiteSpace(ProjectDomain) ? "app" : ProjectDomain.ToLowerInvariant().Replace(" ", "").Replace("/", "");
+
+    /// <summary>Human-readable project label for prompts and generated comments.</summary>
+    public string ProjectLabel => string.IsNullOrWhiteSpace(ProjectDomain) ? "Application Platform" : $"{ProjectDomain} Platform";
+
+    /// <summary>Domain context string agents can inject into LLM system prompts.</summary>
+    public string DomainContext => string.IsNullOrWhiteSpace(ProjectDomainDescription)
+        ? (string.IsNullOrWhiteSpace(ProjectDomain) ? "a generic software platform" : $"a {ProjectDomain} software platform")
+        : ProjectDomainDescription;
 }

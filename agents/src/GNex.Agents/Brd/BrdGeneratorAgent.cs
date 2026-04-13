@@ -49,10 +49,10 @@ public sealed class BrdGeneratorAgent : IAgent
         context.BrdDocuments.Add(brd);
 
         // Generate Mermaid diagrams
-        brd.ContextDiagram = BrdDiagramGenerator.GenerateContextDiagram(requirements, context.DomainModel);
+        brd.ContextDiagram = BrdDiagramGenerator.GenerateContextDiagram(requirements, context.DomainModel, context.DomainProfile);
         brd.DataFlowDiagram = BrdDiagramGenerator.GenerateDataFlowDiagram(requirements, context.DomainModel);
         brd.SequenceDiagram = BrdDiagramGenerator.GenerateSequenceDiagram(requirements);
-        brd.ErDiagram = BrdDiagramGenerator.GenerateErDiagram(context.DomainModel);
+        brd.ErDiagram = BrdDiagramGenerator.GenerateErDiagram(context.DomainModel, context.DomainProfile);
 
         // Produce BRD as markdown artifact
         var markdown = BrdMarkdownExporter.Export(brd);
@@ -216,7 +216,7 @@ public sealed class BrdGeneratorAgent : IAgent
     private static BrdDocument BuildBrd(List<Requirement> requirements, AgentContext context)
     {
         var modules = requirements.Select(r => r.Module).Where(m => !string.IsNullOrEmpty(m)).Distinct().ToList();
-        var projectName = modules.Count > 0 ? string.Join(", ", modules.Take(3)) : "HMS";
+        var projectName = modules.Count > 0 ? string.Join(", ", modules.Take(3)) : context.PipelineConfig?.ProjectLabel ?? "Application";
 
         var brd = new BrdDocument
         {
@@ -237,7 +237,7 @@ public sealed class BrdGeneratorAgent : IAgent
         brd.OutOfScope = "- Manual data migration from legacy systems\n- Third-party vendor integrations not specified in requirements\n- Mobile native applications (web-responsive only)";
 
         // Stakeholders
-        brd.Stakeholders = ExtractStakeholders(requirements);
+        brd.Stakeholders = ExtractStakeholders(requirements, context.DomainProfile);
 
         // FR / NFR
         brd.FunctionalRequirements = requirements
@@ -276,7 +276,7 @@ public sealed class BrdGeneratorAgent : IAgent
         ];
 
         // Integration Points
-        brd.IntegrationPoints = ExtractIntegrationPoints(requirements);
+        brd.IntegrationPoints = ExtractIntegrationPoints(requirements, context.DomainProfile);
 
         // Security
         brd.SecurityRequirements =
@@ -322,32 +322,42 @@ public sealed class BrdGeneratorAgent : IAgent
         return brd;
     }
 
-    private static List<string> ExtractStakeholders(List<Requirement> requirements)
+    private static List<string> ExtractStakeholders(List<Requirement> requirements, DomainProfile? domainProfile)
     {
-        var actors = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        // Prefer DomainProfile actors if available (LLM-derived)
+        if (domainProfile?.Actors is { Count: > 0 } actors)
+            return actors.Select(a => $"{a.Name} — {a.Role}").ToList();
+
+        // Generic keyword-based fallback
+        var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
             "Administrator", "System Administrator"
         };
         var text = string.Join(" ", requirements.Select(r => $"{r.Title} {r.Description}")).ToLowerInvariant();
-        if (text.Contains("patient")) actors.Add("Patient");
-        if (text.Contains("nurse")) actors.Add("Nurse");
-        if (text.Contains("doctor") || text.Contains("physician")) actors.Add("Physician");
-        if (text.Contains("billing") || text.Contains("claim") || text.Contains("revenue")) actors.Add("Billing Staff");
-        if (text.Contains("lab") || text.Contains("diagnostic")) actors.Add("Lab Technician");
-        if (text.Contains("emergency") || text.Contains("triage")) actors.Add("Emergency Department Staff");
-        if (text.Contains("api") || text.Contains("integration")) actors.Add("External System (API Consumer)");
-        return [.. actors];
+        if (text.Contains("user") || text.Contains("customer") || text.Contains("client")) result.Add("End User");
+        if (text.Contains("operator") || text.Contains("staff")) result.Add("Operator");
+        if (text.Contains("manager") || text.Contains("supervisor")) result.Add("Manager");
+        if (text.Contains("billing") || text.Contains("finance")) result.Add("Finance Staff");
+        if (text.Contains("analyst") || text.Contains("report")) result.Add("Analyst");
+        if (text.Contains("auditor") || text.Contains("compliance")) result.Add("Auditor");
+        if (text.Contains("api") || text.Contains("integration")) result.Add("External System (API Consumer)");
+        if (text.Contains("support") || text.Contains("helpdesk")) result.Add("Support Staff");
+        return [.. result];
     }
 
-    private static List<string> ExtractIntegrationPoints(List<Requirement> requirements)
+    private static List<string> ExtractIntegrationPoints(List<Requirement> requirements, DomainProfile? domainProfile)
     {
+        // Prefer DomainProfile integration patterns if available (LLM-derived)
+        if (domainProfile?.IntegrationPatterns is { Count: > 0 } patterns)
+            return patterns.Select(p => $"{p.Name} — {p.AdapterDescription ?? p.Applicability}").ToList();
+
+        // Generic keyword-based fallback
         var points = new List<string>();
         var text = string.Join(" ", requirements.Select(r => $"{r.Title} {r.Description}")).ToLowerInvariant();
-        if (text.Contains("fhir")) points.Add("FHIR R4 — Interoperability (structured data exchange)");
-        if (text.Contains("hl7")) points.Add("HL7 v2 — Legacy system messaging");
-        if (text.Contains("kafka")) points.Add("Apache Kafka — Async event streaming between microservices");
+        if (text.Contains("kafka") || text.Contains("event")) points.Add("Apache Kafka — Async event streaming between microservices");
         if (text.Contains("email") || text.Contains("notification")) points.Add("SMTP / Push Notifications — Alert delivery");
         if (text.Contains("ldap") || text.Contains("active directory")) points.Add("LDAP / Active Directory — User authentication");
+        if (text.Contains("api") || text.Contains("integration")) points.Add("REST/gRPC APIs — Service-to-service communication");
         if (points.Count == 0) points.Add("Internal microservice APIs via HTTP/gRPC");
         return points;
     }

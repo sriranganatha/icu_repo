@@ -258,9 +258,9 @@ public sealed class DodVerificationAgent : IAgent
             return true;
         }
 
-        // ── Pattern: "integration" / "kafka" / "fhir" / "hl7" DOD items ──
-        if (dodLower.Contains("integration") || dodLower.Contains("kafka") || dodLower.Contains("fhir") ||
-            dodLower.Contains("hl7") || dodLower.Contains("event"))
+        // ── Pattern: "integration" / "kafka" / protocol-specific DOD items ──
+        if (dodLower.Contains("integration") || dodLower.Contains("kafka") ||
+            dodLower.Contains("adapter") || dodLower.Contains("event") || dodLower.Contains("protocol"))
         {
             var intArtifacts = allRelevant.Where(a => a.Layer == ArtifactLayer.Integration).ToList();
             if (intArtifacts.Count == 0)
@@ -281,9 +281,9 @@ public sealed class DodVerificationAgent : IAgent
             return true;
         }
 
-        // ── Pattern: "security" / "hipaa" / "compliance" DOD items ──
-        if (dodLower.Contains("security") || dodLower.Contains("hipaa") || dodLower.Contains("compliance") ||
-            dodLower.Contains("rbac") || dodLower.Contains("access control"))
+        // ── Pattern: "security" / "compliance" / "access control" DOD items ──
+        if (dodLower.Contains("security") || dodLower.Contains("compliance") ||
+            dodLower.Contains("rbac") || dodLower.Contains("access control") || dodLower.Contains("audit"))
         {
             var secArtifacts = allRelevant.Where(a =>
                 a.Layer == ArtifactLayer.Security ||

@@ -151,7 +151,7 @@ public sealed class CodeQualityAgent : IAgent
             report.AppendLine("## AI Quality Assessment");
             var topFiles = fileMetrics.OrderByDescending(f => f.Complexity).Take(5);
             var summaryPrompt = $"""
-                Analyze this .NET 8 HMS codebase quality summary and provide 5 actionable recommendations:
+                Analyze this .NET codebase quality summary and provide 5 actionable recommendations:
                 - Total files: {csFiles.Length}, Total methods: {totalMethods}
                 - Long methods (>50 lines): {longMethods}
                 - Long classes (>500 lines): {longClasses}

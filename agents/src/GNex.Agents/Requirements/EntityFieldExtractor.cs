@@ -27,7 +27,9 @@ public static partial class EntityFieldExtractor
     public static ParsedDomainModel BuildDomainModel(List<CodeArtifact> artifacts, IReadOnlyList<MicroserviceDefinition>? services = null)
     {
         var model = new ParsedDomainModel();
-        var catalog = services ?? MicroserviceCatalog.All;
+        var catalog = services ?? [];
+
+        if (catalog.Count == 0) return model;
 
         foreach (var svc in catalog)
         {
@@ -76,8 +78,8 @@ public static partial class EntityFieldExtractor
             }
         }
 
-        // Feature mappings from module structure
-        model.FeatureMappings = BuildFeatureMappings();
+        // Feature mappings derived from service catalog
+        model.FeatureMappings = BuildFeatureMappings(catalog);
 
         // NFR requirements
         model.NfrRequirements = BuildNfrRequirements();
@@ -157,17 +159,25 @@ public static partial class EntityFieldExtractor
             or "Guid" or "TimeSpan";
     }
 
-    private static List<FeatureMapping> BuildFeatureMappings() =>
-    [
-        new() { FeatureId = "EP-01", Module = "B", FeatureName = "Unified Patient Identity", ServiceNames = ["PatientService"], EntityNames = ["PatientProfile", "PatientIdentifier"] },
-        new() { FeatureId = "EP-03", Module = "E", FeatureName = "Emergency & Urgent Care", ServiceNames = ["EmergencyService"], EntityNames = ["EmergencyArrival", "TriageAssessment"] },
-        new() { FeatureId = "EP-04", Module = "F", FeatureName = "Inpatient Admissions & Bed Ops", ServiceNames = ["InpatientService"], EntityNames = ["Admission", "AdmissionEligibility"] },
-        new() { FeatureId = "EP-02", Module = "D", FeatureName = "OPD Intake & Consultation", ServiceNames = ["EncounterService"], EntityNames = ["Encounter", "ClinicalNote"] },
-        new() { FeatureId = "EP-10", Module = "J", FeatureName = "Diagnostics & Lab Results", ServiceNames = ["DiagnosticsService"], EntityNames = ["ResultRecord"] },
-        new() { FeatureId = "EP-12", Module = "L", FeatureName = "Billing & Revenue Cycle", ServiceNames = ["RevenueService"], EntityNames = ["Claim"] },
-        new() { FeatureId = "EP-Y1", Module = "Y", FeatureName = "Audit & Compliance", ServiceNames = ["AuditService"], EntityNames = ["AuditEvent"] },
-        new() { FeatureId = "EP-P1", Module = "P", FeatureName = "AI Platform & Copilot", ServiceNames = ["AiService"], EntityNames = ["AiInteraction"] },
-    ];
+    private static List<FeatureMapping> BuildFeatureMappings(IReadOnlyList<MicroserviceDefinition> catalog)
+    {
+        // Derive feature mappings dynamically from the service catalog
+        var mappings = new List<FeatureMapping>();
+        var featureIndex = 1;
+        foreach (var svc in catalog)
+        {
+            mappings.Add(new FeatureMapping
+            {
+                FeatureId = $"EP-{featureIndex:D2}",
+                Module = svc.ShortName.Length > 0 ? svc.ShortName[..1].ToUpperInvariant() : "X",
+                FeatureName = svc.Description.Length > 0 ? svc.Description : svc.Name,
+                ServiceNames = [svc.Name],
+                EntityNames = [.. svc.Entities]
+            });
+            featureIndex++;
+        }
+        return mappings;
+    }
 
     private static List<NfrRequirement> BuildNfrRequirements() =>
     [
@@ -182,18 +192,8 @@ public static partial class EntityFieldExtractor
         new() { Id = "NFR-TEST-01", Category = "Testing", Description = "All services must have unit tests with real assertions", ValidationRule = "no_stub_assertions" },
     ];
 
-    private static List<string> InferFeatureTags(MicroserviceDefinition svc, string entity) => svc.ShortName switch
-    {
-        "patient" => ["EP-01", "Module-B", "Patient"],
-        "encounter" => ["EP-02", "Module-D", entity == "ClinicalNote" ? "ClinicalDocs" : "Encounters"],
-        "inpatient" => ["EP-04", "Module-F", "ADT"],
-        "emergency" => ["EP-03", "Module-E", "Emergency"],
-        "diagnostics" => ["EP-10", "Module-J", "Diagnostics"],
-        "revenue" => ["EP-12", "Module-L", "Revenue"],
-        "audit" => ["EP-Y1", "Module-Y", "Compliance"],
-        "ai" => ["EP-P1", "Module-P", "AI"],
-        _ => ["General"]
-    };
+    private static List<string> InferFeatureTags(MicroserviceDefinition svc, string entity) =>
+        [svc.Name, svc.ShortName, entity];
 
     private static string ToKebabCase(string name) =>
         KebabRegex().Replace(name, "-$1").ToLowerInvariant().TrimStart('-');

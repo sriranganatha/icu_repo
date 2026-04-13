@@ -1,8 +1,11 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using GNex.Core.Enums;
+using GNex.Core.Extensions;
 using GNex.Core.Interfaces;
 using GNex.Core.Models;
+using GNex.Database.Entities.Platform.AgentRegistry;
+using GNex.Database.Repositories;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -39,9 +42,10 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
     private static readonly Dictionary<AgentType, AgentType[]> s_dependencies = new()
     {
         [AgentType.RequirementsReader]    = [],
+        [AgentType.PromptGenerator]       = [AgentType.RequirementsReader],
         [AgentType.Architect]             = [AgentType.RequirementsReader],
         [AgentType.PlatformBuilder]       = [AgentType.Architect],
-        [AgentType.RequirementsExpander]  = [AgentType.RequirementsReader, AgentType.Architect],
+        [AgentType.RequirementsExpander]  = [AgentType.RequirementsReader, AgentType.Architect, AgentType.PromptGenerator],
         [AgentType.Backlog]               = [AgentType.RequirementsExpander],
         // Code-gen agents depend only on PlatformBuilder (not Backlog) because Backlog
         // cycles continuously. First dispatch is gated by backlogRanAtLeastOnce flag;
@@ -52,14 +56,14 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
         [AgentType.Integration]           = [AgentType.PlatformBuilder],
         [AgentType.Testing]               = [AgentType.Database, AgentType.ServiceLayer, AgentType.PlatformBuilder],
         [AgentType.Review]               = [AgentType.Database, AgentType.ServiceLayer, AgentType.Application, AgentType.Integration, AgentType.Testing],
-        // Enrichment — only need Requirements
-        [AgentType.Security]             = [AgentType.RequirementsReader],
-        [AgentType.HipaaCompliance]      = [AgentType.RequirementsReader],
-        [AgentType.Soc2Compliance]       = [AgentType.RequirementsReader],
-        [AgentType.AccessControl]        = [AgentType.RequirementsReader],
-        [AgentType.Observability]        = [AgentType.RequirementsReader],
+        // Enrichment — need Requirements + DomainProfile
+        [AgentType.Security]             = [AgentType.RequirementsReader, AgentType.PromptGenerator],
+        [AgentType.HipaaCompliance]      = [AgentType.RequirementsReader, AgentType.PromptGenerator],
+        [AgentType.Soc2Compliance]       = [AgentType.RequirementsReader, AgentType.PromptGenerator],
+        [AgentType.AccessControl]        = [AgentType.RequirementsReader, AgentType.PromptGenerator],
+        [AgentType.Observability]        = [AgentType.RequirementsReader, AgentType.PromptGenerator],
         [AgentType.Infrastructure]       = [AgentType.Architect],
-        [AgentType.ApiDocumentation]     = [AgentType.RequirementsReader],
+        [AgentType.ApiDocumentation]     = [AgentType.RequirementsReader, AgentType.PromptGenerator],
         [AgentType.Performance]          = [AgentType.RequirementsReader],
         // Remediation — after Review
         [AgentType.BugFix]               = [AgentType.Review],
@@ -96,7 +100,7 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
         // DodVerification — quality gate after all code-gen + Review complete
         [AgentType.DodVerification]      = [AgentType.Database, AgentType.ServiceLayer, AgentType.Application, AgentType.Integration, AgentType.Testing, AgentType.Review],
         // BRD generation — after requirements are expanded
-        [AgentType.BrdGenerator]         = [AgentType.RequirementsExpander],
+        [AgentType.BrdGenerator]         = [AgentType.RequirementsExpander, AgentType.PromptGenerator],
         // Conflict resolution — after all code-gen agents
         [AgentType.ConflictResolver]     = [AgentType.Database, AgentType.ServiceLayer, AgentType.Application, AgentType.Integration],
         // Traceability gate — after Review + Testing
@@ -246,6 +250,9 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
             var projectAgents = await agentResolver.ResolveAllForProjectAsync(context, ct);
             _logger.LogInformation("Resolved {Count} agents for project {ProjectId}", projectAgents.Count, projectId);
 
+            // Load historical learnings (project + domain + global) for context enrichment
+            await LoadHistoricalLearningsAsync(context, ct);
+
             // If DB-backed workflow stages were loaded, use stage-driven execution
             if (context.ResolvedStages.Count > 0)
             {
@@ -340,10 +347,19 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                 await workflowEngine.ApproveGateAsync(context, stage.StageId, "human", ct);
             }
 
-            // Dispatch agents for this stage in parallel
+            // Dispatch agents for this stage in parallel (skip domain-excluded agents)
+            var domainExcluded = GetDomainExcludedAgents(config);
             var stageTasks = new List<Task<bool>>();
             foreach (var agentType in stage.AgentsInvolved)
             {
+                if (domainExcluded.Contains(agentType))
+                {
+                    _logger.LogInformation("[Stage {Order}] Skipping {AgentType} — not applicable for domain '{Domain}'",
+                        stage.Order, agentType, config.ProjectDomain);
+                    completedAgents.Add(agentType);
+                    continue;
+                }
+
                 var agent = projectAgents.FirstOrDefault(a => a.Type == agentType)
                             ?? _agents.FirstOrDefault(a => a.Type == agentType);
                 if (agent is null)
@@ -390,6 +406,9 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
         await PublishEvent(context, AgentType.Orchestrator, AgentStatus.Completed,
             $"Project pipeline completed — {context.Artifacts.Count} artifacts, {context.Findings.Count} findings",
             artifactCount: context.Artifacts.Count, findingCount: context.Findings.Count, ct: CancellationToken.None);
+
+        // Persist learnings: harvest from this run + verify previously-loaded learnings
+        await PersistLearningsAsync(context, CancellationToken.None);
 
         await ExecutePostPipelineInstructions(context, config, CancellationToken.None);
 
@@ -505,6 +524,9 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
         _taskCompletedBy.Clear();
         _current = context;
 
+        // Load historical learnings (project + domain + global)
+        await LoadHistoricalLearningsAsync(context, ct);
+
         return await RunDaemonLoopAsync(context, config, ct);
     }
 
@@ -547,6 +569,10 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
         pendingAgents.Remove(AgentType.Deploy);
         pendingAgents.Remove(AgentType.Monitor);
         pendingAgents.Remove(AgentType.LoadTest);
+
+        // Domain-specific agent exclusion: skip agents that only apply to certain domains
+        foreach (var excluded in GetDomainExcludedAgents(config))
+            pendingAgents.Remove(excluded);
         var completedAgents = new ConcurrentDictionary<AgentType, bool>(); // true=success, false=skipped
         var runningAgents = new ConcurrentDictionary<AgentType, Task>();
         var platformExpandTriggered = false;
@@ -986,6 +1012,9 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
             $"Duration: {pipelineDuration}",
             severity: AuditSeverity.Info, ct: CancellationToken.None);
 
+        // Persist learnings: harvest from this run + verify previously-loaded learnings
+        await PersistLearningsAsync(context, CancellationToken.None);
+
         await ExecutePostPipelineInstructions(context, config, CancellationToken.None);
 
         }
@@ -1399,6 +1428,34 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                         _logger.LogInformation("[Self-Heal] {Agent} attempt {Attempt}: {Retriable} items queued for retry",
                             agent.Name, attempt + 1, retriable);
                 }
+            }
+
+            // ── Store result so downstream agents can inspect predecessor outputs ──
+            context.AgentResults[agent.Type] = result;
+
+            // ── Record quality metrics for tracking ──
+            context.QualityMetrics.Add(new QualityMetric
+            {
+                Source = agent.Type,
+                Category = "AgentExecution",
+                Description = $"{agent.Name} execution",
+                Value = result.Success ? 1.0 : 0.0,
+                Target = 1.0,
+                ArtifactPath = $"agents/{agent.Type}",
+                RecordedAt = DateTimeOffset.UtcNow
+            });
+            if (result.Artifacts.Count > 0)
+            {
+                context.QualityMetrics.Add(new QualityMetric
+                {
+                    Source = agent.Type,
+                    Category = "ArtifactCount",
+                    Description = $"{agent.Name} artifacts produced",
+                    Value = result.Artifacts.Count,
+                    Target = 1.0,
+                    ArtifactPath = $"agents/{agent.Type}/artifacts",
+                    RecordedAt = DateTimeOffset.UtcNow
+                });
             }
 
             // ── Audit: agent completed/failed with details
@@ -1860,6 +1917,32 @@ Return exactly 3 sections in markdown:
     private static AgentType[] GetDependencies(AgentType agent) =>
         s_dependencies.TryGetValue(agent, out var deps) ? deps : [];
 
+    /// <summary>
+    /// Returns agent types that should be excluded based on the project domain.
+    /// Domain-specific agents (e.g. HIPAA) are only relevant for certain domains;
+    /// universal agents (e.g. SOC2) run for all projects.
+    /// </summary>
+    private static HashSet<AgentType> GetDomainExcludedAgents(PipelineConfig config)
+    {
+        var excluded = new HashSet<AgentType>();
+        var domain = config.ProjectDomain ?? "";
+
+        // HIPAA compliance — only for Healthcare / Medical / Clinical / Pharma domains
+        var isHealthcare = domain.Contains("health", StringComparison.OrdinalIgnoreCase) ||
+                           domain.Contains("medical", StringComparison.OrdinalIgnoreCase) ||
+                           domain.Contains("clinical", StringComparison.OrdinalIgnoreCase) ||
+                           domain.Contains("pharma", StringComparison.OrdinalIgnoreCase);
+
+        if (!isHealthcare)
+            excluded.Add(AgentType.HipaaCompliance);
+
+        // SOC2 is universal — runs for ALL projects (not excluded)
+        // Future: add more domain-specific exclusion rules here
+        // e.g. PCI-DSS only for FinTech/E-Commerce, FERPA only for Education, etc.
+
+        return excluded;
+    }
+
     private async Task PublishEvent(
         AgentContext context, AgentType agent, AgentStatus status, string message,
         int retryAttempt = 0, int artifactCount = 0, int findingCount = 0,
@@ -1902,6 +1985,117 @@ Return exactly 3 sections in markdown:
 
     private static readonly string[] s_testProjectKeywords =
         ["run tests", "run the tests", "dotnet test", "execute tests"];
+
+    // ═══════════════════════════════════════════════════════════════
+    //  Persistent Learning — Load / Harvest / Save
+    // ═══════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Load historical learnings (project + domain + global) at pipeline start.
+    /// Injects them into the AgentContext so PromptGenerator and code-gen agents can consume them.
+    /// </summary>
+    private async Task LoadHistoricalLearningsAsync(AgentContext context, CancellationToken ct)
+    {
+        try
+        {
+            using var scope = _serviceProvider.CreateScope();
+            var repo = scope.ServiceProvider.GetService<ILearningRepository>();
+            if (repo is null) return;
+
+            var projectId = context.ProjectId ?? string.Empty;
+            var domain = context.DomainProfile?.Domain ?? string.Empty;
+
+            var dbLearnings = await repo.GetCombinedForPipelineAsync(projectId, domain, 150, ct);
+
+            if (dbLearnings.Count == 0) return;
+
+            // Convert DB entities → in-memory AgentLearningRecords
+            var records = dbLearnings.Select(l => new AgentLearningRecord
+            {
+                Id = l.Id,
+                RunId = l.RunId,
+                ProjectId = l.ProjectId,
+                AgentType = l.AgentTypeCode,
+                Scope = (LearningScope)l.Scope,
+                Category = l.Category,
+                Problem = l.Problem,
+                Resolution = l.Resolution,
+                Impact = l.Impact,
+                TargetAgents = string.IsNullOrEmpty(l.TargetAgents) ? [] : [.. l.TargetAgents.Split(',')],
+                PromptRule = l.PromptRule,
+                Domain = l.Domain,
+                SeenInProjects = string.IsNullOrEmpty(l.SeenInProjects) ? [] : [.. l.SeenInProjects.Split(',')],
+                SeenInDomains = string.IsNullOrEmpty(l.SeenInDomains) ? [] : [.. l.SeenInDomains.Split(',')],
+                Confidence = l.Confidence,
+                IsVerified = l.IsVerified,
+                IsDeprecated = l.IsDeprecated,
+                Recurrence = l.Recurrence
+            });
+
+            context.InjectHistoricalLearnings(records);
+            _logger.LogInformation("Loaded {Count} historical learnings (project: {P}, domain: {D}, global: {G})",
+                dbLearnings.Count,
+                dbLearnings.Count(l => l.Scope == 0),
+                dbLearnings.Count(l => l.Scope == 1),
+                dbLearnings.Count(l => l.Scope == 2));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to load historical learnings — pipeline will proceed without them");
+        }
+    }
+
+    /// <summary>
+    /// Harvest learnings from the completed pipeline and persist them to DB.
+    /// Also verifies learnings from previous runs whose problems did not recur.
+    /// </summary>
+    private async Task PersistLearningsAsync(AgentContext context, CancellationToken ct)
+    {
+        try
+        {
+            using var scope = _serviceProvider.CreateScope();
+            var repo = scope.ServiceProvider.GetService<ILearningRepository>();
+            if (repo is null) return;
+
+            // 1. Harvest new learnings from this run
+            var harvested = context.HarvestLearnings();
+            if (harvested.Count > 0)
+            {
+                var domain = context.DomainProfile?.Domain ?? string.Empty;
+                var dbEntities = harvested.Select(l => new AgentLearning
+                {
+                    Id = Guid.NewGuid().ToString("N"),
+                    ProjectId = l.ProjectId ?? string.Empty,
+                    RunId = l.RunId,
+                    AgentTypeCode = l.AgentType,
+                    Category = l.Category,
+                    Problem = l.Problem,
+                    Resolution = l.Resolution,
+                    Impact = l.Impact,
+                    TargetAgents = string.Join(",", l.TargetAgents),
+                    PromptRule = l.PromptRule,
+                    Domain = domain,
+                    Scope = (int)l.Scope,
+                    IsActive = true
+                });
+
+                await repo.SaveBatchAsync(dbEntities, ct);
+                _logger.LogInformation("Persisted {Count} learnings to DB (run {RunId})", harvested.Count, context.RunId);
+            }
+
+            // 2. Verify learnings from previous runs that were NOT reproduced
+            var verifiedIds = context.IdentifyVerifiedLearnings();
+            foreach (var id in verifiedIds)
+                await repo.VerifyAsync(id, ct);
+
+            if (verifiedIds.Count > 0)
+                _logger.LogInformation("Verified {Count} historical learnings (problems not reproduced)", verifiedIds.Count);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to persist learnings — they will be lost for this run");
+        }
+    }
 
     private async Task ExecutePostPipelineInstructions(AgentContext context, PipelineConfig config, CancellationToken ct)
     {
@@ -2414,7 +2608,7 @@ Return exactly 3 sections in markdown:
             agents.Add(AgentType.Application.ToString());
 
         // Integration
-        if (text.Contains("integration") || text.Contains("hl7") || text.Contains("fhir") ||
+        if (text.Contains("integration") || text.Contains("adapter") || text.Contains("interoperability") ||
             text.Contains("kafka") || text.Contains("message") || text.Contains("event bus") ||
             text.Contains("outbox") || text.Contains("dead letter") || text.Contains("interop"))
             agents.Add(AgentType.Integration.ToString());

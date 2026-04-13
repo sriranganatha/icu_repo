@@ -20,18 +20,13 @@ public sealed class DeployAgent : IAgent
     public string Name => "Deploy Agent";
     public string Description => "Builds, publishes, and deploys the generated GenesisNexus solution from the output path.";
 
-    private static readonly (string Name, string Project, int Port)[] Services =
-    [
-        ("PatientService",     "GNex.PatientService",     5101),
-        ("EncounterService",   "GNex.EncounterService",   5102),
-        ("InpatientService",   "GNex.InpatientService",   5103),
-        ("EmergencyService",   "GNex.EmergencyService",   5104),
-        ("DiagnosticsService", "GNex.DiagnosticsService", 5105),
-        ("RevenueService",     "GNex.RevenueService",     5106),
-        ("AuditService",       "GNex.AuditService",       5107),
-        ("AiService",          "GNex.AiService",          5108),
-        ("ApiGateway",         "GNex.ApiGateway",         5100),
-    ];
+    private static (string Name, string Project, int Port)[] ResolveServices(AgentContext context)
+    {
+        var derived = ServiceCatalogResolver.GetServices(context);
+        return derived.Count > 0
+            ? derived.Select(s => (s.Name, s.ProjectName, s.ApiPort)).ToArray()
+            : [("ApiGateway", "GNex.ApiGateway", 5100)];
+    }
 
     public DeployAgent(ILogger<DeployAgent> logger)
     {
@@ -136,6 +131,7 @@ public sealed class DeployAgent : IAgent
             // ── Step 4: Publish each service ──
             report.AppendLine("## Step 4: Publish Services");
             var publishResults = new List<(string Service, bool Ok, string Output)>();
+            var Services = ResolveServices(context);
             foreach (var (name, project, port) in Services)
             {
                 ct.ThrowIfCancellationRequested();
@@ -233,7 +229,7 @@ public sealed class DeployAgent : IAgent
 
             // ── Step 7: Database Migration Check ──
             report.AppendLine("## Step 7: Database Migrations");
-            var migrationProject = Services.FirstOrDefault(s => s.Name == "PatientService");
+            var migrationProject = Services.FirstOrDefault();
             if (migrationProject != default)
             {
                 var projDir = Path.Combine(outputPath, "src", migrationProject.Project);
@@ -243,7 +239,7 @@ public sealed class DeployAgent : IAgent
                     if (Directory.Exists(migrationsDir))
                     {
                         var migrationFiles = Directory.GetFiles(migrationsDir, "*.cs");
-                        report.AppendLine($"- Found {migrationFiles.Length} migration files in PatientService.");
+                        report.AppendLine($"- Found {migrationFiles.Length} migration files in {migrationProject.Name}.");
                     }
                     else
                     {

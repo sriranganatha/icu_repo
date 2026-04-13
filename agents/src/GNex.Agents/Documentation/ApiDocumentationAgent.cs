@@ -8,8 +8,8 @@ namespace GNex.Agents.Documentation;
 
 /// <summary>
 /// AI-powered API documentation agent. Generates OpenAPI 3.1 specifications,
-/// FHIR compatibility annotations, PHI field documentation, and Swagger UI
-/// configuration for all HMS microservices using the parsed domain model.
+/// compatibility annotations, sensitive field documentation, and Swagger UI
+/// configuration for all microservices using the parsed domain model.
 /// </summary>
 public sealed class ApiDocumentationAgent : IAgent
 {
@@ -18,7 +18,7 @@ public sealed class ApiDocumentationAgent : IAgent
 
     public AgentType Type => AgentType.ApiDocumentation;
     public string Name => "API Documentation Agent";
-    public string Description => "Generates OpenAPI 3.1 specifications, FHIR annotations, PHI field docs, and Swagger configuration for all HMS endpoints.";
+    public string Description => "Generates OpenAPI 3.1 specifications, annotations, sensitive field docs, and Swagger configuration for all endpoints.";
 
     public ApiDocumentationAgent(ILlmProvider llm, ILogger<ApiDocumentationAgent> logger)
     {
@@ -92,9 +92,9 @@ public sealed class ApiDocumentationAgent : IAgent
 
         var response = await _llm.GenerateAsync(new LlmPrompt
         {
-            SystemPrompt = "You are an OpenAPI expert for healthcare APIs. Generate complete OpenAPI 3.1 YAML specifications.",
+            SystemPrompt = "You are an OpenAPI expert for enterprise APIs. Generate complete OpenAPI 3.1 YAML specifications.",
             UserPrompt = $$"""
-                Generate an OpenAPI 3.1 YAML spec for the HMS {{serviceName}}.
+                Generate an OpenAPI 3.1 YAML spec for the {{serviceName}}.
                 Base path: /api/v1
                 Entities:
                 {{entitySummary}}
@@ -105,8 +105,7 @@ public sealed class ApiDocumentationAgent : IAgent
                 - POST /{entity} — Create (request body is CreateRequest DTO)
                 - PUT /{entity}/{id} — Update (request body is UpdateRequest DTO)
                 - Include X-Tenant-Id header parameter on all operations
-                - Mark PHI fields with x-phi-classification extension
-                - Add FHIR resource mapping where applicable
+                - Mark sensitive fields with x-data-classification extension
                 - Include 401, 403, 404, 422 error responses
                 """,
             Temperature = 0.2,
@@ -131,16 +130,15 @@ public sealed class ApiDocumentationAgent : IAgent
     {
         var response = await _llm.GenerateAsync(new LlmPrompt
         {
-            SystemPrompt = "You are a FHIR interoperability expert. Generate FHIR R4 resource mapping documentation for a healthcare management system.",
+            SystemPrompt = "You are an API interoperability expert. Generate entity-to-standard mapping documentation.",
             UserPrompt = $"""
-                Generate a FHIR R4 mapping guide for these HMS entities:
+                Generate an entity mapping guide for these entities:
                 {string.Join(", ", entities.Select(e => e.Name))}
 
                 For each entity, document:
-                - The corresponding FHIR R4 resource (e.g., PatientProfile → Patient, Encounter → Encounter)
+                - Standard resource mappings (if applicable for the domain)
                 - Field-to-element mappings
-                - Required FHIR extensions
-                - Terminology bindings (ICD-10, SNOMED-CT, LOINC, RxNorm, CPT)
+                - Required extensions
                 - Data conversion notes
 
                 Format as Markdown.
@@ -151,11 +149,11 @@ public sealed class ApiDocumentationAgent : IAgent
         return new CodeArtifact
         {
             Layer = ArtifactLayer.Documentation,
-            RelativePath = "docs/api/fhir-mapping-guide.md",
-            FileName = "fhir-mapping-guide.md",
+            RelativePath = "docs/api/entity-mapping-guide.md",
+            FileName = "entity-mapping-guide.md",
             Namespace = string.Empty,
             ProducedBy = AgentType.ApiDocumentation,
-            TracedRequirementIds = ["NFR-DOC-01", "FHIR-R4"],
+            TracedRequirementIds = ["NFR-DOC-01"],
             Content = response.Success ? response.Content : GenerateFhirMappingFallback(entities)
         };
     }
@@ -175,21 +173,21 @@ public sealed class ApiDocumentationAgent : IAgent
             namespace GNex.SharedKernel.Documentation;
 
             /// <summary>
-            /// Centralized Swagger/OpenAPI configuration for all HMS services.
+            /// Centralized Swagger/OpenAPI configuration for all services.
             /// </summary>
             public static class SwaggerConfig
             {
-                public static IServiceCollection AddHmsSwagger(this IServiceCollection services, string serviceName, string version = "v1")
+                public static IServiceCollection AddAppSwagger(this IServiceCollection services, string serviceName, string version = "v1")
                 {
                     services.AddEndpointsApiExplorer();
                     services.AddSwaggerGen(options =>
                     {
                         options.SwaggerDoc(version, new OpenApiInfo
                         {
-                            Title = $"HMS {serviceName} API",
+                            Title = $"{serviceName} API",
                             Version = version,
-                            Description = $"Healthcare Management System — {serviceName} endpoints. HIPAA-compliant, multi-tenant API.",
-                            Contact = new OpenApiContact { Name = "HMS Platform Team", Email = "platform@hms.health" },
+                            Description = $"{serviceName} endpoints. Multi-tenant, secure API.",
+                            Contact = new OpenApiContact { Name = "Platform Team", Email = "platform@app.dev" },
                             License = new OpenApiLicense { Name = "Proprietary" }
                         });
 
@@ -241,7 +239,7 @@ public sealed class ApiDocumentationAgent : IAgent
         ProducedBy = AgentType.ApiDocumentation,
         TracedRequirementIds = ["NFR-DOC-01"],
         Content = """
-            # HMS API Changelog
+            # API Changelog
 
             All notable API changes will be documented in this file.
             Follows [Keep a Changelog](https://keepachangelog.com/) and [Semantic Versioning](https://semver.org/).
@@ -249,25 +247,19 @@ public sealed class ApiDocumentationAgent : IAgent
             ## [1.0.0] — YYYY-MM-DD
 
             ### Added
-            - **Patient Service**: CRUD endpoints for PatientProfile, PatientIdentifier, PatientContact
-            - **Encounter Service**: Encounter lifecycle (create, update, close, list by patient)
-            - **Inpatient Service**: InpatientStay, BedAssignment, NursingNote, DietaryOrder
-            - **Emergency Service**: EmergencyArrival, TriageAssessment, TraumaCaseLog
-            - **Diagnostics Service**: DiagnosticOrder, DiagnosticResult, SpecimenTracking
-            - **Revenue Service**: Claim, Payment, InsuranceVerification
-            - **Audit Service**: AuditEntry query and export
-            - **AI Service**: AiInteraction, CopilotSession, GovernanceLog
+            - All service CRUD endpoints generated from domain model
+            - Multi-tenant support via X-Tenant-Id header
+            - JWT Bearer authentication on all endpoints
 
             ### Security
             - X-Tenant-Id header required on all endpoints
             - JWT Bearer authentication
-            - PHI field-level access control per HIPAA Minimum Necessary
-            - All PHI access logged to audit trail
+            - Field-level access control
+            - All sensitive data access logged to audit trail
 
             ### Compliance
-            - HIPAA Technical Safeguards (45 CFR §164.312)
             - SOC 2 Type II controls (CC1-CC9)
-            - FHIR R4 resource compatibility annotations
+            - Audit trail for all data modifications
             """
     };
 
@@ -358,9 +350,9 @@ public sealed class ApiDocumentationAgent : IAgent
         return $"""
             openapi: '3.1.0'
             info:
-              title: HMS {serviceName} API
+              title: {serviceName} API
               version: '1.0.0'
-              description: 'Healthcare Management System — {serviceName}'
+              description: '{serviceName} endpoints'
             servers:
               - url: http://localhost:{5100 + Math.Abs(serviceName.GetHashCode()) % 10}
             paths:
@@ -385,50 +377,20 @@ public sealed class ApiDocumentationAgent : IAgent
 
     private static string GenerateFhirMappingFallback(IReadOnlyList<ParsedEntity> entities)
     {
-        var fhirMap = new Dictionary<string, string>
-        {
-            ["PatientProfile"] = "Patient",
-            ["PatientIdentifier"] = "Patient.identifier",
-            ["PatientContact"] = "Patient.contact / RelatedPerson",
-            ["Encounter"] = "Encounter",
-            ["InpatientStay"] = "Encounter (class=inpatient)",
-            ["BedAssignment"] = "Encounter.location",
-            ["EmergencyArrival"] = "Encounter (class=emergency)",
-            ["TriageAssessment"] = "Observation (category=survey)",
-            ["DiagnosticOrder"] = "ServiceRequest",
-            ["DiagnosticResult"] = "DiagnosticReport / Observation",
-            ["Claim"] = "Claim",
-            ["Payment"] = "PaymentNotice",
-        };
-
         var lines = new List<string>
         {
-            "# FHIR R4 Mapping Guide",
+            "# Entity Mapping Guide",
             "",
-            "## HMS Entity → FHIR R4 Resource Mapping",
+            "## Entity → Standard Resource Mapping",
             "",
-            "| HMS Entity | FHIR R4 Resource | Notes |",
+            "| Entity | Service | Notes |",
             "|---|---|---|"
         };
 
         foreach (var entity in entities)
         {
-            var fhir = fhirMap.GetValueOrDefault(entity.Name, "Custom Extension");
-            lines.Add($"| {entity.Name} | {fhir} | {entity.ServiceName} |");
+            lines.Add($"| {entity.Name} | {entity.ServiceName} | Domain entity |");
         }
-
-        lines.AddRange([
-            "",
-            "## Terminology Bindings",
-            "",
-            "| Domain | Code System | URL |",
-            "|---|---|---|",
-            "| Diagnoses | ICD-10-CM | http://hl7.org/fhir/sid/icd-10-cm |",
-            "| Procedures | CPT | http://www.ama-assn.org/go/cpt |",
-            "| Lab Tests | LOINC | http://loinc.org |",
-            "| Medications | RxNorm | http://www.nlm.nih.gov/research/umls/rxnorm |",
-            "| Clinical Findings | SNOMED CT | http://snomed.info/sct |",
-        ]);
 
         return string.Join("\n", lines);
     }
