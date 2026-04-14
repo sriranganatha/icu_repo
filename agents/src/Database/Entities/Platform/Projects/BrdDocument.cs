@@ -21,6 +21,13 @@ public class BrdDocument : PlatformEntityBase
     /// <summary>Custom instructions for AI enrichment (e.g. "Build BRD for UI and UX screens for these functionalities").</summary>
     public string Instructions { get; set; } = string.Empty;
 
+    /// <summary>
+    /// Groups BRDs created together from a multi-type selection.
+    /// All BRDs in the same group share the same requirement source documents.
+    /// Null/empty means the BRD is standalone (single-type creation).
+    /// </summary>
+    public string? GroupId { get; set; }
+
     /// <summary>draft | enriched | in_review | approved | rejected</summary>
     [Required] public string Status { get; set; } = "draft";
 

@@ -42,7 +42,7 @@ public sealed class OpenAiLlmProvider : ILlmProvider, IDisposable
         else
         {
             _available = false;
-            _logger.LogWarning("LLM provider not configured (no Llm:ApiKey). Agents will use template fallback.");
+            _logger.LogWarning("LLM provider not configured (no Llm:ApiKey). LLM calls will fail.");
         }
     }
 

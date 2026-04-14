@@ -5,7 +5,9 @@ using GNex.Core.Extensions;
 using GNex.Core.Interfaces;
 using GNex.Core.Models;
 using GNex.Database.Entities.Platform.AgentRegistry;
+using GNex.Database.Entities.Platform.Projects;
 using GNex.Database.Repositories;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -250,6 +252,9 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
             var projectAgents = await agentResolver.ResolveAllForProjectAsync(context, ct);
             _logger.LogInformation("Resolved {Count} agents for project {ProjectId}", projectAgents.Count, projectId);
 
+            // ── Load project tech stack from DB ──
+            await LoadProjectTechStackAsync(scope, context, projectId, ct);
+
             // Load historical learnings (project + domain + global) for context enrichment
             await LoadHistoricalLearningsAsync(context, ct);
 
@@ -298,6 +303,10 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
         context.ReportProgress = async (agentType, msg) =>
             await PublishEvent(context, agentType, AgentStatus.Running, msg, 0, ct: ct);
 
+        // Wire incremental work-item persistence callback from config (set by PipelineController)
+        if (config.PersistWorkItems is not null)
+            context.PersistWorkItems = (runId, items) => config.PersistWorkItems(runId, context.ProjectId, items);
+
         _logger.LogInformation("Pipeline {RunId} starting (stage-driven mode, {StageCount} stages)",
             context.RunId, context.ResolvedStages.Count);
 
@@ -311,12 +320,66 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
 
         var completedAgents = new HashSet<AgentType>();
 
+        // ── Resume support: pre-populate completed agents from a prior interrupted run ──
+        var resumeAgents = config.ResumeCompletedAgents;
+        if (resumeAgents is { Count: > 0 })
+        {
+            foreach (var name in resumeAgents)
+            {
+                if (Enum.TryParse<AgentType>(name, ignoreCase: true, out var at))
+                    completedAgents.Add(at);
+            }
+            _logger.LogInformation("[Resume] Resuming pipeline — {Count} agents already completed from prior run: {Agents}",
+                completedAgents.Count, string.Join(", ", completedAgents));
+            await PublishEvent(context, AgentType.Orchestrator, AgentStatus.Running,
+                $"Resuming pipeline — skipping {completedAgents.Count} already-completed agents", ct: ct);
+
+            // ── Restore all outputs from completed agents so downstream agents have data ──
+            var restored = new List<string>();
+
+            if (config.ResumeRequirements is { Count: > 0 })
+            {
+                context.Requirements = config.ResumeRequirements;
+                restored.Add($"{config.ResumeRequirements.Count} requirements");
+            }
+
+            if (config.ResumeExpandedRequirements is { Count: > 0 })
+            {
+                foreach (var er in config.ResumeExpandedRequirements)
+                    context.ExpandedRequirements.Add(er);
+                restored.Add($"{config.ResumeExpandedRequirements.Count} backlog items");
+            }
+
+            if (config.ResumeDerivedServices is { Count: > 0 })
+            {
+                context.DerivedServices = config.ResumeDerivedServices;
+                restored.Add($"{config.ResumeDerivedServices.Count} derived services");
+            }
+
+            if (restored.Count > 0)
+            {
+                _logger.LogInformation("[Resume] Restored into context: {Details}", string.Join(", ", restored));
+                await PublishEvent(context, AgentType.Orchestrator, AgentStatus.Running,
+                    $"Restored from prior run: {string.Join(", ", restored)}", ct: ct);
+            }
+        }
+
         foreach (var stage in context.ResolvedStages.OrderBy(s => s.Order))
         {
             if (ct.IsCancellationRequested) break;
 
             _logger.LogInformation("[Stage {Order}] {Name} — {Count} agents",
                 stage.Order, stage.Name, stage.AgentsInvolved.Count);
+
+            // Resume: skip entire stage if all its agents already completed
+            if (stage.AgentsInvolved.All(a => completedAgents.Contains(a)))
+            {
+                _logger.LogInformation("[Stage {Order}] Skipping entire stage '{Name}' — all agents completed in prior run",
+                    stage.Order, stage.Name);
+                await PublishEvent(context, AgentType.Orchestrator, AgentStatus.Running,
+                    $"Skipping stage: {stage.Name} (completed in prior run)", ct: ct);
+                continue;
+            }
 
             await PublishEvent(context, AgentType.Orchestrator, AgentStatus.Running,
                 $"Entering stage: {stage.Name}", ct: ct);
@@ -347,15 +410,40 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                 await workflowEngine.ApproveGateAsync(context, stage.StageId, "human", ct);
             }
 
-            // Dispatch agents for this stage in parallel (skip domain-excluded agents)
+            // Dispatch agents for this stage sequentially in declared order.
+            // Agents within a stage have implicit ordering dependencies
+            // (e.g. RequirementsReader must complete before RequirementsExpander).
             var domainExcluded = GetDomainExcludedAgents(config);
-            var stageTasks = new List<Task<bool>>();
             foreach (var agentType in stage.AgentsInvolved)
             {
+                if (ct.IsCancellationRequested) break;
+
                 if (domainExcluded.Contains(agentType))
                 {
                     _logger.LogInformation("[Stage {Order}] Skipping {AgentType} — not applicable for domain '{Domain}'",
                         stage.Order, agentType, config.ProjectDomain);
+                    completedAgents.Add(agentType);
+                    continue;
+                }
+
+                // Resume: skip agents that already completed in a prior run
+                if (completedAgents.Contains(agentType))
+                {
+                    _logger.LogInformation("[Stage {Order}] Skipping {AgentType} — already completed in prior run",
+                        stage.Order, agentType);
+                    await PublishEvent(context, agentType, AgentStatus.Completed,
+                        "Skipped (completed in prior run)", ct: ct);
+                    continue;
+                }
+
+                // Guard: skip service-dependent agents if no services have been derived
+                if (context.DerivedServices.Count == 0 && ServiceCatalogResolver.GetServices(context).Count == 0
+                    && s_serviceDependentAgents.Contains(agentType))
+                {
+                    _logger.LogWarning("[Stage {Order}] Skipping {AgentType} — no DerivedServices available (Architect hasn't succeeded yet)",
+                        stage.Order, agentType);
+                    await PublishEvent(context, agentType, AgentStatus.Completed,
+                        "Skipped — no services derived (Architect must succeed first)", ct: ct);
                     completedAgents.Add(agentType);
                     continue;
                 }
@@ -369,15 +457,15 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                     continue;
                 }
 
-                stageTasks.Add(Task.Run(async () =>
-                {
-                    var success = await RunAgentWithHealingAsync(context, agent, ct);
-                    completedAgents.Add(agentType);
-                    return success;
-                }, ct));
-            }
+                _logger.LogInformation("[Stage {Order}] Running {AgentType}...", stage.Order, agentType);
+                var success = await RunAgentWithHealingAsync(context, agent, ct);
+                completedAgents.Add(agentType);
 
-            await Task.WhenAll(stageTasks);
+                if (!success)
+                {
+                    _logger.LogWarning("[Stage {Order}] Agent {AgentType} failed — continuing with next agent", stage.Order, agentType);
+                }
+            }
 
             // Check exit criteria
             var readonlyCompleted = (IReadOnlySet<AgentType>)completedAgents;
@@ -409,6 +497,9 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
 
         // Persist learnings: harvest from this run + verify previously-loaded learnings
         await PersistLearningsAsync(context, CancellationToken.None);
+
+        // Persist communication log if enabled
+        await PersistCommunicationLogAsync(context, CancellationToken.None);
 
         await ExecutePostPipelineInstructions(context, config, CancellationToken.None);
 
@@ -524,6 +615,13 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
         _taskCompletedBy.Clear();
         _current = context;
 
+        // Load project tech stack from DB if ProjectId is set, else apply defaults
+        if (!string.IsNullOrWhiteSpace(config.ProjectId))
+        {
+            using var scope = _serviceProvider.CreateScope();
+            await LoadProjectTechStackAsync(scope, context, config.ProjectId, ct);
+        }
+
         // Load historical learnings (project + domain + global)
         await LoadHistoricalLearningsAsync(context, ct);
 
@@ -546,6 +644,10 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
         // Wire progress callback once — agents pass their own AgentType to avoid cross-contamination
         context.ReportProgress = async (agentType, msg) =>
             await PublishEvent(context, agentType, AgentStatus.Running, msg, 0, ct: ct);
+
+        // Wire incremental work-item persistence callback from config (set by PipelineController)
+        if (config.PersistWorkItems is not null)
+            context.PersistWorkItems = (runId, items) => config.PersistWorkItems(runId, context.ProjectId, items);
 
         _logger.LogInformation("Pipeline {RunId} starting (daemon parallel mode)", context.RunId);
 
@@ -576,6 +678,51 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
         var completedAgents = new ConcurrentDictionary<AgentType, bool>(); // true=success, false=skipped
         var runningAgents = new ConcurrentDictionary<AgentType, Task>();
         var platformExpandTriggered = false;
+
+        // ── Resume support: pre-populate completed agents and context from a prior interrupted run ──
+        var resumeAgents = config.ResumeCompletedAgents;
+        if (resumeAgents is { Count: > 0 })
+        {
+            foreach (var name in resumeAgents)
+            {
+                if (Enum.TryParse<AgentType>(name, ignoreCase: true, out var at))
+                {
+                    completedAgents[at] = true;
+                    pendingAgents.Remove(at);
+                    context.AgentStatuses[at] = AgentStatus.Completed;
+                }
+            }
+            _logger.LogInformation("[Resume] Resuming daemon pipeline — {Count} agents already completed from prior run: {Agents}",
+                completedAgents.Count, string.Join(", ", completedAgents.Keys));
+
+            var restored = new List<string>();
+
+            if (config.ResumeRequirements is { Count: > 0 })
+            {
+                context.Requirements = config.ResumeRequirements;
+                restored.Add($"{config.ResumeRequirements.Count} requirements");
+            }
+
+            if (config.ResumeExpandedRequirements is { Count: > 0 })
+            {
+                foreach (var er in config.ResumeExpandedRequirements)
+                    context.ExpandedRequirements.Add(er);
+                restored.Add($"{config.ResumeExpandedRequirements.Count} backlog items");
+            }
+
+            if (config.ResumeDerivedServices is { Count: > 0 })
+            {
+                context.DerivedServices = config.ResumeDerivedServices;
+                restored.Add($"{config.ResumeDerivedServices.Count} derived services");
+            }
+
+            if (restored.Count > 0)
+            {
+                _logger.LogInformation("[Resume] Restored into daemon context: {Details}", string.Join(", ", restored));
+                await PublishEvent(context, AgentType.Orchestrator, AgentStatus.Running,
+                    $"Restored from prior run: {string.Join(", ", restored)}", ct: ct);
+            }
+        }
         // Track finding count before each feedback agent runs so we detect new findings
         var findingCountBeforeAgent = new ConcurrentDictionary<AgentType, int>();
         // Track how many times Review has triggered remediation dispatch (allows iterative cycles)
@@ -1015,6 +1162,9 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
         // Persist learnings: harvest from this run + verify previously-loaded learnings
         await PersistLearningsAsync(context, CancellationToken.None);
 
+        // Persist communication log if enabled
+        await PersistCommunicationLogAsync(context, CancellationToken.None);
+
         await ExecutePostPipelineInstructions(context, config, CancellationToken.None);
 
         }
@@ -1150,9 +1300,15 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
     // This handles transient failures (DB connectivity, Docker not ready, etc.)
     // by giving them one more shot before Review/Build/Deploy.
 
-    private static readonly HashSet<AgentType> s_rerunCandidates =
+    private static readonly HashSet<AgentType> s_serviceDependentAgents =
     [
         AgentType.Database, AgentType.ServiceLayer, AgentType.Application,
+        AgentType.Integration, AgentType.Migration
+    ];
+
+    private static readonly HashSet<AgentType> s_rerunCandidates =
+    [
+        AgentType.Architect, AgentType.Database, AgentType.ServiceLayer, AgentType.Application,
         AgentType.Integration, AgentType.Testing
     ];
 
@@ -1430,8 +1586,73 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                 }
             }
 
+            // ── Bidirectional artifact ↔ work item linkage ──
+            // After a successful non-meta agent run, link generated artifacts to
+            // the claimed work items (and vice versa) so traceability is complete.
+            if (result.Success && !s_metaAgents.Contains(agent.Type)
+                && result.Artifacts.Count > 0 && claimedBatch.Count > 0)
+            {
+                var completedItems = claimedBatch
+                    .Where(i => i.Status == WorkItemStatus.Completed)
+                    .ToList();
+
+                if (completedItems.Count > 0)
+                {
+                    var artifactPaths = result.Artifacts
+                        .Select(a => a.RelativePath)
+                        .Where(p => !string.IsNullOrEmpty(p))
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .ToList();
+
+                    var workItemIds = completedItems
+                        .Select(i => i.Id)
+                        .Where(id => !string.IsNullOrEmpty(id))
+                        .ToList();
+
+                    // Link artifacts → work items
+                    foreach (var artifact in result.Artifacts)
+                    {
+                        foreach (var id in workItemIds)
+                        {
+                            if (!artifact.TracedRequirementIds.Contains(id, StringComparer.OrdinalIgnoreCase))
+                                artifact.TracedRequirementIds.Add(id);
+                        }
+                    }
+
+                    // Link work items → artifacts
+                    foreach (var item in completedItems)
+                    {
+                        foreach (var path in artifactPaths)
+                        {
+                            if (!item.MatchingArtifactPaths.Contains(path, StringComparer.OrdinalIgnoreCase))
+                                item.MatchingArtifactPaths.Add(path);
+                        }
+                    }
+
+                    _logger.LogInformation(
+                        "[Traceability] {Agent} linked {ArtifactCount} artifacts ↔ {ItemCount} work items",
+                        agent.Name, artifactPaths.Count, completedItems.Count);
+                }
+            }
+
             // ── Store result so downstream agents can inspect predecessor outputs ──
             context.AgentResults[agent.Type] = result;
+
+            if (context.PipelineConfig?.EnableAgentCommunicationLogging == true)
+            {
+                context.CommunicationLog.Add(new AgentCommunicationEntry
+                {
+                    RunId = context.RunId,
+                    ProjectId = context.ProjectId,
+                    CommType = AgentCommType.StoreResult,
+                    FromAgent = agent.Type,
+                    ToAgent = null,
+                    Message = result.Success
+                        ? $"Stored result: {result.Artifacts.Count} artifacts, {result.Summary?.Length ?? 0} char summary"
+                        : $"Stored failed result: {result.Summary?[..Math.Min(200, result.Summary?.Length ?? 0)]}",
+                    ItemCount = result.Artifacts.Count
+                });
+            }
 
             // ── Record quality metrics for tracking ──
             context.QualityMetrics.Add(new QualityMetric
@@ -1987,6 +2208,50 @@ Return exactly 3 sections in markdown:
         ["run tests", "run the tests", "dotnet test", "execute tests"];
 
     // ═══════════════════════════════════════════════════════════════
+    //  Project Tech Stack — Load from DB
+    // ═══════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Loads the project's tech stack from <c>ProjectTechStack</c> table and populates
+    /// <see cref="AgentContext.ResolvedTechStack"/> so all agents can read technology
+    /// versions dynamically instead of hardcoding them.
+    /// </summary>
+    private async Task LoadProjectTechStackAsync(IServiceScope scope, AgentContext context, string projectId, CancellationToken ct)
+    {
+        try
+        {
+            var db = scope.ServiceProvider.GetRequiredService<GNex.Database.GNexDbContext>();
+            var techEntries = await db.ProjectTechStacks
+                .Where(t => t.ProjectId == projectId)
+                .ToListAsync(ct);
+
+            if (techEntries.Count == 0)
+            {
+                _logger.LogDebug("No tech stack entries found for project {ProjectId}, agents will use defaults", projectId);
+                return;
+            }
+
+            context.ResolvedTechStack = techEntries.Select(t => new ResolvedTechStackEntry
+            {
+                TechnologyId = t.TechnologyId,
+                TechnologyName = t.TechnologyId, // TechnologyId is the name (e.g. "C#", ".NET", "PostgreSQL")
+                TechnologyType = t.TechnologyType,
+                Layer = t.Layer,
+                Version = t.Version ?? string.Empty,
+                ConfigOverridesJson = t.ConfigOverridesJson
+            }).ToList();
+
+            _logger.LogInformation("Loaded {Count} tech stack entries for project {ProjectId}: {Summary}",
+                techEntries.Count, projectId,
+                string.Join(", ", context.ResolvedTechStack.Select(t => $"{t.TechnologyName} {t.Version}".Trim())));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to load tech stack for project {ProjectId} — agents will use defaults", projectId);
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
     //  Persistent Learning — Load / Harvest / Save
     // ═══════════════════════════════════════════════════════════════
 
@@ -2094,6 +2359,51 @@ Return exactly 3 sections in markdown:
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to persist learnings — they will be lost for this run");
+        }
+    }
+
+    /// <summary>
+    /// Persist all communication log entries from this pipeline run to the database.
+    /// Only runs when <see cref="PipelineConfig.EnableAgentCommunicationLogging"/> is true
+    /// and there are log entries to persist.
+    /// </summary>
+    private async Task PersistCommunicationLogAsync(AgentContext context, CancellationToken ct)
+    {
+        if (context.PipelineConfig?.EnableAgentCommunicationLogging != true || context.CommunicationLog.IsEmpty)
+            return;
+
+        try
+        {
+            using var scope = _serviceProvider.CreateScope();
+            var db = scope.ServiceProvider.GetService<GNex.Database.GNexDbContext>();
+            if (db is null) return;
+
+            var entities = context.CommunicationLog.Select(e => new GNex.Database.Entities.Platform.AgentCommunicationLog
+            {
+                Id = e.Id,
+                TenantId = "default",
+                RunId = e.RunId,
+                ProjectId = e.ProjectId,
+                CommType = e.CommType.ToString(),
+                FromAgent = e.FromAgent.ToString(),
+                ToAgent = e.ToAgent?.ToString(),
+                Message = e.Message,
+                ItemCount = e.ItemCount,
+                Category = e.Category,
+                EventTimestamp = e.Timestamp,
+                CreatedAt = e.Timestamp,
+                CreatedBy = "pipeline"
+            }).ToList();
+
+            db.AgentCommunicationLogs.AddRange(entities);
+            await db.SaveChangesAsync(ct);
+
+            _logger.LogInformation("Persisted {Count} communication log entries to DB (run {RunId})",
+                entities.Count, context.RunId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to persist communication log — entries will be lost for this run");
         }
     }
 

@@ -68,6 +68,18 @@ public sealed class Soc2ComplianceAgent : IAgent
             context.Findings.AddRange(findings);
             context.AgentStatuses[Type] = AgentStatus.Completed;
 
+            // Dispatch SOC 2 findings as feedback to responsible code-gen agents
+            if (findings.Count > 0)
+                context.DispatchFindingsAsFeedback(Type, findings);
+
+            // Notify code-gen agents about SOC 2 compliance gaps
+            if (findings.Count > 0)
+            {
+                context.WriteFeedback(AgentType.Deploy, Type, $"SOC 2: {findings.Count} control gaps — ensure change management gates, backup/DR policies in deployment pipeline.");
+                context.WriteFeedback(AgentType.Application, Type, $"SOC 2: Wire access review and incident response into application middleware — {findings.Count} gaps found.");
+                context.WriteFeedback(AgentType.Infrastructure, Type, $"SOC 2: {findings.Count} infrastructure compliance gaps — backup/DR, monitoring, access controls.");
+            }
+
             // Agent completes its own claimed work items
             foreach (var item in context.CurrentClaimedItems)
                 context.CompleteWorkItem?.Invoke(item);

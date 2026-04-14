@@ -57,15 +57,13 @@ builder.Services.AddScoped<GNex.Database.ITenantProvider, GNex.Studio.Services.H
 builder.Services.AddDbContext<GNex.Database.GNexDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("MasterDb")));
 
-// ── LLM providers (Claude primary → Gemini secondary → Template fallback) ──
+// ── LLM providers (Claude primary → Gemini secondary) ──
 builder.Services.AddSingleton<ClaudeLlmProvider>();
 builder.Services.AddSingleton<GeminiLlmProvider>();
-builder.Services.AddSingleton<TemplateFallbackLlmProvider>();
 builder.Services.AddSingleton<ILlmProvider>(sp =>
     new SmartLlmRouter(
         sp.GetRequiredService<ClaudeLlmProvider>(),
         sp.GetRequiredService<GeminiLlmProvider>(),
-        sp.GetRequiredService<TemplateFallbackLlmProvider>(),
         sp.GetRequiredService<ILogger<SmartLlmRouter>>()));
 
 // ── Agent registrations ──

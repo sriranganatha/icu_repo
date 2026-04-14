@@ -65,6 +65,14 @@ public class BrdUploadController(IBrdUploadService svc, IBrdWorkflowService work
         return ok ? Ok(new { message = "BRD document deleted." }) : NotFound(new { error = "BRD document not found." });
     }
 
+    /// <summary>Get sibling BRD documents that share the same group.</summary>
+    [HttpGet("documents/{brdId}/siblings")]
+    public async Task<IActionResult> GetGroupSiblings(string brdId, CancellationToken ct)
+    {
+        var siblings = await svc.GetGroupSiblingsAsync(brdId, ct);
+        return Ok(siblings);
+    }
+
     // ═══════════════════════════════════════════════════════════════
     // BRD Sections
     // ═══════════════════════════════════════════════════════════════

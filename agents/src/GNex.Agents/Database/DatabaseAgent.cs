@@ -48,6 +48,21 @@ public sealed class DatabaseAgent : IAgent
             .Where(svc => !_generatedPaths.Contains($"{svc.ProjectName}/Data/{svc.DbContextName}.cs"))
             .ToList();
 
+        // ── No services at all in the catalog — nothing to generate (not an error) ──
+        if (scopedServices.Count == 0)
+        {
+            _logger.LogInformation("DatabaseAgent: no services in catalog — nothing to generate. Completing gracefully.");
+            if (context.ReportProgress is not null)
+                await context.ReportProgress(Type, "No microservices defined yet — Database agent has nothing to generate. Waiting for Architect to derive services.");
+            context.AgentStatuses[Type] = AgentStatus.Completed;
+            return new AgentResult
+            {
+                Agent = Type, Success = true,
+                Summary = "No services in catalog — nothing to generate. Architect must derive services first.",
+                Duration = sw.Elapsed
+            };
+        }
+
         if (newServices.Count == 0 && _ddlExecutedThisRun)
         {
             _logger.LogInformation("DatabaseAgent skipping — all {Count} services already generated and DDL already executed",
@@ -82,6 +97,14 @@ public sealed class DatabaseAgent : IAgent
             var feedback = context.ReadFeedback(Type);
             if (feedback.Count > 0)
                 _logger.LogInformation("DatabaseAgent received {Count} feedback items", feedback.Count);
+
+            // Read upstream agent results for cross-agent awareness
+            if (context.AgentResults.TryGetValue(AgentType.Architect, out var archResult) && archResult.Success)
+                _logger.LogInformation("DatabaseAgent consuming Architect results: {Summary}", archResult.Summary);
+            if (context.AgentResults.TryGetValue(AgentType.Planning, out var planResult) && planResult.Success)
+                _logger.LogInformation("DatabaseAgent consuming Planning results: {Summary}", planResult.Summary);
+            if (context.AgentResults.TryGetValue(AgentType.Security, out var secResult) && secResult.Success)
+                _logger.LogInformation("DatabaseAgent consuming Security results for schema hardening");
 
             // Read historical learnings from previous pipeline runs
             var learnings = context.GetLearningsForAgent(Type);
@@ -129,8 +152,8 @@ public sealed class DatabaseAgent : IAgent
             // Shared artifacts (only if we generated new services)
             if (newServices.Count > 0)
             {
-                AddIfNew(artifacts, GenerateRlsMigration(scopedServices));
-                AddIfNew(artifacts, GenerateDockerCompose(context.PipelineConfig, scopedServices));
+                AddIfNew(artifacts, GenerateRlsMigration(context, scopedServices));
+                AddIfNew(artifacts, GenerateDockerCompose(context, scopedServices));
             }
 
             context.Artifacts.AddRange(artifacts);
@@ -237,6 +260,16 @@ public sealed class DatabaseAgent : IAgent
 
             // Mark assigned backlog items as completed
             MarkItemsCompleted(context);
+
+            // Dispatch findings as feedback to responsible agents
+            if (context.Findings.Count > 0)
+                context.DispatchFindingsAsFeedback(Type, context.Findings);
+
+            // Notify downstream agents about schema decisions
+            var schemaList = string.Join(", ", scopedServices.Select(s => s.Schema));
+            context.WriteFeedback(AgentType.ServiceLayer, Type, $"Database schemas ready: {schemaList}. {artifacts.Count} artifacts generated (entities, DbContexts, repos, migrations).");
+            context.WriteFeedback(AgentType.Integration, Type, $"Database layer generated for {scopedServices.Count} bounded contexts: {schemaList}. Integration endpoints can reference these schemas.");
+            context.WriteFeedback(AgentType.Testing, Type, $"Database layer ready with {scopedServices.Sum(s => s.Entities.Length)} entities across {scopedServices.Count} services — generate repository/integration tests.");
 
             _logger.LogInformation("DatabaseAgent completed — {New} new artifacts, {Total} total generated across {Svc} microservices{Ddl}",
                 artifacts.Count, _generatedPaths.Count, scopedServices.Count, ddlSuffix);
@@ -378,19 +411,55 @@ public sealed class DatabaseAgent : IAgent
 
     // ─── Shared RLS Migration ───────────────────────────────────────────────
 
-    private static CodeArtifact GenerateRlsMigration(IEnumerable<MicroserviceDefinition> services)
+    private static CodeArtifact GenerateRlsMigration(AgentContext context, IEnumerable<MicroserviceDefinition> services)
     {
+        var engine = context.DatabaseEngine();
         var policies = string.Join("\n\n", services.SelectMany(svc =>
             svc.Entities.Select(e =>
             {
                 var table = $"{svc.Schema}.{ToSnakeCase(e)}";
                 var policy = $"tenant_isolation_{ToSnakeCase(e)}";
-                return $"""
-                    ALTER TABLE {table} ENABLE ROW LEVEL SECURITY;
-                    DROP POLICY IF EXISTS {policy} ON {table};
-                    CREATE POLICY {policy} ON {table}
-                        USING (tenant_id = current_setting('app.current_tenant_id', true));
-                    """;
+                return engine switch
+                {
+                    "SQL Server" => $"""
+                        -- Row-Level Security for {table}
+                        IF NOT EXISTS (SELECT 1 FROM sys.security_policies WHERE name = '{policy}')
+                        BEGIN
+                            CREATE FUNCTION {svc.Schema}.fn_{policy}(@tenant_id NVARCHAR(64))
+                            RETURNS TABLE WITH SCHEMABINDING AS
+                            RETURN SELECT 1 AS result WHERE @tenant_id = SESSION_CONTEXT(N'TenantId');
+
+                            CREATE SECURITY POLICY {policy}
+                                ADD FILTER PREDICATE {svc.Schema}.fn_{policy}(tenant_id) ON {table};
+                        END
+                        """,
+                    "MySQL" => $"""
+                        -- MySQL does not support native RLS — enforce in application layer
+                        -- View-based tenant isolation for {table}
+                        CREATE OR REPLACE VIEW {svc.Schema}.v_{ToSnakeCase(e)}_tenant AS
+                            SELECT * FROM {table} WHERE tenant_id = @current_tenant_id;
+                        """,
+                    "Oracle" => $"""
+                        -- Oracle VPD policy for {table}
+                        BEGIN
+                            DBMS_RLS.ADD_POLICY(
+                                object_schema   => '{svc.Schema}',
+                                object_name     => '{ToSnakeCase(e)}',
+                                policy_name     => '{policy}',
+                                function_schema => '{svc.Schema}',
+                                policy_function => 'tenant_isolation_fn',
+                                statement_types => 'SELECT,INSERT,UPDATE,DELETE'
+                            );
+                        END;
+                        /
+                        """,
+                    _ => $"""
+                        ALTER TABLE {table} ENABLE ROW LEVEL SECURITY;
+                        DROP POLICY IF EXISTS {policy} ON {table};
+                        CREATE POLICY {policy} ON {table}
+                            USING (tenant_id = current_setting('app.current_tenant_id', true));
+                        """
+                };
             })));
 
         return new CodeArtifact
@@ -401,7 +470,7 @@ public sealed class DatabaseAgent : IAgent
             Namespace = "GNex.Infrastructure",
             ProducedBy = AgentType.Database,
             Content = $"""
-                -- Row-Level Security policies for all microservices
+                -- Row-Level Security policies for all microservices ({engine})
                 -- Ensures tenant isolation at the database level
 
                 {policies}
@@ -411,13 +480,94 @@ public sealed class DatabaseAgent : IAgent
 
         // ─── Docker Compose ─────────────────────────────────────────────────────
 
-        private static CodeArtifact GenerateDockerCompose(PipelineConfig? config, IEnumerable<MicroserviceDefinition> services)
+        private static CodeArtifact GenerateDockerCompose(AgentContext context, IEnumerable<MicroserviceDefinition> services)
         {
+                var config = context.PipelineConfig;
                 var dbUser = config?.DbUser ?? "gnex_admin";
                 var dbPassword = config?.DbPassword ?? "gnex_dev_pw";
                 var dbName = config?.DbName ?? "app_db";
-                var dbPort = config?.DbPort ?? 5432;
+                var dbPort = config?.DbPort ?? context.DatabaseDefaultPort();
+                var dbImage = context.DatabaseDockerImageByEngine();
+                var dbEngine = context.DatabaseEngine();
+                var messagingImage = context.MessagingDockerImage();
+                var kafkaPort = config?.ServicePorts?.GetValueOrDefault("Kafka", 9092) ?? 9092;
+                var gatewayPort = config?.ServicePorts?.GetValueOrDefault("Gateway", 5100) ?? 5100;
                 var serviceList = services.ToList();
+
+                // Generate DB-specific service block
+                var (dbServiceBlock, dbVolume, dbConnectionTemplate, dbHealthcheck, dbDependsService) = dbEngine switch
+                {
+                    "MySQL" => (
+                        $$"""
+                                    mysql:
+                                        image: {{dbImage}}
+                                        ports:
+                                            - "{{dbPort}}:3306"
+                                        environment:
+                                            MYSQL_ROOT_PASSWORD: ${DB_PASSWORD:-{{dbPassword}}}
+                                            MYSQL_DATABASE: {{dbName}}
+                                            MYSQL_USER: {{dbUser}}
+                                            MYSQL_PASSWORD: ${DB_PASSWORD:-{{dbPassword}}}
+                                        volumes:
+                                            - mysqldata:/var/lib/mysql
+                                        healthcheck:
+                                            test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+                                            interval: 5s
+                                            timeout: 5s
+                                            retries: 10
+                        """,
+                        "mysqldata:",
+                        $"Server=mysql;Port=3306;Database={dbName};User={dbUser};Password=${{DB_PASSWORD:-{dbPassword}}}",
+                        "mysql",
+                        "mysql"
+                    ),
+                    "SQL Server" => (
+                        $$"""
+                                    mssql:
+                                        image: {{dbImage}}
+                                        ports:
+                                            - "{{dbPort}}:1433"
+                                        environment:
+                                            ACCEPT_EULA: "Y"
+                                            SA_PASSWORD: ${DB_PASSWORD:-{{dbPassword}}}
+                                            MSSQL_PID: Developer
+                                        volumes:
+                                            - mssqldata:/var/opt/mssql
+                                        healthcheck:
+                                            test: ["CMD-SHELL", "/opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P '${DB_PASSWORD:-{{dbPassword}}}' -Q 'SELECT 1'"]
+                                            interval: 10s
+                                            timeout: 5s
+                                            retries: 10
+                        """,
+                        "mssqldata:",
+                        $"Server=mssql,1433;Database={dbName};User Id=sa;Password=${{DB_PASSWORD:-{dbPassword}}};TrustServerCertificate=True",
+                        "mssql",
+                        "mssql"
+                    ),
+                    _ => (
+                        $$"""
+                                    postgres:
+                                        image: {{dbImage}}
+                                        ports:
+                                            - "{{dbPort}}:5432"
+                                        environment:
+                                            POSTGRES_USER: {{dbUser}}
+                                            POSTGRES_PASSWORD: ${DB_PASSWORD:-{{dbPassword}}}
+                                            POSTGRES_DB: {{dbName}}
+                                        volumes:
+                                            - pgdata:/var/lib/postgresql/data
+                                        healthcheck:
+                                            test: ["CMD-SHELL", "pg_isready -U {{dbUser}}"]
+                                            interval: 5s
+                                            timeout: 5s
+                                            retries: 10
+                        """,
+                        "pgdata:",
+                        $"Host=postgres;Port=5432;Database={dbName};Username={dbUser};Password=${{DB_PASSWORD:-{dbPassword}}}",
+                        "postgres",
+                        "postgres"
+                    )
+                };
 
                 var svcEntries = string.Join("\n\n", serviceList.Select(svc => $$"""
                             {{svc.ShortName}}-api:
@@ -427,11 +577,11 @@ public sealed class DatabaseAgent : IAgent
                                 ports:
                                     - "{{svc.ApiPort}}:8080"
                                 environment:
-                                    - ConnectionStrings__Default=Host=postgres;Port=5432;Database={{dbName}};Username={{dbUser}};Password=${DB_PASSWORD:-{{dbPassword}}}
-                                    - Kafka__BootstrapServers=kafka:9092
+                                    - ConnectionStrings__Default={{dbConnectionTemplate}}
+                                    - Kafka__BootstrapServers=kafka:{{kafkaPort}}
                                     - TenantId=default
                                 depends_on:
-                                    postgres:
+                                    {{dbDependsService}}:
                                         condition: service_healthy
                                     kafka:
                                         condition: service_healthy
@@ -449,26 +599,12 @@ public sealed class DatabaseAgent : IAgent
                         Content = $$"""
                                 version: '3.9'
                                 services:
-                                    postgres:
-                                        image: postgres:16-alpine
-                                        ports:
-                                            - "{{dbPort}}:5432"
-                                        environment:
-                                            POSTGRES_USER: {{dbUser}}
-                                            POSTGRES_PASSWORD: ${DB_PASSWORD:-{{dbPassword}}}
-                                            POSTGRES_DB: {{dbName}}
-                                        volumes:
-                                            - pgdata:/var/lib/postgresql/data
-                                        healthcheck:
-                                            test: ["CMD-SHELL", "pg_isready -U {{dbUser}}"]
-                                            interval: 5s
-                                            timeout: 5s
-                                            retries: 10
+                                {{dbServiceBlock}}
 
                                     kafka:
-                                        image: bitnami/kafka:3.7
+                                        image: {{messagingImage}}
                                         ports:
-                                            - "9092:9092"
+                                            - "{{kafkaPort}}:9092"
                                         environment:
                                             KAFKA_CFG_NODE_ID: 0
                                             KAFKA_CFG_PROCESS_ROLES: controller,broker
@@ -492,14 +628,14 @@ public sealed class DatabaseAgent : IAgent
                                             context: .
                                             dockerfile: GNex.ApiGateway/Dockerfile
                                         ports:
-                                            - "5100:8080"
+                                            - "{{gatewayPort}}:8080"
                                         environment:
-                                            - Kafka__BootstrapServers=kafka:9092
+                                            - Kafka__BootstrapServers=kafka:{{kafkaPort}}
                                         depends_on:
                                 {{gatewayDepends}}
 
                                 volumes:
-                                    pgdata:
+                                    {{dbVolume}}
                                     kafkadata:
                                 """
                 };
@@ -616,31 +752,13 @@ public sealed class DatabaseAgent : IAgent
             .Take(80)
             .Select(r => $"- {r.Title}: {r.Description}"));
 
-        // Domain-specific guidance from PromptGeneratorAgent
-        var domainGuidance = "";
-        var profile = context.DomainProfile;
-        if (profile is not null)
-        {
-            var parts = new List<string>();
-            if (profile.AgentPrompts.TryGetValue("Database", out var agentPrompt))
-                parts.Add($"Domain Agent Guidance:\n{agentPrompt}");
-            if (profile.DomainGlossary is { Count: > 0 })
-                parts.Add("Domain Glossary (use these terms for field/entity naming):\n" +
-                    string.Join("\n", profile.DomainGlossary.Take(20).Select(kv => $"  {kv.Key}: {kv.Value}")));
-            if (profile.BusinessRules is { Count: > 0 })
-                parts.Add("Business Rules (reflect as validation fields/constraints):\n" +
-                    string.Join("\n", profile.BusinessRules.Take(15).Select(r => $"  • {r}")));
-            if (profile.SensitiveFieldPatterns is { Count: > 0 })
-                parts.Add("Sensitive Fields (mark with [PersonalData] attribute):\n" +
-                    string.Join(", ", profile.SensitiveFieldPatterns.Take(20)));
-            if (parts.Count > 0)
-                domainGuidance = "\n\n=== DOMAIN CONTEXT ===\n" + string.Join("\n\n", parts);
-        }
+        // Centralized LLM context (tech stack, domain profile, feedback, quality metrics, prior agent results)
+        var llmContext = context.BuildLlmContextBlock(Type);
 
         var prompt = new LlmPrompt
         {
-            SystemPrompt = """
-                You are a senior .NET developer generating EF Core entity classes.
+            SystemPrompt = $$"""
+                You are a {{context.SeniorRoleLabel("developer")}} generating {{context.OrmLabel()}} entity classes.
                 Generate one C# entity class per requested entity for a microservice.
 
                 Every entity MUST have these standard fields:
@@ -661,7 +779,9 @@ public sealed class DatabaseAgent : IAgent
 
                 DELIMITER FORMAT: Separate each entity with a line containing exactly:
                 // === EntityName.cs ===
-                Do NOT use markdown code fences. Output raw C# only.
+                {{context.OutputFormatInstruction("code")}}
+
+                {{(!string.IsNullOrWhiteSpace(llmContext) ? llmContext : "")}}
                 """,
             UserPrompt = $"""
                 Service: {svc.Name} (schema: {svc.Schema})
@@ -671,7 +791,7 @@ public sealed class DatabaseAgent : IAgent
                 Generate entity classes for: {string.Join(", ", svc.Entities)}
 
                 Project requirements context (use these to infer appropriate domain fields):
-                {requirementsSummary}{domainGuidance}
+                {requirementsSummary}
                 """,
             Temperature = 0.2,
             MaxTokens = 4096,
@@ -746,7 +866,7 @@ public sealed class DatabaseAgent : IAgent
         MicroserviceDefinition svc, AgentContext context, CancellationToken ct)
     {
         var migrationSql = await GenerateServiceMigrationViaLlmAsync(svc, context, ct);
-        var sql = migrationSql ?? GenerateDefaultMigrationSql(svc);
+        var sql = migrationSql ?? GenerateDefaultMigrationSql(svc, context);
 
         return new CodeArtifact
         {
@@ -766,41 +886,34 @@ public sealed class DatabaseAgent : IAgent
             .Take(50)
             .Select(r => $"- {r.Title}: {r.Description}"));
 
-        // Domain-specific context for migration generation
-        var domainMigrationCtx = "";
-        var profile = context.DomainProfile;
-        if (profile is not null)
-        {
-            var parts = new List<string>();
-            if (profile.DomainGlossary is { Count: > 0 })
-                parts.Add("Use these domain terms for column naming:\n" +
-                    string.Join("\n", profile.DomainGlossary.Take(15).Select(kv => $"  {kv.Key} → {kv.Value}")));
-            if (profile.SensitiveFieldPatterns is { Count: > 0 })
-                parts.Add("Add COMMENT ON COLUMN for sensitive fields:\n" +
-                    string.Join(", ", profile.SensitiveFieldPatterns.Take(15)));
-            if (parts.Count > 0)
-                domainMigrationCtx = "\n\nDomain Context:\n" + string.Join("\n", parts);
-        }
+        // Centralized LLM context for migration generation
+        var llmContext = context.BuildLlmContextBlock(Type);
 
         var prompt = new LlmPrompt
         {
-            SystemPrompt = """
-                You are a senior PostgreSQL DBA generating migration DDL scripts.
+            SystemPrompt = $$"""
+                You are a senior {{context.DatabaseLabel()}} DBA generating migration DDL scripts.
+                Target database engine: {{context.DatabaseEngine()}}.
                 Generate CREATE TABLE statements for all entities in a microservice.
 
-                Every table MUST have these standard columns:
-                - id VARCHAR(32) PRIMARY KEY DEFAULT replace(gen_random_uuid()::text, '-', '')
-                - tenant_id VARCHAR(64) NOT NULL
-                - created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-                - created_by VARCHAR(128) NOT NULL
+                Every table MUST have these standard columns (adapt types for {{context.DatabaseEngine()}}):
+                - id (string, 32 chars, primary key, auto-generated UUID)
+                - tenant_id (string, 64 chars, not null)
+                - created_at (timestamp with timezone, not null, default now)
+                - created_by (string, 128 chars, not null)
+                - updated_at (timestamp with timezone, not null, default now)
+                - updated_by (string, 128 chars, not null)
+                - version_no (integer, not null, default 1)
 
                 Add domain-specific columns based on entity name and context.
                 Use snake_case for all column and table names.
                 Include appropriate indexes (at minimum tenant_id).
                 Include foreign key constraints where appropriate within the same schema.
 
-                Output raw SQL only — no markdown fences, no commentary.
+                {{context.OutputFormatInstruction("sql")}}
                 Start with: CREATE SCHEMA IF NOT EXISTS {schema};
+
+                {{(!string.IsNullOrWhiteSpace(llmContext) ? llmContext : "")}}
                 """,
             UserPrompt = $"""
                 Service: {svc.Name}
@@ -809,7 +922,7 @@ public sealed class DatabaseAgent : IAgent
                 Entities: {string.Join(", ", svc.Entities)}
 
                 Project requirements context:
-                {requirementsSummary}{domainMigrationCtx}
+                {requirementsSummary}
 
                 Generate the complete migration SQL for all entities.
                 """,
@@ -853,31 +966,81 @@ public sealed class DatabaseAgent : IAgent
         }
     }
 
-    private static string GenerateDefaultMigrationSql(MicroserviceDefinition svc)
+    private static string GenerateDefaultMigrationSql(MicroserviceDefinition svc, AgentContext context)
     {
+        var engine = context.DatabaseEngine();
+
         var tables = string.Join("\n\n", svc.Entities.Select(e =>
         {
             var table = ToSnakeCase(e);
-            return $"""
-                CREATE TABLE IF NOT EXISTS {svc.Schema}.{table} (
-                    id          VARCHAR(32) PRIMARY KEY DEFAULT replace(gen_random_uuid()::text, '-', ''),
-                    tenant_id   VARCHAR(64) NOT NULL,
-                    created_by  VARCHAR(128) NOT NULL,
-                    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-                    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-                    updated_by  VARCHAR(128) NOT NULL,
-                    version_no  INTEGER NOT NULL DEFAULT 1
-                );
-                CREATE INDEX IF NOT EXISTS idx_{svc.Schema}_{table}_tenant ON {svc.Schema}.{table} (tenant_id);
-                """;
+            return engine switch
+            {
+                "SQL Server" => $"""
+                    IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = '{table}' AND schema_id = SCHEMA_ID('{svc.Schema}'))
+                    CREATE TABLE [{svc.Schema}].[{table}] (
+                        id          NVARCHAR(32) NOT NULL PRIMARY KEY DEFAULT REPLACE(NEWID(), '-', ''),
+                        tenant_id   NVARCHAR(64) NOT NULL,
+                        created_by  NVARCHAR(128) NOT NULL,
+                        created_at  DATETIMEOFFSET NOT NULL DEFAULT SYSDATETIMEOFFSET(),
+                        updated_at  DATETIMEOFFSET NOT NULL DEFAULT SYSDATETIMEOFFSET(),
+                        updated_by  NVARCHAR(128) NOT NULL,
+                        version_no  INT NOT NULL DEFAULT 1
+                    );
+                    CREATE INDEX idx_{svc.Schema}_{table}_tenant ON [{svc.Schema}].[{table}] (tenant_id);
+                    """,
+                "MySQL" => $"""
+                    CREATE TABLE IF NOT EXISTS `{svc.Schema}`.`{table}` (
+                        id          VARCHAR(32) NOT NULL PRIMARY KEY DEFAULT (REPLACE(UUID(), '-', '')),
+                        tenant_id   VARCHAR(64) NOT NULL,
+                        created_by  VARCHAR(128) NOT NULL,
+                        created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                        updated_by  VARCHAR(128) NOT NULL,
+                        version_no  INT NOT NULL DEFAULT 1,
+                        INDEX idx_{svc.Schema}_{table}_tenant (tenant_id)
+                    );
+                    """,
+                "Oracle" => $"""
+                    CREATE TABLE {svc.Schema}.{table} (
+                        id          VARCHAR2(32) DEFAULT SYS_GUID() PRIMARY KEY,
+                        tenant_id   VARCHAR2(64) NOT NULL,
+                        created_by  VARCHAR2(128) NOT NULL,
+                        created_at  TIMESTAMP WITH TIME ZONE DEFAULT SYSTIMESTAMP NOT NULL,
+                        updated_at  TIMESTAMP WITH TIME ZONE DEFAULT SYSTIMESTAMP NOT NULL,
+                        updated_by  VARCHAR2(128) NOT NULL,
+                        version_no  NUMBER(10) DEFAULT 1 NOT NULL
+                    );
+                    CREATE INDEX idx_{svc.Schema}_{table}_tenant ON {svc.Schema}.{table} (tenant_id);
+                    """,
+                _ => $"""
+                    CREATE TABLE IF NOT EXISTS {svc.Schema}.{table} (
+                        id          VARCHAR(32) PRIMARY KEY DEFAULT replace(gen_random_uuid()::text, '-', ''),
+                        tenant_id   VARCHAR(64) NOT NULL,
+                        created_by  VARCHAR(128) NOT NULL,
+                        created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+                        updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+                        updated_by  VARCHAR(128) NOT NULL,
+                        version_no  INTEGER NOT NULL DEFAULT 1
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_{svc.Schema}_{table}_tenant ON {svc.Schema}.{table} (tenant_id);
+                    """
+            };
         }));
 
+        var createSchema = engine switch
+        {
+            "SQL Server" => $"IF NOT EXISTS (SELECT * FROM sys.schemas WHERE name = '{svc.Schema}') EXEC('CREATE SCHEMA [{svc.Schema}]');",
+            "MySQL" => $"CREATE SCHEMA IF NOT EXISTS `{svc.Schema}`;",
+            "Oracle" => $"-- Ensure schema/user {svc.Schema} exists before running",
+            _ => $"CREATE SCHEMA IF NOT EXISTS {svc.Schema};"
+        };
+
         return $"""
-            -- Migration: {svc.Name} initial schema
+            -- Migration: {svc.Name} initial schema ({engine})
             -- Schema: {svc.Schema}
             -- Bounded Context: {svc.Description}
 
-            CREATE SCHEMA IF NOT EXISTS {svc.Schema};
+            {createSchema}
 
             {tables}
             """;

@@ -41,6 +41,22 @@
         </div>
     </div>
 
+    <!-- Group tabs: shown when BRD is part of a multi-type group -->
+    <div id="groupTabBar" class="mb-3" style="display:none;">
+        <div class="card">
+            <div class="card-header bg-primary bg-opacity-10 py-2">
+                <div class="d-flex align-items-center gap-2">
+                    <i class="bi bi-collection text-primary"></i>
+                    <span class="fw-semibold text-primary">BRD Group</span>
+                    <span class="text-muted small">— all types share the same requirement documents</span>
+                </div>
+            </div>
+            <div class="card-body py-2">
+                <ul class="nav nav-pills" id="groupTabs"></ul>
+            </div>
+        </div>
+    </div>
+
     <!-- BRD Metadata (collapsible) -->
     <div class="card mb-3" id="brdMetaCard" style="display:none;">
         <div class="card-header d-flex justify-content-between">
@@ -118,6 +134,9 @@
             <button class="btn btn-primary" id="btnEnrich" onclick="enrichAllSections()">
                 <i class="bi bi-stars me-1"></i>Enrich with AI
             </button>
+            <button class="btn btn-outline-primary" id="btnEnrichGroup" onclick="enrichGroupBrds()" style="display:none;">
+                <i class="bi bi-collection me-1"></i>Enrich All Group BRDs
+            </button>
         </div>
         <div class="d-flex gap-2">
             <button class="btn btn-outline-primary" onclick="expandAll()">
@@ -139,18 +158,63 @@
     let currentBrd = null;
     let loadedSections = [];
     let editedSections = {};
+    let groupSiblings = [];
 
     // ── Init ──────────────────────────────────────────────
     (async function init() {
         const params = new URLSearchParams(window.location.search);
         const brdId = params.get('brdId');
+        const groupId = params.get('groupId');
         if (brdId) {
             selectedBrdId = brdId;
+            if (groupId) {
+                await loadGroupSiblings(brdId);
+            }
             await loadBrdDocument(brdId);
         } else {
             await loadBrdSelector();
         }
     })();
+
+    // ── Group Siblings ────────────────────────────────────
+    async function loadGroupSiblings(brdId) {
+        try {
+            const res = await fetch(`/api/brd/documents/${brdId}/siblings`);
+            if (!res.ok) return;
+            groupSiblings = await res.json();
+            if (groupSiblings.length > 1) {
+                renderGroupTabs(brdId);
+            }
+        } catch (e) {
+            console.warn('Could not load group siblings:', e);
+        }
+    }
+
+    function renderGroupTabs(activeBrdId) {
+        const tabBar = document.getElementById('groupTabBar');
+        const tabs = document.getElementById('groupTabs');
+        tabBar.style.display = '';
+        tabs.innerHTML = groupSiblings.map(s => `
+            <li class="nav-item">
+                <a class="nav-link ${s.id === activeBrdId ? 'active' : ''}"
+                   href="#" onclick="switchGroupBrd('${s.id}'); return false;">
+                    ${typeIcon(s.brdType)} ${escapeHtml(s.brdTypeDisplay)}
+                    <span class="badge bg-light text-dark ms-1">${s.sectionCount}</span>
+                    <span class="badge ${statusBadgeClass(s.status)} ms-1">${formatStatus(s.status)}</span>
+                </a>
+            </li>
+        `).join('');
+    }
+
+    async function switchGroupBrd(brdId) {
+        selectedBrdId = brdId;
+        editedSections = {};
+        const params = new URLSearchParams(window.location.search);
+        const groupId = params.get('groupId');
+        history.replaceState(null, '', `/Brd/Edit?brdId=${brdId}${groupId ? '&groupId=' + groupId : ''}`);
+        renderGroupTabs(brdId);
+        await loadBrdDocument(brdId);
+    }
 
     // ── BRD Selector ─────────────────────────────────────
     async function loadBrdSelector() {
@@ -238,6 +302,12 @@
         document.getElementById('activeBrdType').textContent = brd.brdTypeDisplay;
         document.getElementById('activeBrdType').className = `badge ms-2 ${typeBadgeClass(brd.brdType)}`;
         document.getElementById('activeSectionCount').textContent = `${brd.sectionCount} sections`;
+
+        // Show/hide group enrich button
+        const groupBtn = document.getElementById('btnEnrichGroup');
+        if (groupBtn) {
+            groupBtn.style.display = groupSiblings.length > 1 ? '' : 'none';
+        }
     }
 
     // ── BRD Meta editing ──────────────────────────────────
@@ -269,7 +339,7 @@
             hideBrdMeta();
             await loadBrdDocument(selectedBrdId);
         } else {
-            alert('Update failed.');
+            await msgBox.error('Update Failed', 'Could not save BRD details.');
         }
     }
 
@@ -389,7 +459,7 @@
 
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
-            alert('Save failed: ' + (err.error || res.statusText));
+            await msgBox.error('Save Failed', err.error || res.statusText);
             return;
         }
 
@@ -433,14 +503,14 @@
     }
 
     function cancelEdits() {
-        if (Object.keys(editedSections).length > 0 && !confirm('Discard all unsaved changes?')) return;
+        if (Object.keys(editedSections).length > 0 && !await msgBox.confirm('Discard Changes', 'Discard all unsaved changes?')) return;
         editedSections = {};
         if (selectedBrdId) loadSections(selectedBrdId);
     }
 
     async function enrichAllSections() {
         if (!selectedBrdId) return;
-        if (!confirm('This will use AI to enrich all draft sections with content generated from uploaded source documents. Continue?')) return;
+        if (!await msgBox.confirm('AI Enrichment', 'This will use AI to enrich all draft sections with content generated from uploaded source documents. Continue?')) return;
 
         const btn = document.getElementById('btnEnrich');
         const origHtml = btn.innerHTML;
@@ -451,7 +521,7 @@
             const res = await fetch(`/api/brd/documents/${selectedBrdId}/enrich`, { method: 'POST' });
             if (!res.ok) {
                 const err = await res.json().catch(() => ({}));
-                alert('Enrichment failed: ' + (err.error || res.statusText));
+                await msgBox.error('Enrichment Failed', err.error || res.statusText);
                 return;
             }
             const result = await res.json();
@@ -460,7 +530,41 @@
                 await loadBrdDocument(selectedBrdId);
             }
         } catch (ex) {
-            alert('Enrichment error: ' + ex.message);
+            await msgBox.error('Enrichment Error', ex.message);
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = origHtml;
+        }
+    }
+
+    async function enrichGroupBrds() {
+        if (groupSiblings.length < 2) return;
+        const typeNames = groupSiblings.map(s => s.brdTypeDisplay).join(', ');
+        if (!await msgBox.confirm('Group Enrichment', `Enrich all ${groupSiblings.length} BRDs in this group (${typeNames}) using the same project requirement documents?`)) return;
+
+        const btn = document.getElementById('btnEnrichGroup');
+        const origHtml = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Enriching group...';
+
+        let enriched = 0, failed = 0;
+        try {
+            for (const sibling of groupSiblings) {
+                const res = await fetch(`/api/brd/documents/${sibling.id}/enrich`, { method: 'POST' });
+                if (res.ok) {
+                    enriched++;
+                } else {
+                    failed++;
+                }
+            }
+            showToast(`Group enrichment: ${enriched} BRD(s) enriched, ${failed} failed.`);
+            // Reload the current BRD and update group tabs
+            if (selectedBrdId) {
+                await loadGroupSiblings(selectedBrdId);
+                await loadBrdDocument(selectedBrdId);
+            }
+        } catch (ex) {
+            await msgBox.error('Group Enrichment Error', ex.message);
         } finally {
             btn.disabled = false;
             btn.innerHTML = origHtml;
@@ -554,6 +658,18 @@
         return (status || 'draft').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
     }
 
+    function typeIcon(type) {
+        const icons = {
+            'general': '<i class="bi bi-file-text"></i>',
+            'web_application': '<i class="bi bi-globe"></i>',
+            'mobile_application': '<i class="bi bi-phone"></i>',
+            'api_service': '<i class="bi bi-plug"></i>',
+            'data_pipeline': '<i class="bi bi-diagram-3"></i>',
+            'integration': '<i class="bi bi-link-45deg"></i>'
+        };
+        return icons[type] || '<i class="bi bi-file-text"></i>';
+    }
+
     function updateWorkflowBar(status) {
         currentBrdStatus = status;
         const bar = document.getElementById('workflowBar');
@@ -591,7 +707,7 @@
     async function submitForReview() {
         if (!selectedBrdId) return;
         if (Object.keys(editedSections).length > 0) {
-            if (!confirm('You have unsaved changes. Save them before submitting?')) return;
+            if (!await msgBox.confirm('Unsaved Changes', 'You have unsaved changes. Save them before submitting?')) return;
             await saveAllSections();
         }
         const res = await fetch(`/api/brd/documents/${selectedBrdId}/submit`, {
@@ -601,16 +717,17 @@
         });
         const data = await res.json();
         if (res.ok) {
-            showToast(data.message);
+            await msgBox.success('Submitted', data.message);
             updateWorkflowBar('in_review');
         } else {
-            alert(data.error || 'Submit failed');
+            await msgBox.error('Submit Failed', data.error || 'Submit failed');
         }
     }
 
     async function approveBrd() {
         if (!selectedBrdId) return;
-        const comment = prompt('Approval comment (optional):');
+        const comment = await msgBox.prompt('Approve BRD', 'Provide an optional approval comment.', { inputLabel: 'Comment (optional)', placeholder: 'Looks good...' });
+        if (comment === null) return;
         const res = await fetch(`/api/brd/documents/${selectedBrdId}/approve`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -618,7 +735,7 @@
         });
         const data = await res.json();
         if (res.ok) {
-            showToast(data.message);
+            await msgBox.success('Approved', data.message);
             updateWorkflowBar('approved');
             if (data.approvedAt) {
                 document.getElementById('approvalInfo').style.display = '';
@@ -626,13 +743,13 @@
                     `Approved by ${data.approvedBy || 'user'} on ${new Date(data.approvedAt).toLocaleString()}`;
             }
         } else {
-            alert(data.error || 'Approval failed');
+            await msgBox.error('Approval Failed', data.error || 'Approval failed');
         }
     }
 
     async function rejectBrd() {
         if (!selectedBrdId) return;
-        const reason = prompt('Rejection reason (required):');
+        const reason = await msgBox.prompt('Reject BRD', 'Provide a reason for rejection.', { inputLabel: 'Reason (required)', placeholder: 'Enter rejection reason...', required: true });
         if (!reason) return;
         const res = await fetch(`/api/brd/documents/${selectedBrdId}/reject`, {
             method: 'POST',
@@ -641,16 +758,16 @@
         });
         const data = await res.json();
         if (res.ok) {
-            showToast(data.message);
+            await msgBox.success('Rejected', data.message);
             updateWorkflowBar('rejected');
         } else {
-            alert(data.error || 'Rejection failed');
+            await msgBox.error('Rejection Failed', data.error || 'Rejection failed');
         }
     }
 
     async function requestChanges() {
         if (!selectedBrdId) return;
-        const feedback = prompt('Feedback / changes needed (required):');
+        const feedback = await msgBox.prompt('Request Changes', 'What changes are needed?', { inputLabel: 'Feedback (required)', placeholder: 'Describe the changes needed...', required: true });
         if (!feedback) return;
         const res = await fetch(`/api/brd/documents/${selectedBrdId}/request-changes`, {
             method: 'POST',
@@ -659,10 +776,10 @@
         });
         const data = await res.json();
         if (res.ok) {
-            showToast(data.message);
+            await msgBox.success('Changes Requested', data.message);
             updateWorkflowBar('draft');
         } else {
-            alert(data.error || 'Request changes failed');
+            await msgBox.error('Request Failed', data.error || 'Request changes failed');
         }
     }
 </script>

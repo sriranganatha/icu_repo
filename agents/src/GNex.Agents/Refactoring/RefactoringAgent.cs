@@ -122,9 +122,9 @@ public sealed class RefactoringAgent : IAgent
                 var prompt = new LlmPrompt
                 {
                     SystemPrompt = $$"""
-                        You are a senior .NET 8 architect performing code refactoring.
+                        You are a {{context.SeniorRoleLabel("architect")}} performing code refactoring.
                         Apply SOLID principles, extract methods, reduce complexity, fix naming, eliminate dead code.
-                        Return ONLY the complete refactored C# file with no explanations or markdown fences.
+                        Return ONLY the complete refactored {{context.LanguageLabel()}} file with no explanations or markdown fences.
 
                         {{(!string.IsNullOrWhiteSpace(llmContext) ? llmContext : "")}}
                         """,

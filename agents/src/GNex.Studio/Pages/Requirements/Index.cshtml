@@ -1,0 +1,619 @@
+@page
+@model GNex.Studio.Pages.Requirements.IndexModel
+@{
+    ViewData["Title"] = "Requirements Explorer";
+}
+
+<style>
+    .req-card { transition: all 0.2s; cursor: pointer; }
+    .req-card:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.12) !important; }
+    .badge-epic { background: #7c3aed; }
+    .badge-story { background: #2563eb; }
+    .badge-usecase { background: #0891b2; }
+    .badge-task { background: #059669; }
+    .badge-bug { background: #dc2626; }
+    .stat-card { border-left: 4px solid; }
+    .stat-card.base { border-color: #6366f1; }
+    .stat-card.epic { border-color: #7c3aed; }
+    .stat-card.story { border-color: #2563eb; }
+    .stat-card.usecase { border-color: #0891b2; }
+    .stat-card.task { border-color: #059669; }
+    .detail-panel { max-height: 75vh; overflow-y: auto; }
+    .tag-badge { font-size: 0.7rem; }
+    .ac-item::before { content: "✓ "; color: #059669; font-weight: bold; }
+    .search-highlight { background: #fef08a; padding: 1px 2px; border-radius: 2px; }
+    #reqTable th { position: sticky; top: 0; background: #fff; z-index: 10; }
+    .module-chip { font-size: 0.75rem; cursor: pointer; transition: all 0.15s; }
+    .module-chip:hover { opacity: 0.8; }
+    .module-chip.active { outline: 2px solid #1d4ed8; outline-offset: 1px; }
+    .tree-indent { padding-left: 1.5rem; border-left: 2px solid #e5e7eb; margin-left: 0.5rem; }
+    .progress-pulse { animation: pulse 2s infinite; }
+    @@keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.6; } }
+    .tab-content { min-height: 400px; }
+</style>
+
+<div class="container-fluid mt-3">
+    <!-- Header -->
+    <div class="row mb-3">
+        <div class="col">
+            <h2><i class="bi bi-list-check me-2"></i>Requirements Explorer</h2>
+            <p class="text-muted mb-0" id="subtitle">Loading requirements...</p>
+        </div>
+        <div class="col-auto d-flex align-items-center gap-2">
+            <span id="sourceBadge" class="badge bg-secondary">—</span>
+            <button class="btn btn-outline-primary btn-sm" onclick="loadRequirements()"><i class="bi bi-arrow-clockwise"></i> Refresh</button>
+        </div>
+    </div>
+
+    <!-- Stats Row -->
+    <div class="row g-3 mb-4" id="statsRow">
+        <div class="col-md-2">
+            <div class="card stat-card base p-3 text-center">
+                <div class="text-muted small">Base Requirements</div>
+                <div class="fs-3 fw-bold" id="statBase">0</div>
+            </div>
+        </div>
+        <div class="col-md-2">
+            <div class="card stat-card epic p-3 text-center">
+                <div class="text-muted small">Epics</div>
+                <div class="fs-3 fw-bold" id="statEpics">0</div>
+            </div>
+        </div>
+        <div class="col-md-2">
+            <div class="card stat-card story p-3 text-center">
+                <div class="text-muted small">User Stories</div>
+                <div class="fs-3 fw-bold" id="statStories">0</div>
+            </div>
+        </div>
+        <div class="col-md-2">
+            <div class="card stat-card usecase p-3 text-center">
+                <div class="text-muted small">Use Cases</div>
+                <div class="fs-3 fw-bold" id="statUseCases">0</div>
+            </div>
+        </div>
+        <div class="col-md-2">
+            <div class="card stat-card task p-3 text-center">
+                <div class="text-muted small">Tasks</div>
+                <div class="fs-3 fw-bold" id="statTasks">0</div>
+            </div>
+        </div>
+        <div class="col-md-2">
+            <div class="card p-3 text-center" style="border-left: 4px solid #f59e0b;">
+                <div class="text-muted small">Modules</div>
+                <div class="fs-3 fw-bold" id="statModules">0</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Filters -->
+    <div class="card mb-3">
+        <div class="card-body py-2">
+            <div class="row align-items-center g-2">
+                <div class="col-md-4">
+                    <div class="input-group input-group-sm">
+                        <span class="input-group-text"><i class="bi bi-search"></i></span>
+                        <input type="text" id="searchInput" class="form-control" placeholder="Search requirements..." oninput="filterAndRender()">
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <select id="moduleFilter" class="form-select form-select-sm" onchange="filterAndRender()">
+                        <option value="">All Modules</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <select id="typeFilter" class="form-select form-select-sm" onchange="filterAndRender()">
+                        <option value="">All Types</option>
+                        <option value="base">Base Requirements</option>
+                        <option value="Epic">Epics</option>
+                        <option value="UserStory">User Stories</option>
+                        <option value="UseCase">Use Cases</option>
+                        <option value="Task">Tasks</option>
+                    </select>
+                </div>
+                <div class="col-md-2 text-end">
+                    <div class="btn-group btn-group-sm">
+                        <button class="btn btn-outline-secondary active" id="btnViewTable" onclick="setView('table')"><i class="bi bi-table"></i></button>
+                        <button class="btn btn-outline-secondary" id="btnViewTree" onclick="setView('tree')"><i class="bi bi-diagram-3"></i></button>
+                        <button class="btn btn-outline-secondary" id="btnViewCards" onclick="setView('cards')"><i class="bi bi-grid"></i></button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Content: Tabs for Base vs Enriched -->
+    <ul class="nav nav-tabs mb-0" id="mainTabs">
+        <li class="nav-item">
+            <a class="nav-link active" href="#" data-tab="base" onclick="switchTab('base')">
+                <i class="bi bi-file-earmark-text me-1"></i>Base Requirements <span class="badge bg-secondary ms-1" id="baseTabCount">0</span>
+            </a>
+        </li>
+        <li class="nav-item">
+            <a class="nav-link" href="#" data-tab="enriched" onclick="switchTab('enriched')">
+                <i class="bi bi-stars me-1"></i>Enriched (Expanded) <span class="badge bg-primary ms-1" id="enrichedTabCount">0</span>
+            </a>
+        </li>
+    </ul>
+
+    <div class="row">
+        <!-- Left: List -->
+        <div class="col-md-7">
+            <div class="card border-top-0 rounded-top-0">
+                <div class="card-body p-0" style="max-height: 70vh; overflow-y: auto;">
+                    <div id="contentArea">
+                        <div class="text-center text-muted py-5"><i class="bi bi-hourglass-split progress-pulse fs-3"></i><br>Loading...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <!-- Right: Detail Panel -->
+        <div class="col-md-5">
+            <div class="card detail-panel" id="detailPanel">
+                <div class="card-body text-center text-muted py-5">
+                    <i class="bi bi-hand-index fs-1"></i>
+                    <p class="mt-2">Select a requirement to view details</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+<script>
+let allData = null;
+let currentTab = 'base';
+let currentView = 'table';
+let autoRefreshTimer = null;
+
+async function loadRequirements() {
+    try {
+        const resp = await fetch('/api/pipeline/requirements');
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        allData = await resp.json();
+
+        // Update stats
+        document.getElementById('statBase').textContent = allData.baseCount || 0;
+        const enriched = allData.enrichedRequirements || [];
+        document.getElementById('statEpics').textContent = enriched.filter(e => e.itemType === 'Epic').length;
+        document.getElementById('statStories').textContent = enriched.filter(e => e.itemType === 'UserStory').length;
+        document.getElementById('statUseCases').textContent = enriched.filter(e => e.itemType === 'UseCase').length;
+        document.getElementById('statTasks').textContent = enriched.filter(e => e.itemType === 'Task').length;
+        document.getElementById('statModules').textContent = (allData.modules || []).length;
+
+        document.getElementById('baseTabCount').textContent = allData.baseCount || 0;
+        document.getElementById('enrichedTabCount').textContent = allData.enrichedCount || 0;
+
+        // Source badge
+        const srcBadge = document.getElementById('sourceBadge');
+        if (allData.source === 'active') {
+            srcBadge.className = 'badge bg-success';
+            srcBadge.textContent = `Live — ${allData.runId?.substring(0, 8)}`;
+        } else if (allData.source === 'database') {
+            srcBadge.className = 'badge bg-info';
+            srcBadge.textContent = 'From DB';
+        } else {
+            srcBadge.className = 'badge bg-warning';
+            srcBadge.textContent = 'No data';
+        }
+
+        document.getElementById('subtitle').textContent =
+            `${allData.baseCount} base requirements, ${allData.enrichedCount} enriched items across ${(allData.modules||[]).length} modules`;
+
+        // Populate module filter
+        const moduleSelect = document.getElementById('moduleFilter');
+        const currentVal = moduleSelect.value;
+        moduleSelect.innerHTML = '<option value="">All Modules</option>';
+        (allData.modules || []).forEach(m => {
+            moduleSelect.innerHTML += `<option value="${esc(m)}">${esc(m)}</option>`;
+        });
+        moduleSelect.value = currentVal;
+
+        filterAndRender();
+
+        // Auto-refresh while pipeline active
+        if (allData.source === 'active') {
+            if (!autoRefreshTimer) autoRefreshTimer = setInterval(loadRequirements, 30000);
+        } else {
+            clearInterval(autoRefreshTimer);
+            autoRefreshTimer = null;
+        }
+    } catch (err) {
+        document.getElementById('contentArea').innerHTML =
+            `<div class="alert alert-danger m-3">${esc(err.message)}</div>`;
+    }
+}
+
+function filterAndRender() {
+    if (!allData) return;
+    const search = document.getElementById('searchInput').value.toLowerCase();
+    const module = document.getElementById('moduleFilter').value;
+    const typeFilter = document.getElementById('typeFilter').value;
+
+    if (currentTab === 'base') {
+        let items = allData.baseRequirements || [];
+        if (module) items = items.filter(r => (r.module || '').toLowerCase().includes(module.toLowerCase()));
+        if (search) items = items.filter(r => (r.title||'').toLowerCase().includes(search) || (r.description||'').toLowerCase().includes(search));
+        if (typeFilter && typeFilter !== 'base') { items = []; } // base tab only shows base reqs
+        renderBaseRequirements(items);
+    } else {
+        let items = allData.enrichedRequirements || [];
+        if (module) items = items.filter(e => (e.module||'').toLowerCase().includes(module.toLowerCase()));
+        if (search) items = items.filter(e => (e.title||'').toLowerCase().includes(search) || (e.description||'').toLowerCase().includes(search));
+        if (typeFilter && typeFilter !== '' && typeFilter !== 'base') items = items.filter(e => e.itemType === typeFilter);
+        if (typeFilter === 'base') { items = []; }
+
+        if (currentView === 'tree') renderEnrichedTree(items);
+        else if (currentView === 'cards') renderEnrichedCards(items);
+        else renderEnrichedTable(items);
+    }
+}
+
+function switchTab(tab) {
+    currentTab = tab;
+    document.querySelectorAll('#mainTabs a').forEach(a => a.classList.remove('active'));
+    document.querySelector(`#mainTabs a[data-tab="${tab}"]`).classList.add('active');
+    filterAndRender();
+}
+
+function setView(view) {
+    currentView = view;
+    document.querySelectorAll('.btn-group .btn').forEach(b => b.classList.remove('active'));
+    document.getElementById('btnView' + view.charAt(0).toUpperCase() + view.slice(1)).classList.add('active');
+    filterAndRender();
+}
+
+// ───── Base Requirements ─────
+
+function renderBaseRequirements(items) {
+    if (!items.length) {
+        document.getElementById('contentArea').innerHTML = '<div class="text-center text-muted py-5"><i class="bi bi-inbox fs-2"></i><br>No base requirements found</div>';
+        return;
+    }
+    // Group by module
+    const grouped = {};
+    items.forEach(r => {
+        const mod = r.module || 'Uncategorized';
+        if (!grouped[mod]) grouped[mod] = [];
+        grouped[mod].push(r);
+    });
+
+    let html = '<div class="accordion" id="baseAccordion">';
+    Object.entries(grouped).sort((a, b) => a[0].localeCompare(b[0])).forEach(([mod, reqs], idx) => {
+        html += `
+        <div class="accordion-item">
+            <h2 class="accordion-header">
+                <button class="accordion-button ${idx > 0 ? 'collapsed' : ''}" type="button"
+                        data-bs-toggle="collapse" data-bs-target="#baseMod${idx}">
+                    <i class="bi bi-folder2 me-2 text-primary"></i>
+                    <strong>${esc(mod)}</strong>
+                    <span class="badge bg-secondary ms-2">${reqs.length}</span>
+                </button>
+            </h2>
+            <div id="baseMod${idx}" class="accordion-collapse collapse ${idx === 0 ? 'show' : ''}">
+                <div class="list-group list-group-flush">`;
+        reqs.forEach(r => {
+            html += `
+                    <a class="list-group-item list-group-item-action req-card py-2" onclick="showBaseDetail(${JSON.stringify(r).replace(/"/g, '&quot;')})">
+                        <div class="d-flex justify-content-between align-items-start">
+                            <div>
+                                <span class="badge bg-secondary me-1">H${r.headingLevel}</span>
+                                <strong>${highlight(esc(r.title))}</strong>
+                            </div>
+                            <span class="text-muted small">${esc(r.id?.substring(0,8) || '')}</span>
+                        </div>
+                        <div class="text-muted small mt-1 text-truncate" style="max-width: 500px;">${highlight(esc(truncate(r.description, 120)))}</div>
+                        <div class="mt-1">
+                            ${(r.tags || []).map(t => `<span class="badge bg-light text-dark tag-badge me-1">${esc(t)}</span>`).join('')}
+                        </div>
+                    </a>`;
+        });
+        html += `</div></div></div>`;
+    });
+    html += '</div>';
+    document.getElementById('contentArea').innerHTML = html;
+}
+
+function showBaseDetail(r) {
+    const panel = document.getElementById('detailPanel');
+    panel.innerHTML = `
+    <div class="card-header bg-light">
+        <div class="d-flex justify-content-between">
+            <h6 class="mb-0"><i class="bi bi-file-earmark-text me-2"></i>${esc(r.title)}</h6>
+            <span class="badge bg-secondary">${esc(r.id || '')}</span>
+        </div>
+    </div>
+    <div class="card-body">
+        <div class="mb-3">
+            <small class="text-muted">Module</small>
+            <div><span class="badge bg-primary">${esc(r.module || 'N/A')}</span></div>
+        </div>
+        <div class="mb-3">
+            <small class="text-muted">Source</small>
+            <div class="small">${esc(r.sourceFile || '')} &mdash; ${esc(r.section || '')}</div>
+        </div>
+        <div class="mb-3">
+            <small class="text-muted">Description</small>
+            <div class="border rounded p-2 bg-light small">${esc(r.description || 'No description')}</div>
+        </div>
+        ${(r.acceptanceCriteria && r.acceptanceCriteria.length) ? `
+        <div class="mb-3">
+            <small class="text-muted">Acceptance Criteria</small>
+            <ul class="list-unstyled small mb-0">
+                ${r.acceptanceCriteria.map(ac => `<li class="ac-item">${esc(ac)}</li>`).join('')}
+            </ul>
+        </div>` : ''}
+        ${(r.tags && r.tags.length) ? `
+        <div class="mb-3">
+            <small class="text-muted">Tags</small><br>
+            ${r.tags.map(t => `<span class="badge bg-info tag-badge me-1">${esc(t)}</span>`).join('')}
+        </div>` : ''}
+        ${(r.dependsOn && r.dependsOn.length) ? `
+        <div class="mb-3">
+            <small class="text-muted">Dependencies</small><br>
+            ${r.dependsOn.map(d => `<span class="badge bg-warning text-dark tag-badge me-1">${esc(d)}</span>`).join('')}
+        </div>` : ''}
+    </div>`;
+}
+
+// ───── Enriched Requirements ─────
+
+function typeBadge(itemType) {
+    const cls = { 'Epic': 'badge-epic', 'UserStory': 'badge-story', 'UseCase': 'badge-usecase', 'Task': 'badge-task', 'Bug': 'badge-bug' };
+    const labels = { 'Epic': 'Epic', 'UserStory': 'Story', 'UseCase': 'Use Case', 'Task': 'Task', 'Bug': 'Bug' };
+    return `<span class="badge ${cls[itemType] || 'bg-secondary'}">${labels[itemType] || itemType}</span>`;
+}
+
+function statusBadge(status) {
+    const colors = { 'New': 'secondary', 'InQueue': 'info', 'Received': 'primary', 'InProgress': 'warning', 'Completed': 'success', 'Failed': 'danger', 'Blocked': 'dark' };
+    return `<span class="badge bg-${colors[status] || 'secondary'}">${status}</span>`;
+}
+
+function priorityStars(p) {
+    return '★'.repeat(Math.min(p || 1, 5));
+}
+
+function renderEnrichedTable(items) {
+    if (!items.length) {
+        document.getElementById('contentArea').innerHTML = `<div class="text-center text-muted py-5">
+            <i class="bi bi-stars fs-2"></i><br>No enriched requirements yet
+            ${allData?.source === 'active' ? '<br><small class="progress-pulse">Pipeline is running — enriched items will appear as the Expander completes batches</small>' : ''}
+        </div>`;
+        return;
+    }
+    let html = `<table class="table table-hover table-sm mb-0" id="reqTable">
+        <thead><tr>
+            <th style="width:80px">Type</th>
+            <th>Title</th>
+            <th style="width:100px">Module</th>
+            <th style="width:70px">Priority</th>
+            <th style="width:80px">Status</th>
+            <th style="width:60px">SP</th>
+        </tr></thead><tbody>`;
+    items.forEach(e => {
+        html += `<tr class="req-card" onclick="showEnrichedDetail(${JSON.stringify(e).replace(/"/g, '&quot;')})">
+            <td>${typeBadge(e.itemType)}</td>
+            <td>
+                <strong>${highlight(esc(e.title))}</strong>
+                <div class="text-muted small text-truncate" style="max-width:400px">${highlight(esc(truncate(e.description, 80)))}</div>
+            </td>
+            <td><span class="badge bg-light text-dark">${esc(e.module || '')}</span></td>
+            <td class="text-warning">${priorityStars(e.priority)}</td>
+            <td>${statusBadge(e.status)}</td>
+            <td>${e.storyPoints || '-'}</td>
+        </tr>`;
+    });
+    html += '</tbody></table>';
+    document.getElementById('contentArea').innerHTML = html;
+}
+
+function renderEnrichedCards(items) {
+    if (!items.length) {
+        document.getElementById('contentArea').innerHTML = '<div class="text-center text-muted py-5"><i class="bi bi-inbox fs-2"></i><br>No enriched requirements</div>';
+        return;
+    }
+    let html = '<div class="row g-2 p-3">';
+    items.forEach(e => {
+        html += `
+        <div class="col-md-6">
+            <div class="card req-card h-100" onclick="showEnrichedDetail(${JSON.stringify(e).replace(/"/g, '&quot;')})">
+                <div class="card-body py-2">
+                    <div class="d-flex justify-content-between mb-1">
+                        ${typeBadge(e.itemType)}
+                        ${statusBadge(e.status)}
+                    </div>
+                    <h6 class="card-title mb-1">${highlight(esc(e.title))}</h6>
+                    <p class="card-text text-muted small mb-1">${highlight(esc(truncate(e.description, 100)))}</p>
+                    <div class="d-flex justify-content-between align-items-center">
+                        <span class="badge bg-light text-dark small">${esc(e.module || '')}</span>
+                        <span class="text-warning small">${priorityStars(e.priority)}</span>
+                    </div>
+                </div>
+            </div>
+        </div>`;
+    });
+    html += '</div>';
+    document.getElementById('contentArea').innerHTML = html;
+}
+
+function renderEnrichedTree(items) {
+    if (!items.length) {
+        document.getElementById('contentArea').innerHTML = '<div class="text-center text-muted py-5"><i class="bi bi-diagram-3 fs-2"></i><br>No enriched requirements</div>';
+        return;
+    }
+    // Build hierarchy: Epic → Stories → Tasks
+    const epics = items.filter(e => e.itemType === 'Epic');
+    const stories = items.filter(e => e.itemType === 'UserStory');
+    const usecases = items.filter(e => e.itemType === 'UseCase');
+    const tasks = items.filter(e => e.itemType === 'Task');
+
+    let html = '<div class="p-3">';
+    epics.forEach(epic => {
+        html += `<div class="mb-3">
+            <div class="req-card p-2 border rounded" onclick="showEnrichedDetail(${JSON.stringify(epic).replace(/"/g, '&quot;')})">
+                ${typeBadge('Epic')} <strong>${esc(epic.title)}</strong>
+                <span class="text-muted small ms-2">${esc(epic.id?.substring(0,12) || '')}</span>
+            </div>
+            <div class="tree-indent">`;
+
+        // Find child stories/use cases
+        const childStories = stories.filter(s => s.parentId === epic.id);
+        const childUseCases = usecases.filter(u => u.parentId === epic.id);
+
+        childStories.forEach(story => {
+            html += `<div class="req-card p-2 border rounded my-1" onclick="showEnrichedDetail(${JSON.stringify(story).replace(/"/g, '&quot;')})">
+                ${typeBadge('UserStory')} ${esc(story.title)} <span class="text-muted small">(${story.storyPoints || '-'} SP)</span>
+            </div>`;
+            // Find child tasks
+            const childTasks = tasks.filter(t => t.parentId === story.id);
+            if (childTasks.length) {
+                html += '<div class="tree-indent">';
+                childTasks.forEach(task => {
+                    html += `<div class="req-card p-1 border rounded my-1 small" onclick="showEnrichedDetail(${JSON.stringify(task).replace(/"/g, '&quot;')})">
+                        ${typeBadge('Task')} ${esc(task.title)}
+                    </div>`;
+                });
+                html += '</div>';
+            }
+        });
+
+        childUseCases.forEach(uc => {
+            html += `<div class="req-card p-2 border rounded my-1" onclick="showEnrichedDetail(${JSON.stringify(uc).replace(/"/g, '&quot;')})">
+                ${typeBadge('UseCase')} ${esc(uc.title)}
+            </div>`;
+        });
+
+        html += '</div></div>';
+    });
+
+    // Orphan items (no parent epic)
+    const epicIds = new Set(epics.map(e => e.id));
+    const orphans = items.filter(i => i.itemType !== 'Epic' && !epicIds.has(i.parentId));
+    if (orphans.length) {
+        html += `<div class="mt-3 border-top pt-3"><h6 class="text-muted"><i class="bi bi-question-circle me-1"></i>Unlinked Items (${orphans.length})</h6>`;
+        orphans.forEach(o => {
+            html += `<div class="req-card p-2 border rounded my-1" onclick="showEnrichedDetail(${JSON.stringify(o).replace(/"/g, '&quot;')})">
+                ${typeBadge(o.itemType)} ${esc(o.title)}
+            </div>`;
+        });
+        html += '</div>';
+    }
+    html += '</div>';
+    document.getElementById('contentArea').innerHTML = html;
+}
+
+function showEnrichedDetail(e) {
+    const panel = document.getElementById('detailPanel');
+    let sections = '';
+
+    // Common header
+    sections += `
+    <div class="card-header bg-light">
+        <div class="d-flex justify-content-between align-items-start">
+            <div>
+                ${typeBadge(e.itemType)} ${statusBadge(e.status)}
+                <span class="text-warning ms-2">${priorityStars(e.priority)}</span>
+            </div>
+            <span class="text-muted small">${esc(e.id || '')}</span>
+        </div>
+        <h6 class="mt-2 mb-0">${esc(e.title)}</h6>
+    </div>
+    <div class="card-body">`;
+
+    // Module + affected services
+    sections += `<div class="mb-2">
+        <span class="badge bg-primary">${esc(e.module || 'N/A')}</span>
+        ${(e.affectedServices || []).map(s => `<span class="badge bg-outline-info border ms-1">${esc(s)}</span>`).join('')}
+    </div>`;
+
+    // Description
+    if (e.description) {
+        sections += `<div class="mb-3"><small class="text-muted d-block">Description</small>
+        <div class="border rounded p-2 bg-light small">${esc(e.description)}</div></div>`;
+    }
+
+    // Epic-specific
+    if (e.itemType === 'Epic') {
+        if (e.summary) sections += `<div class="mb-2"><small class="text-muted d-block">Summary</small><div class="small">${esc(e.summary)}</div></div>`;
+        if (e.businessValue) sections += `<div class="mb-2"><small class="text-muted d-block">Business Value</small><div class="small border-start border-3 border-success ps-2">${esc(e.businessValue)}</div></div>`;
+        if (e.scope) sections += `<div class="mb-2"><small class="text-muted d-block">Scope</small><div class="small">${esc(e.scope)}</div></div>`;
+        if (e.successCriteria?.length) sections += `<div class="mb-2"><small class="text-muted d-block">Success Criteria</small><ul class="small mb-0">${e.successCriteria.map(c => `<li>${esc(c)}</li>`).join('')}</ul></div>`;
+    }
+
+    // Story-specific
+    if (e.itemType === 'UserStory') {
+        if (e.storyPoints) sections += `<div class="mb-2"><small class="text-muted d-block">Story Points</small><span class="badge bg-primary fs-6">${e.storyPoints}</span></div>`;
+        if (e.labels?.length) sections += `<div class="mb-2"><small class="text-muted d-block">Labels</small>${e.labels.map(l => `<span class="badge bg-info tag-badge me-1">${esc(l)}</span>`).join('')}</div>`;
+    }
+
+    // UseCase-specific
+    if (e.itemType === 'UseCase') {
+        if (e.actor) sections += `<div class="mb-2"><small class="text-muted d-block">Actor</small><div class="small"><i class="bi bi-person me-1"></i>${esc(e.actor)}</div></div>`;
+        if (e.preconditions) sections += `<div class="mb-2"><small class="text-muted d-block">Preconditions</small><div class="small">${esc(e.preconditions)}</div></div>`;
+        if (e.mainFlow?.length) sections += `<div class="mb-2"><small class="text-muted d-block">Main Flow</small><ol class="small mb-0">${e.mainFlow.map(s => `<li>${esc(s)}</li>`).join('')}</ol></div>`;
+        if (e.alternativeFlows) sections += `<div class="mb-2"><small class="text-muted d-block">Alternative Flows</small><div class="small">${esc(e.alternativeFlows)}</div></div>`;
+        if (e.postconditions) sections += `<div class="mb-2"><small class="text-muted d-block">Postconditions</small><div class="small">${esc(e.postconditions)}</div></div>`;
+    }
+
+    // Task-specific
+    if (e.itemType === 'Task') {
+        if (e.technicalNotes) sections += `<div class="mb-2"><small class="text-muted d-block">Technical Notes</small><div class="small font-monospace bg-dark text-light p-2 rounded">${esc(e.technicalNotes)}</div></div>`;
+        if (e.definitionOfDone?.length) sections += `<div class="mb-2"><small class="text-muted d-block">Definition of Done</small><ul class="small mb-0">${e.definitionOfDone.map(d => `<li class="ac-item">${esc(d)}</li>`).join('')}</ul></div>`;
+    }
+
+    // Common: Acceptance Criteria
+    if (e.acceptanceCriteria?.length) {
+        sections += `<div class="mb-2"><small class="text-muted d-block">Acceptance Criteria</small><ul class="list-unstyled small mb-0">${e.acceptanceCriteria.map(ac => `<li class="ac-item">${esc(ac)}</li>`).join('')}</ul></div>`;
+    }
+
+    // Tags
+    if (e.tags?.length) {
+        sections += `<div class="mb-2"><small class="text-muted d-block">Tags</small>${e.tags.map(t => `<span class="badge bg-light text-dark tag-badge me-1">${esc(t)}</span>`).join('')}</div>`;
+    }
+
+    // Dependencies
+    if (e.dependsOn?.length) {
+        sections += `<div class="mb-2"><small class="text-muted d-block">Dependencies</small>${e.dependsOn.map(d => `<span class="badge bg-warning text-dark tag-badge me-1">${esc(d)}</span>`).join('')}</div>`;
+    }
+
+    // Detailed Spec
+    if (e.detailedSpec) {
+        sections += `<div class="mb-2"><small class="text-muted d-block">Detailed Specification</small><div class="small border rounded p-2 bg-light" style="max-height: 200px; overflow-y: auto;">${esc(e.detailedSpec)}</div></div>`;
+    }
+
+    // Coverage / Gaps
+    if (e.coverage && e.coverage !== 'NotAssessed') {
+        const covColors = { 'Covered': 'success', 'Partial': 'warning', 'NotStarted': 'secondary', 'GapIdentified': 'danger' };
+        sections += `<div class="mb-2"><small class="text-muted d-block">Coverage</small><span class="badge bg-${covColors[e.coverage] || 'secondary'}">${e.coverage}</span></div>`;
+    }
+    if (e.identifiedGaps?.length) {
+        sections += `<div class="mb-2"><small class="text-muted d-block">Identified Gaps</small><ul class="small text-danger mb-0">${e.identifiedGaps.map(g => `<li>${esc(g)}</li>`).join('')}</ul></div>`;
+    }
+
+    // Meta
+    sections += `<div class="border-top pt-2 mt-3 small text-muted">
+        <div class="row">
+            <div class="col-6">Source: ${esc(e.sourceRequirementId || '—')}</div>
+            <div class="col-6">Parent: ${esc(e.parentId || '—')}</div>
+            <div class="col-6">Produced By: ${esc(e.producedBy || '—')}</div>
+            <div class="col-6">Created: ${e.createdAt ? new Date(e.createdAt).toLocaleString() : '—'}</div>
+        </div>
+    </div>`;
+
+    sections += '</div>';
+    panel.innerHTML = sections;
+}
+
+// ───── Helpers ─────
+function esc(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+function truncate(s, n) { if (!s) return ''; return s.length > n ? s.substring(0, n) + '...' : s; }
+function highlight(s) {
+    const q = document.getElementById('searchInput').value;
+    if (!q) return s;
+    const regex = new RegExp(`(${q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+    return s.replace(regex, '<mark class="search-highlight">$1</mark>');
+}
+
+// Init
+loadRequirements();
+</script>
+}

@@ -130,6 +130,18 @@ public sealed class HipaaComplianceAgent : IAgent
             context.Findings.AddRange(findings);
             context.AgentStatuses[Type] = AgentStatus.Completed;
 
+            // Dispatch HIPAA findings as feedback to responsible code-gen agents
+            if (findings.Count > 0)
+                context.DispatchFindingsAsFeedback(Type, findings);
+
+            // Notify code-gen agents about HIPAA compliance gaps
+            if (findings.Count > 0)
+            {
+                context.WriteFeedback(AgentType.Database, Type, $"HIPAA: {findings.Count(f => f.Category.Contains("PHI") || f.Category.Contains("Encrypt"))} PHI/encryption findings — ensure entities have [PersonalData] and encryption at rest.");
+                context.WriteFeedback(AgentType.ServiceLayer, Type, $"HIPAA: Ensure all PHI access goes through audit service — {findings.Count} compliance gaps found.");
+                context.WriteFeedback(AgentType.Application, Type, $"HIPAA: {findings.Count} compliance findings — wire access audit middleware and minimum necessary policy into API endpoints.");
+            }
+
             // Agent completes its own claimed work items
             foreach (var item in context.CurrentClaimedItems)
                 context.CompleteWorkItem?.Invoke(item);

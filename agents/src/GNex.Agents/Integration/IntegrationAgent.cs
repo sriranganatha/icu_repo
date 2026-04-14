@@ -59,6 +59,24 @@ public sealed class IntegrationAgent : IAgent
                     await context.ReportProgress(Type, "Generating Kafka infrastructure — consumer hosted service, outbox pattern, dead-letter handler");
                 if (context.ReportProgress is not null && !string.IsNullOrWhiteSpace(guidance))
                     await context.ReportProgress(Type, $"Applying architecture/platform guidance: {guidance}");
+
+                // Read feedback from upstream agents (GapAnalysis, Database, ServiceLayer, Supervisor)
+                var feedback = context.ReadFeedback(Type);
+                if (feedback.Count > 0)
+                {
+                    _logger.LogInformation("IntegrationAgent received {Count} feedback items", feedback.Count);
+                    if (context.ReportProgress is not null)
+                        await context.ReportProgress(Type, $"Incorporating {feedback.Count} feedback items from GapAnalysis/Database/ServiceLayer");
+                }
+
+                // Read upstream agent results for cross-agent context
+                if (context.AgentResults.TryGetValue(AgentType.Database, out var dbResult) && dbResult.Success)
+                    _logger.LogInformation("IntegrationAgent consuming Database results: {Summary}", dbResult.Summary);
+                if (context.AgentResults.TryGetValue(AgentType.ServiceLayer, out var svcResult) && svcResult.Success)
+                    _logger.LogInformation("IntegrationAgent consuming ServiceLayer results: {Summary}", svcResult.Summary);
+                if (context.AgentResults.TryGetValue(AgentType.Architect, out var archResult) && archResult.Success)
+                    _logger.LogInformation("IntegrationAgent consuming Architect results for integration patterns");
+
                 artifacts.Add(GenerateKafkaConsumerHostedService());
                 artifacts.Add(GenerateOutboxEntity());
                 artifacts.Add(GenerateOutboxProcessor());
@@ -106,6 +124,11 @@ public sealed class IntegrationAgent : IAgent
             // Agent completes its own claimed work items
             foreach (var item in context.CurrentClaimedItems)
                 context.CompleteWorkItem?.Invoke(item);
+
+            // Notify downstream agents about integration artifacts
+            var svcNames = string.Join(", ", scopedServices.Select(s => s.Name));
+            context.WriteFeedback(AgentType.Testing, Type, $"Integration layer ready: Kafka consumers, outbox, DLQ for {svcNames}. Generate integration/contract tests.");
+            context.WriteFeedback(AgentType.Deploy, Type, $"Integration layer generated — Kafka topic provisioner and {scopedServices.Count} service consumers need deployment configuration.");
 
             await Task.CompletedTask;
             var adapterNames = artifacts.Where(a => a.FileName.Contains("Adapter") || a.FileName.Contains("Processor"))

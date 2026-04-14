@@ -440,13 +440,13 @@ public sealed class ContextBroker : IContextBroker
         var facts = new Dictionary<string, string>
         {
             ["Pattern"] = "Clean Architecture — Domain → Application → Infrastructure → WebAPI",
-            ["Database"] = "PostgreSQL 16 with EF Core, schema-per-service, RLS for tenant isolation",
-            ["Messaging"] = "Apache Kafka with transactional outbox pattern, schema registry",
+            ["Database"] = $"{context.DatabaseLabel()} with {context.OrmLabel()}, schema-per-service, RLS for tenant isolation",
+            ["Messaging"] = $"{context.MessagingLabel()} with transactional outbox pattern, schema registry",
             ["Authentication"] = "JWT Bearer with RBAC + ABAC, break-the-glass emergency access",
             ["API_Style"] = "REST with Minimal APIs, YARP API Gateway reverse proxy",
             ["Observability"] = "OpenTelemetry, Prometheus metrics, Grafana dashboards, structured logging",
             ["Deployment"] = "Docker Compose (dev), Kubernetes + Helm (prod)",
-            ["Testing"] = "xUnit + Moq unit tests, integration tests, load tests (k6)"
+            ["Testing"] = $"{context.TestStackLabel()} unit tests, integration tests, load tests (k6)"
         };
 
         // Add architect instructions if present
@@ -469,7 +469,7 @@ public sealed class ContextBroker : IContextBroker
             QueryId = query.Id,
             RespondedBy = AgentType.Architect,
             Success = true,
-            Answer = "Architecture: Clean Architecture, PostgreSQL + Kafka, REST + YARP, Docker/K8s",
+            Answer = $"Architecture: Clean Architecture, {context.DatabaseLabel()} + {context.MessagingLabel()}, REST + YARP, Docker/K8s",
             Facts = facts
         };
     }
@@ -541,10 +541,10 @@ public sealed class ContextBroker : IContextBroker
         var entity = query.EntityName;
         var facts = new Dictionary<string, string>
         {
-            ["UnitTestFramework"] = "xUnit + Moq",
+            ["UnitTestFramework"] = context.TestStackLabel(),
             ["IntegrationTestPattern"] = "WebApplicationFactory with InMemoryDb",
             ["CoverageTarget"] = "80% line coverage minimum",
-            ["RequiredTestTypes"] = "Unit (service logic), Repository (EF InMemory), Tenant isolation, Authorization, Validation, Integration (Kafka events)"
+            ["RequiredTestTypes"] = $"Unit (service logic), Repository ({context.OrmLabel()} InMemory), Tenant isolation, Authorization, Validation, Integration ({context.MessagingLabel()} events)"
         };
 
         // Check existing test artifacts for this module/entity
@@ -572,7 +572,7 @@ public sealed class ContextBroker : IContextBroker
             QueryId = query.Id,
             RespondedBy = AgentType.Testing,
             Success = true,
-            Answer = $"Test strategy: xUnit+Moq, {testArtifacts.Count} existing tests, target 80% coverage",
+            Answer = $"Test strategy: {context.TestStackLabel()}, {testArtifacts.Count} existing tests, target 80% coverage",
             CodeSnippets = snippets,
             Facts = facts
         };

@@ -9,8 +9,17 @@ namespace GNex.Studio.Services;
 /// </summary>
 public sealed class PipelineStateStore
 {
-    private static readonly string s_statePath = Path.Combine(
-        AppContext.BaseDirectory, "..", "..", "..", "pipeline-state.json");
+    private static readonly string s_stateFileName = "pipeline-state.json";
+
+    /// <summary>Resolve pipeline-state.json — check base dir first (published), then ../../.. (dev mode).</summary>
+    private static string ResolveStatePath()
+    {
+        var direct = Path.Combine(AppContext.BaseDirectory, s_stateFileName);
+        if (File.Exists(direct)) return direct;
+        var devMode = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", s_stateFileName));
+        if (File.Exists(devMode)) return devMode;
+        return direct; // default to base dir for new files
+    }
 
     private static readonly JsonSerializerOptions s_jsonOpts = new()
     {
@@ -150,11 +159,40 @@ public sealed class PipelineStateStore
         }
     }
 
+    /// <summary>
+    /// Returns the set of agent names that have "Completed" status in the current snapshot.
+    /// Used by the resume logic to skip agents that finished in a prior run.
+    /// </summary>
+    public HashSet<string> GetCompletedAgents()
+    {
+        lock (_lock)
+        {
+            if (CurrentSnapshot is null) return new HashSet<string>();
+            return CurrentSnapshot.AgentStatuses
+                .Where(kv => kv.Value == "Completed")
+                .Select(kv => kv.Key)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        }
+    }
+
+    /// <summary>
+    /// Returns true if the current snapshot represents an incomplete (interrupted) run.
+    /// </summary>
+    public bool HasIncompleteRun()
+    {
+        lock (_lock)
+        {
+            return CurrentSnapshot is not null
+                && !CurrentSnapshot.Completed
+                && CurrentSnapshot.AgentStatuses.Count > 0;
+        }
+    }
+
     private PipelineStateSnapshot? LoadFromDisk()
     {
         try
         {
-            var path = Path.GetFullPath(s_statePath);
+            var path = ResolveStatePath();
             if (!File.Exists(path)) return null;
             var json = File.ReadAllText(path);
             return JsonSerializer.Deserialize<PipelineStateSnapshot>(json, s_jsonOpts);
@@ -169,7 +207,7 @@ public sealed class PipelineStateStore
     {
         try
         {
-            var path = Path.GetFullPath(s_statePath);
+            var path = ResolveStatePath();
             File.WriteAllText(path, JsonSerializer.Serialize(snapshot, s_jsonOpts));
         }
         catch

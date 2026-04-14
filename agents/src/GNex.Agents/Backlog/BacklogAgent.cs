@@ -58,6 +58,22 @@ public sealed class BacklogAgent : IAgent
             if (bugItemsAdded > 0)
                 context.ReportProgress?.Invoke(Type, $"Added {bugItemsAdded} bug item(s) from findings using bug report template");
 
+            // Read feedback from other agents (Build failures, DOD reopens, etc.)
+            var feedback = context.ReadFeedback(Type);
+            if (feedback.Count > 0)
+            {
+                _logger.LogInformation("BacklogAgent received {Count} feedback items", feedback.Count);
+                context.ReportProgress?.Invoke(Type, $"Processing {feedback.Count} feedback items from other agents");
+            }
+
+            // Read upstream agent results for backlog intelligence
+            if (context.AgentResults.TryGetValue(AgentType.DodVerification, out var dodResult) && dodResult.Success)
+                _logger.LogInformation("BacklogAgent consuming DOD results: {Summary}", dodResult.Summary);
+            if (context.AgentResults.TryGetValue(AgentType.Build, out var buildResult) && !buildResult.Success)
+                _logger.LogInformation("BacklogAgent: Build failed — may need to create fix items");
+            if (context.AgentResults.TryGetValue(AgentType.GapAnalysis, out var gapResult) && gapResult.Success)
+                _logger.LogInformation("BacklogAgent consuming GapAnalysis results: {Summary}", gapResult.Summary);
+
             // 2. Update statuses based on current artifacts and findings
             context.ReportProgress?.Invoke(Type, $"Updating backlog statuses — {context.Artifacts.Count} artifacts, {context.Findings.Count} findings");
             UpdateBacklogStatuses(context);
@@ -79,6 +95,14 @@ public sealed class BacklogAgent : IAgent
             // This keeps the orchestrator's backlog-driven re-dispatch loop active.
             var actionable = context.ExpandedRequirements.Where(IsActionableWorkItem).ToList();
             var allDone = actionable.Count > 0 && actionable.All(i => i.Status == WorkItemStatus.Completed);
+
+            // Persist updated work items after each backlog pass
+            if (context.PersistWorkItems is not null)
+            {
+                try { context.PersistWorkItems(context.RunId, context.ExpandedRequirements.ToList()); }
+                catch (Exception ex) { _logger.LogWarning(ex, "Backlog incremental persist failed"); }
+            }
+
             context.AgentStatuses[Type] = allDone ? AgentStatus.Completed : AgentStatus.Idle;
 
             return new AgentResult
@@ -688,7 +712,7 @@ public sealed class BacklogAgent : IAgent
             var bugId = $"BUG-AUTO-{finding.Id[..Math.Min(8, finding.Id.Length)].ToUpperInvariant()}";
             var title = BuildBugTitle(finding);
             var severity = MapBugSeverity(finding.Severity);
-            var environment = BuildBugEnvironment(finding);
+            var environment = BuildBugEnvironment(finding, context);
             var steps = BuildBugSteps(finding);
             var expected = BuildExpectedResult(finding);
             var actual = BuildActualResult(finding);
@@ -708,13 +732,13 @@ public sealed class BacklogAgent : IAgent
                 Title = title,
                 Severity = severity,
                 Environment = svcDef is not null
-                    ? $".NET 10, PostgreSQL 16 | Service: {svcLabel}, Schema: {schema}, Entities: {entityCsv} — {environment}"
+                    ? $"{context.EnvironmentLabel()} | Service: {svcLabel}, Schema: {schema}, Entities: {entityCsv} — {environment}"
                     : environment,
                 StepsToReproduce = steps,
                 ExpectedResult = expected,
                 ActualResult = actual,
                 Description = svcDef is not null
-                    ? $"[{svcLabel} | {schema}] Severity: {severity}\nEnvironment: .NET 10, PostgreSQL 16, Service: {svcLabel}, Schema: {schema}\nSteps to Reproduce:\n{string.Join("\n", steps)}\nExpected Result: {expected}\nActual Result: {actual}"
+                    ? $"[{svcLabel} | {schema}] Severity: {severity}\nEnvironment: {context.EnvironmentLabel()}, Service: {svcLabel}, Schema: {schema}\nSteps to Reproduce:\n{string.Join("\n", steps)}\nExpected Result: {expected}\nActual Result: {actual}"
                     : $"Severity: {severity}\nEnvironment: {environment}\nSteps to Reproduce:\n{string.Join("\n", steps)}\nExpected Result: {expected}\nActual Result: {actual}\nAttachments: [Screenshot/Screen Recording/Log Snippet]",
                 TechnicalNotes = svcDef is not null
                     ? $"Investigate in {svcNs}. Check entities: {entityCsv}. Schema: {schema}."
@@ -776,10 +800,10 @@ public sealed class BacklogAgent : IAgent
         _ => "Minor"
     };
 
-    private static string BuildBugEnvironment(ReviewFinding finding)
+    private static string BuildBugEnvironment(ReviewFinding finding, AgentContext context)
         => string.IsNullOrWhiteSpace(finding.FilePath)
-            ? ".NET 8, PostgreSQL 16, Local"
-            : $".NET 8, PostgreSQL 16, Local — {finding.FilePath}";
+            ? $"{context.EnvironmentLabel()}, Local"
+            : $"{context.EnvironmentLabel()}, Local — {finding.FilePath}";
 
     private static List<string> BuildBugSteps(ReviewFinding finding)
         =>

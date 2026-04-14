@@ -122,16 +122,17 @@
 
     async function saveGeneral() {
         const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}`, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ name: document.getElementById('fName').value, description: document.getElementById('fDesc').value }) });
-        if (res.ok) { alert('Saved'); load(); } else alert('Failed');
+        if (res.ok) { await msgBox.success('Saved'); load(); } else await msgBox.error('Failed to save.');
     }
 
     async function archiveProject() {
-        if (!confirm('Archive this project?')) return;
+        const ok = await msgBox.confirm('Archive this project?');
+        if (!ok) return;
         await fetch(`/api/projects/${encodeURIComponent(projectId)}`, { method: 'DELETE' });
         window.location.href = '/Projects';
     }
 
-    function deleteProject() { alert('Permanent deletion requires admin confirmation — not yet implemented.'); }
+    async function deleteProject() { await msgBox.warning('Permanent deletion requires admin confirmation — not yet implemented.'); }
 
     async function loadTechOptions() {
         const cat = document.getElementById('techCat').value;
@@ -148,8 +149,13 @@
         if (res.ok) { bootstrap.Modal.getInstance(document.getElementById('addTechModal')).hide(); load(); }
     }
 
-    function addEnv() { alert('Use the API to add environments (POST /api/projects/{id}/environments)'); }
-    function removeTech(id) { alert('Tech removal via API'); }
+    async function addEnv() { await msgBox.info('Use the API to add environments (POST /api/projects/{id}/environments)'); }
+    async function removeTech(id) {
+        const ok = await msgBox.confirm('Remove this technology?');
+        if (!ok) return;
+        const res = await fetch(`/api/projects/tech-stack/${encodeURIComponent(id)}`, { method: 'DELETE' });
+        if (res.ok) { load(); await msgBox.success('Removed.'); } else await msgBox.error('Failed to remove.');
+    }
     function esc(s) { const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML; }
 
     load(); loadTechOptions();

@@ -416,7 +416,7 @@ public sealed class SupervisorAgent : IAgent
             Category = "Output Validation",
             Outcome = testArtifacts.Count > 0 ? TestOutcome.Passed : TestOutcome.Failed,
             Diagnostic = testArtifacts.Count > 0 ? $"{testArtifacts.Count} test artifacts" : "No test artifacts generated",
-            Remediation = "TestingAgent must produce xUnit test files"
+            Remediation = $"TestingAgent must produce {ctx.TestFrameworkLabel()} test files"
         });
 
         var hasTenantTests = testArtifacts.Any(a => a.Content.Contains("TenantIsolation"));

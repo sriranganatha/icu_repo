@@ -25,6 +25,7 @@ public interface IBrdUploadService
     Task<BrdDocumentDto?> GetBrdDocumentAsync(string brdId, CancellationToken ct = default);
     Task<bool> UpdateBrdDocumentAsync(string brdId, UpdateBrdDocumentRequest request, CancellationToken ct = default);
     Task<bool> DeleteBrdDocumentAsync(string brdId, CancellationToken ct = default);
+    Task<List<BrdDocumentDto>> GetGroupSiblingsAsync(string brdId, CancellationToken ct = default);
 
     // ── Section operations ──
     Task<List<BrdSectionDto>> GetBrdSectionsAsync(string brdId, CancellationToken ct = default);
@@ -50,6 +51,10 @@ public class BrdUploadService(GNexDbContext db, ILlmProvider llm, ILogger<BrdUpl
 
         var docs = new List<BrdDocument>();
 
+        // When multiple types are selected, assign a shared GroupId so all
+        // sibling BRDs reference the same set of requirement source documents.
+        var groupId = request.BrdTypes.Count > 1 ? Guid.NewGuid().ToString("N") : null;
+
         foreach (var brdType in request.BrdTypes)
         {
             if (!BrdTypeTemplates.IsValid(brdType))
@@ -67,6 +72,7 @@ public class BrdUploadService(GNexDbContext db, ILlmProvider llm, ILogger<BrdUpl
                 Description = request.Description ?? string.Empty,
                 BrdType = brdType,
                 Instructions = request.Instructions ?? string.Empty,
+                GroupId = groupId,
                 Status = "draft"
             };
             db.BrdDocuments.Add(doc);
@@ -89,11 +95,12 @@ public class BrdUploadService(GNexDbContext db, ILlmProvider llm, ILogger<BrdUpl
 
         await db.SaveChangesAsync(ct);
 
-        logger.LogInformation("Created {Count} BRD document(s) for project {ProjectId}: {Types}",
-            docs.Count, request.ProjectId, string.Join(", ", request.BrdTypes));
+        logger.LogInformation("Created {Count} BRD document(s) for project {ProjectId}: {Types}{Group}",
+            docs.Count, request.ProjectId, string.Join(", ", request.BrdTypes),
+            groupId is not null ? $" [group={groupId[..8]}]" : "");
 
         var dtos = docs.Select(d => MapToDto(d, project.Name)).ToList();
-        return new BrdDocumentCreateResult(request.ProjectId, docs.Count, dtos);
+        return new BrdDocumentCreateResult(request.ProjectId, docs.Count, groupId, dtos);
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -120,7 +127,7 @@ public class BrdUploadService(GNexDbContext db, ILlmProvider llm, ILogger<BrdUpl
                 d.Id, d.ProjectId, d.Project?.Name ?? d.ProjectId,
                 d.Title, d.Description, d.BrdType, BrdTypeTemplates.DisplayName(d.BrdType),
                 d.Instructions, d.Status, sectionCount,
-                d.CreatedAt, d.UpdatedAt, d.ApprovedAt, d.ApprovedBy));
+                d.CreatedAt, d.UpdatedAt, d.ApprovedAt, d.ApprovedBy, d.GroupId));
         }
         return result;
     }
@@ -136,7 +143,7 @@ public class BrdUploadService(GNexDbContext db, ILlmProvider llm, ILogger<BrdUpl
             d.Id, d.ProjectId, d.Project?.Name ?? d.ProjectId,
             d.Title, d.Description, d.BrdType, BrdTypeTemplates.DisplayName(d.BrdType),
             d.Instructions, d.Status, sectionCount,
-            d.CreatedAt, d.UpdatedAt, d.ApprovedAt, d.ApprovedBy);
+            d.CreatedAt, d.UpdatedAt, d.ApprovedAt, d.ApprovedBy, d.GroupId);
     }
 
     public async Task<bool> UpdateBrdDocumentAsync(string brdId, UpdateBrdDocumentRequest request, CancellationToken ct = default)
@@ -147,6 +154,7 @@ public class BrdUploadService(GNexDbContext db, ILlmProvider llm, ILogger<BrdUpl
         if (request.Title is not null) doc.Title = request.Title;
         if (request.Description is not null) doc.Description = request.Description;
         if (request.Instructions is not null) doc.Instructions = request.Instructions;
+        if (request.ProjectId is not null) doc.ProjectId = request.ProjectId;
         doc.UpdatedAt = DateTimeOffset.UtcNow;
 
         await db.SaveChangesAsync(ct);
@@ -168,6 +176,21 @@ public class BrdUploadService(GNexDbContext db, ILlmProvider llm, ILogger<BrdUpl
 
         logger.LogInformation("Deleted BRD document {BrdId} with {Sections} sections", brdId, sections.Count);
         return true;
+    }
+
+    public async Task<List<BrdDocumentDto>> GetGroupSiblingsAsync(string brdId, CancellationToken ct = default)
+    {
+        var doc = await db.BrdDocuments.FirstOrDefaultAsync(d => d.Id == brdId && d.IsActive, ct);
+        if (doc is null || string.IsNullOrEmpty(doc.GroupId))
+            return [];
+
+        return await db.BrdDocuments
+            .Include(d => d.Project)
+            .Include(d => d.Sections)
+            .Where(d => d.GroupId == doc.GroupId && d.IsActive)
+            .OrderBy(d => d.CreatedAt)
+            .Select(d => MapToDto(d, d.Project!.Name))
+            .ToListAsync(ct);
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -422,6 +445,6 @@ public class BrdUploadService(GNexDbContext db, ILlmProvider llm, ILogger<BrdUpl
             d.Id, d.ProjectId, projectName, d.Title, d.Description,
             d.BrdType, BrdTypeTemplates.DisplayName(d.BrdType),
             d.Instructions, d.Status, sectionCount,
-            d.CreatedAt, d.UpdatedAt, d.ApprovedAt, d.ApprovedBy);
+            d.CreatedAt, d.UpdatedAt, d.ApprovedAt, d.ApprovedBy, d.GroupId);
     }
 }

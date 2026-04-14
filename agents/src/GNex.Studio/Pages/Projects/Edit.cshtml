@@ -1,0 +1,708 @@
+@page
+@{
+    ViewData["Title"] = "Edit Project";
+}
+
+<style>
+    .brd-check-card { cursor: pointer; transition: border-color .15s, box-shadow .15s; }
+    .brd-check-card:hover { border-color: var(--bs-primary); }
+    .brd-check-card.selected { border-color: var(--bs-primary); box-shadow: 0 0 0 .2rem rgba(13,110,253,.25); }
+    .brd-check-card .form-check-input { pointer-events: none; }
+    .tech-badge { font-size: .85rem; }
+    .tech-badge .bi-x-lg { cursor: pointer; }
+</style>
+
+<div class="container-fluid px-4">
+    <nav aria-label="breadcrumb">
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="/Projects">Projects</a></li>
+            <li class="breadcrumb-item active" id="bcName">Edit</li>
+        </ol>
+    </nav>
+
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2><i class="bi bi-pencil-square me-2"></i><span id="pageTitle">Edit Project</span></h2>
+        <div class="d-flex gap-2">
+            <a href="/Projects" class="btn btn-outline-secondary"><i class="bi bi-arrow-left me-1"></i>Back</a>
+            <button class="btn btn-primary" onclick="saveAll()"><i class="bi bi-check-lg me-1"></i>Save All Changes</button>
+        </div>
+    </div>
+
+    <!-- Tabs -->
+    <ul class="nav nav-tabs mb-4" role="tablist">
+        <li class="nav-item"><a class="nav-link active" data-bs-toggle="tab" href="#tabGeneral"><i class="bi bi-gear me-1"></i>General</a></li>
+        <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#tabBrd"><i class="bi bi-file-earmark-text me-1"></i>BRD Documents</a></li>
+        <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#tabTech"><i class="bi bi-cpu me-1"></i>Tech Stack</a></li>
+        <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#tabEnv"><i class="bi bi-hdd-network me-1"></i>Environments</a></li>
+        <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#tabDanger"><i class="bi bi-exclamation-triangle me-1"></i>Danger Zone</a></li>
+    </ul>
+
+    <div class="tab-content">
+
+        <!-- ═══ General Tab ═══ -->
+        <div class="tab-pane active" id="tabGeneral">
+            <div class="card">
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-8 mb-3">
+                            <label class="form-label fw-semibold">Project Name</label>
+                            <input class="form-control" id="fName">
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label fw-semibold">Status</label>
+                            <select class="form-select" id="fStatus">
+                                <option value="draft">Draft</option>
+                                <option value="created">Created</option>
+                                <option value="configuring">Configuring</option>
+                                <option value="generating">Generating</option>
+                                <option value="completed">Completed</option>
+                                <option value="archived">Archived</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Description</label>
+                        <textarea class="form-control" id="fDesc" rows="3"></textarea>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label fw-semibold">Project Type</label>
+                            <select class="form-select" id="fType">
+                                <option value="web_app">Web App</option>
+                                <option value="api">API</option>
+                                <option value="microservices">Microservices</option>
+                                <option value="mobile_app">Mobile App</option>
+                                <option value="library">Library</option>
+                                <option value="cli_tool">CLI Tool</option>
+                                <option value="data_pipeline">Data Pipeline</option>
+                                <option value="full_stack">Full Stack</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label fw-semibold">Repository URL</label>
+                            <input class="form-control" id="fRepo" placeholder="https://github.com/...">
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label fw-semibold">Slug</label>
+                            <input class="form-control" id="fSlug" disabled>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label fw-semibold">Created</label>
+                            <input class="form-control" id="fCreated" disabled>
+                        </div>
+                    </div>
+                    <button class="btn btn-primary" onclick="saveGeneral()"><i class="bi bi-check-lg me-1"></i>Save General</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ═══ BRD Documents Tab ═══ -->
+        <div class="tab-pane" id="tabBrd">
+            <div class="card">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <div>
+                            <h5 class="mb-1">BRD Documents</h5>
+                            <small class="text-muted">Select BRD documents to associate with this project. You can assign unlinked BRDs or reassign BRDs from other projects.</small>
+                        </div>
+                        <div class="d-flex gap-2">
+                            <span class="badge bg-primary fs-6" id="brdSelectedCount">0 selected</span>
+                            <button class="btn btn-sm btn-outline-primary" onclick="saveProjectBrds()"><i class="bi bi-check-lg me-1"></i>Save BRD Assignments</button>
+                        </div>
+                    </div>
+
+                    <!-- BRD Filter -->
+                    <div class="row mb-3">
+                        <div class="col-md-4">
+                            <input class="form-control form-control-sm" id="brdSearch" placeholder="Search BRDs..." oninput="renderBrdList()">
+                        </div>
+                        <div class="col-md-3">
+                            <select class="form-select form-select-sm" id="brdStatusFilter" onchange="renderBrdList()">
+                                <option value="">All Statuses</option>
+                                <option value="draft">Draft</option>
+                                <option value="enriched">Enriched</option>
+                                <option value="in_review">In Review</option>
+                                <option value="approved">Approved</option>
+                                <option value="rejected">Rejected</option>
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <select class="form-select form-select-sm" id="brdProjectFilter" onchange="renderBrdList()">
+                                <option value="">All Projects</option>
+                                <option value="__unlinked">Unlinked Only</option>
+                            </select>
+                        </div>
+                        <div class="col-md-2 text-end">
+                            <button class="btn btn-sm btn-outline-secondary" onclick="selectAllVisibleBrds()"><i class="bi bi-check-all me-1"></i>Select All</button>
+                        </div>
+                    </div>
+
+                    <div id="brdGrid" class="row g-2"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ═══ Tech Stack Tab ═══ -->
+        <div class="tab-pane" id="tabTech">
+            <div class="card">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <div>
+                            <h5 class="mb-1">Technology Stack</h5>
+                            <small class="text-muted">Configure the technologies used in this project.</small>
+                        </div>
+                        <button class="btn btn-primary btn-sm" onclick="openAddTechModal()"><i class="bi bi-plus-lg me-1"></i>Add Technology</button>
+                    </div>
+
+                    <!-- Current Tech Stack -->
+                    <div class="table-responsive">
+                        <table class="table table-hover align-middle">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>Layer</th>
+                                    <th>Technology</th>
+                                    <th>Type</th>
+                                    <th>Version</th>
+                                    <th style="width: 80px;"></th>
+                                </tr>
+                            </thead>
+                            <tbody id="techBody"></tbody>
+                        </table>
+                    </div>
+
+                    <!-- Quick-Add Panels -->
+                    <h6 class="mt-4 mb-3">Quick Add</h6>
+                    <div class="row g-3">
+                        <div class="col-md-3">
+                            <label class="form-label fw-semibold">Language</label>
+                            <select class="form-select form-select-sm" id="qaLang">
+                                <option value="">Select...</option>
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label fw-semibold">Framework</label>
+                            <select class="form-select form-select-sm" id="qaFramework">
+                                <option value="">Select...</option>
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label fw-semibold">Database</label>
+                            <select class="form-select form-select-sm" id="qaDb">
+                                <option value="">Select...</option>
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label fw-semibold">Cloud Provider</label>
+                            <select class="form-select form-select-sm" id="qaCloud">
+                                <option value="">Select...</option>
+                            </select>
+                        </div>
+                    </div>
+                    <button class="btn btn-outline-primary btn-sm mt-3" onclick="quickAddTech()"><i class="bi bi-plus-lg me-1"></i>Add Selected</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ═══ Environments Tab ═══ -->
+        <div class="tab-pane" id="tabEnv">
+            <div class="card">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h5 class="mb-0">Environments</h5>
+                        <button class="btn btn-primary btn-sm" onclick="addEnvironment()"><i class="bi bi-plus-lg me-1"></i>Add Environment</button>
+                    </div>
+                    <div id="envList"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ═══ Danger Zone Tab ═══ -->
+        <div class="tab-pane" id="tabDanger">
+            <div class="card border-danger">
+                <div class="card-body">
+                    <h5 class="text-danger mb-3"><i class="bi bi-exclamation-triangle me-2"></i>Danger Zone</h5>
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <div>
+                            <strong>Archive Project</strong><br>
+                            <small class="text-muted">Marks the project as archived. Can be restored later.</small>
+                        </div>
+                        <button class="btn btn-outline-warning" onclick="archiveProject()"><i class="bi bi-archive me-1"></i>Archive</button>
+                    </div>
+                    <hr>
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <strong>Delete Project</strong><br>
+                            <small class="text-muted">Permanently deletes the project and all associated data. This action cannot be undone.</small>
+                        </div>
+                        <button class="btn btn-outline-danger" onclick="deleteProject()"><i class="bi bi-trash me-1"></i>Delete</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Add Tech Modal -->
+<div class="modal fade" id="addTechModal" tabindex="-1"><div class="modal-dialog"><div class="modal-content">
+    <div class="modal-header bg-primary text-white">
+        <h5 class="modal-title"><i class="bi bi-cpu me-2"></i>Add Technology</h5>
+        <button class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+    </div>
+    <div class="modal-body">
+        <div class="mb-3">
+            <label class="form-label fw-semibold">Layer</label>
+            <select class="form-select" id="techLayer">
+                <option value="frontend">Frontend</option>
+                <option value="backend">Backend</option>
+                <option value="database">Database</option>
+                <option value="cache">Cache</option>
+                <option value="queue">Queue</option>
+                <option value="infra">Infrastructure</option>
+            </select>
+        </div>
+        <div class="mb-3">
+            <label class="form-label fw-semibold">Category</label>
+            <select class="form-select" id="techCategory" onchange="loadTechCategoryOptions()">
+                <option value="language">Language</option>
+                <option value="framework">Framework</option>
+                <option value="database">Database</option>
+                <option value="cloud">Cloud Provider</option>
+                <option value="devops">DevOps Tool</option>
+            </select>
+        </div>
+        <div class="mb-3">
+            <label class="form-label fw-semibold">Technology</label>
+            <select class="form-select" id="techSelect"></select>
+        </div>
+        <div class="mb-3">
+            <label class="form-label fw-semibold">Version (optional)</label>
+            <input class="form-control" id="techVersion" placeholder="e.g. 8.0">
+        </div>
+    </div>
+    <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button class="btn btn-primary" onclick="addTech()"><i class="bi bi-plus-lg me-1"></i>Add</button>
+    </div>
+</div></div></div>
+
+@section Scripts {
+<script>
+    const params = new URLSearchParams(window.location.search);
+    const projectId = params.get('projectId');
+
+    let project = null;
+    let allBrds = [];
+    let selectedBrdIds = new Set();
+    let allProjects = [];
+    let techLookup = { languages: [], frameworks: [], databases: [], clouds: [], devops: [] };
+
+    // ═══════════════════════════════════════════════════════
+    // INIT
+    // ═══════════════════════════════════════════════════════
+    async function load() {
+        if (!projectId) { window.location.href = '/Projects'; return; }
+
+        // Load in parallel
+        const [proj, brds, projects, langs, fws, dbs, clouds, devops] = await Promise.all([
+            apiFetch(`/api/projects/${projectId}`),
+            apiFetch('/api/brd-upload/documents'),
+            apiFetch('/api/projects'),
+            apiFetch('/api/technologies/languages'),
+            apiFetch('/api/technologies/frameworks'),
+            apiFetch('/api/technologies/databases'),
+            apiFetch('/api/technologies/cloud-providers'),
+            apiFetch('/api/technologies/devops-tools')
+        ]);
+
+        project = proj;
+        allBrds = brds || [];
+        allProjects = projects || [];
+        techLookup = { languages: langs || [], frameworks: fws || [], databases: dbs || [], clouds: clouds || [], devops: devops || [] };
+
+        // Populate General tab
+        document.getElementById('bcName').textContent = project.name;
+        document.getElementById('pageTitle').textContent = project.name;
+        document.getElementById('fName').value = project.name;
+        document.getElementById('fDesc').value = project.description || '';
+        document.getElementById('fRepo').value = project.settings?.gitRepoUrl || '';
+        document.getElementById('fStatus').value = project.status;
+        document.getElementById('fType').value = project.projectType;
+        document.getElementById('fSlug').value = project.slug;
+        document.getElementById('fCreated').value = new Date(project.createdAt).toLocaleString();
+
+        // Select BRDs already assigned to this project
+        allBrds.filter(b => b.projectId === projectId).forEach(b => selectedBrdIds.add(b.id));
+
+        // Populate BRD project filter
+        const pFilter = document.getElementById('brdProjectFilter');
+        allProjects.forEach(p => {
+            const opt = document.createElement('option');
+            opt.value = p.id;
+            opt.textContent = p.name;
+            pFilter.appendChild(opt);
+        });
+
+        // Fill tech quick-add selects
+        fillSelect('qaLang', techLookup.languages);
+        fillSelect('qaFramework', techLookup.frameworks);
+        fillSelect('qaDb', techLookup.databases);
+        fillSelect('qaCloud', techLookup.clouds);
+
+        renderAll();
+    }
+
+    function renderAll() {
+        renderBrdList();
+        renderTechStack();
+        renderEnvs();
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // HELPERS
+    // ═══════════════════════════════════════════════════════
+    async function apiFetch(url) {
+        const res = await fetch(url);
+        if (!res.ok) return null;
+        return res.json();
+    }
+
+    function esc(s) { const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML; }
+
+    function fillSelect(id, items) {
+        const el = document.getElementById(id);
+        const first = el.querySelector('option');
+        el.innerHTML = '';
+        if (first) el.appendChild(first);
+        items.forEach(i => {
+            const opt = document.createElement('option');
+            opt.value = i.id;
+            opt.textContent = `${i.name} ${i.version || ''}`.trim();
+            el.appendChild(opt);
+        });
+    }
+
+    function statusBadge(s) {
+        const map = { draft: 'secondary', enriched: 'info', in_review: 'warning', approved: 'success', rejected: 'danger' };
+        return `<span class="badge bg-${map[s] || 'secondary'}">${esc(s)}</span>`;
+    }
+
+    function brdTypeBadge(t) {
+        const map = { functional: 'primary', technical: 'info', integration: 'warning', security: 'danger', ux: 'success' };
+        return `<span class="badge bg-${map[t] || 'secondary'}">${esc(t)}</span>`;
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // GENERAL TAB
+    // ═══════════════════════════════════════════════════════
+    async function saveGeneral() {
+        const name = document.getElementById('fName').value.trim();
+        if (!name) { await msgBox.error('Project name is required.'); return; }
+
+        const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                id: projectId,
+                name: name,
+                description: document.getElementById('fDesc').value,
+                status: document.getElementById('fStatus').value
+            })
+        });
+        if (res.ok) {
+            project = await apiFetch(`/api/projects/${projectId}`);
+            document.getElementById('bcName').textContent = project.name;
+            document.getElementById('pageTitle').textContent = project.name;
+            document.getElementById('fSlug').value = project.slug;
+            await msgBox.success('General settings saved.');
+        } else {
+            await msgBox.error('Failed to save general settings.');
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // BRD DOCUMENTS TAB
+    // ═══════════════════════════════════════════════════════
+    function renderBrdList() {
+        const q = (document.getElementById('brdSearch').value || '').toLowerCase();
+        const sf = document.getElementById('brdStatusFilter').value;
+        const pf = document.getElementById('brdProjectFilter').value;
+
+        const filtered = allBrds.filter(b => {
+            if (q && !b.title.toLowerCase().includes(q) && !(b.brdType || '').toLowerCase().includes(q)) return false;
+            if (sf && b.status !== sf) return false;
+            if (pf === '__unlinked' && b.projectId) return false;
+            if (pf && pf !== '__unlinked' && b.projectId !== pf) return false;
+            return true;
+        });
+
+        const grid = document.getElementById('brdGrid');
+        grid.innerHTML = filtered.map(b => {
+            const checked = selectedBrdIds.has(b.id);
+            const ownerProject = b.projectId ? allProjects.find(p => p.id === b.projectId) : null;
+            const ownerName = ownerProject ? ownerProject.name : '';
+            const isOwnProject = b.projectId === projectId;
+
+            return `
+            <div class="col-md-6 col-lg-4">
+                <div class="card brd-check-card ${checked ? 'selected' : ''}" onclick="toggleBrd('${b.id}', this)">
+                    <div class="card-body py-2">
+                        <div class="d-flex align-items-start gap-2">
+                            <input class="form-check-input mt-1" type="checkbox" ${checked ? 'checked' : ''}>
+                            <div class="flex-grow-1">
+                                <div class="fw-semibold">${esc(b.title)}</div>
+                                <div class="d-flex gap-1 mt-1">
+                                    ${brdTypeBadge(b.brdType)}
+                                    ${statusBadge(b.status)}
+                                </div>
+                                ${ownerName && !isOwnProject ? `<small class="text-muted d-block mt-1"><i class="bi bi-folder me-1"></i>${esc(ownerName)}</small>` : ''}
+                                ${isOwnProject ? '<small class="text-success d-block mt-1"><i class="bi bi-check-circle me-1"></i>This project</small>' : ''}
+                                ${!b.projectId ? '<small class="text-warning d-block mt-1"><i class="bi bi-exclamation-circle me-1"></i>Unlinked</small>' : ''}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>`;
+        }).join('') || '<div class="col-12 text-center text-muted py-4">No BRD documents found.</div>';
+
+        document.getElementById('brdSelectedCount').textContent = `${selectedBrdIds.size} selected`;
+    }
+
+    function toggleBrd(brdId, card) {
+        if (selectedBrdIds.has(brdId)) {
+            selectedBrdIds.delete(brdId);
+            card.classList.remove('selected');
+            card.querySelector('input[type="checkbox"]').checked = false;
+        } else {
+            selectedBrdIds.add(brdId);
+            card.classList.add('selected');
+            card.querySelector('input[type="checkbox"]').checked = true;
+        }
+        document.getElementById('brdSelectedCount').textContent = `${selectedBrdIds.size} selected`;
+    }
+
+    function selectAllVisibleBrds() {
+        document.querySelectorAll('#brdGrid .brd-check-card').forEach(card => {
+            const cb = card.querySelector('input[type="checkbox"]');
+            const brdId = card.getAttribute('onclick').match(/'([^']+)'/)[1];
+            if (!selectedBrdIds.has(brdId)) {
+                selectedBrdIds.add(brdId);
+                card.classList.add('selected');
+                cb.checked = true;
+            }
+        });
+        document.getElementById('brdSelectedCount').textContent = `${selectedBrdIds.size} selected`;
+    }
+
+    async function saveProjectBrds() {
+        const ok = await msgBox.confirm(`Assign ${selectedBrdIds.size} BRD(s) to this project? BRDs not selected will be unlinked from this project.`);
+        if (!ok) return;
+
+        let errors = 0;
+        // Unlink BRDs that were removed
+        const currentBrds = allBrds.filter(b => b.projectId === projectId);
+        for (const b of currentBrds) {
+            if (!selectedBrdIds.has(b.id)) {
+                const res = await fetch(`/api/brd-upload/documents/${b.id}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ projectId: '' })
+                });
+                if (!res.ok) errors++;
+            }
+        }
+
+        // Link newly selected BRDs
+        for (const brdId of selectedBrdIds) {
+            const brd = allBrds.find(b => b.id === brdId);
+            if (brd && brd.projectId !== projectId) {
+                const res = await fetch(`/api/brd-upload/documents/${brdId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ projectId: projectId })
+                });
+                if (!res.ok) errors++;
+            }
+        }
+
+        // Refresh BRD list
+        allBrds = await apiFetch('/api/brd-upload/documents') || [];
+        selectedBrdIds.clear();
+        allBrds.filter(b => b.projectId === projectId).forEach(b => selectedBrdIds.add(b.id));
+        renderBrdList();
+
+        if (errors === 0) await msgBox.success('BRD assignments updated.');
+        else await msgBox.warning(`Saved with ${errors} error(s). Some BRDs may not have been updated.`);
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // TECH STACK TAB
+    // ═══════════════════════════════════════════════════════
+    function renderTechStack() {
+        const stacks = project.techStack || [];
+        const body = document.getElementById('techBody');
+        body.innerHTML = stacks.map(t => {
+            // Resolve name from tech lookup
+            const allTech = [...techLookup.languages, ...techLookup.frameworks, ...techLookup.databases, ...techLookup.clouds, ...techLookup.devops];
+            const found = allTech.find(x => x.id === t.technologyId);
+            const name = found ? found.name : t.technologyId;
+            return `
+            <tr>
+                <td><span class="badge bg-light text-dark">${esc(t.layer)}</span></td>
+                <td class="fw-semibold">${esc(name)}</td>
+                <td>${esc(t.technologyType)}</td>
+                <td>${esc(t.version || '-')}</td>
+                <td><button class="btn btn-sm btn-outline-danger" onclick="removeTech('${t.id}')"><i class="bi bi-trash"></i></button></td>
+            </tr>`;
+        }).join('') || '<tr><td colspan="5" class="text-muted text-center py-3">No technologies added yet. Use "Add Technology" or "Quick Add" below.</td></tr>';
+    }
+
+    function openAddTechModal() {
+        document.getElementById('techVersion').value = '';
+        loadTechCategoryOptions();
+        new bootstrap.Modal(document.getElementById('addTechModal')).show();
+    }
+
+    async function loadTechCategoryOptions() {
+        const cat = document.getElementById('techCategory').value;
+        const map = { language: 'languages', framework: 'frameworks', database: 'databases', cloud: 'clouds', devops: 'devops' };
+        const items = techLookup[map[cat]] || [];
+        const sel = document.getElementById('techSelect');
+        sel.innerHTML = items.map(i => `<option value="${i.id}">${esc(i.name)} ${i.version || ''}</option>`).join('');
+    }
+
+    async function addTech() {
+        const techId = document.getElementById('techSelect').value;
+        if (!techId) { await msgBox.error('Please select a technology.'); return; }
+
+        const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/tech-stack`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                projectId: projectId,
+                layer: document.getElementById('techLayer').value,
+                technologyId: techId,
+                technologyType: document.getElementById('techCategory').value,
+                version: document.getElementById('techVersion').value || '',
+                configOverridesJson: null
+            })
+        });
+
+        if (res.ok) {
+            bootstrap.Modal.getInstance(document.getElementById('addTechModal')).hide();
+            project = await apiFetch(`/api/projects/${projectId}`);
+            renderTechStack();
+            await msgBox.success('Technology added.');
+        } else {
+            await msgBox.error('Failed to add technology.');
+        }
+    }
+
+    async function quickAddTech() {
+        const selects = [
+            { id: 'qaLang', type: 'language', layer: 'backend' },
+            { id: 'qaFramework', type: 'framework', layer: 'backend' },
+            { id: 'qaDb', type: 'database', layer: 'database' },
+            { id: 'qaCloud', type: 'cloud', layer: 'infra' }
+        ];
+
+        let added = 0;
+        for (const s of selects) {
+            const val = document.getElementById(s.id).value;
+            if (!val) continue;
+
+            const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/tech-stack`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    projectId: projectId,
+                    layer: s.layer,
+                    technologyId: val,
+                    technologyType: s.type,
+                    version: '',
+                    configOverridesJson: null
+                })
+            });
+            if (res.ok) added++;
+        }
+
+        if (added > 0) {
+            project = await apiFetch(`/api/projects/${projectId}`);
+            renderTechStack();
+            // Reset quick-add selects
+            selects.forEach(s => document.getElementById(s.id).value = '');
+            await msgBox.success(`${added} technolog${added > 1 ? 'ies' : 'y'} added.`);
+        } else {
+            await msgBox.warning('No technologies selected to add.');
+        }
+    }
+
+    async function removeTech(techStackId) {
+        const ok = await msgBox.confirm('Remove this technology from the project?');
+        if (!ok) return;
+
+        const res = await fetch(`/api/projects/tech-stack/${encodeURIComponent(techStackId)}`, { method: 'DELETE' });
+        if (res.ok) {
+            project = await apiFetch(`/api/projects/${projectId}`);
+            renderTechStack();
+            await msgBox.success('Technology removed.');
+        } else {
+            await msgBox.error('Failed to remove technology.');
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // ENVIRONMENTS TAB
+    // ═══════════════════════════════════════════════════════
+    function renderEnvs() {
+        const envs = project.environments || [];
+        document.getElementById('envList').innerHTML = envs.map(e => `
+            <div class="card mb-2">
+                <div class="card-body py-2 d-flex justify-content-between align-items-center">
+                    <div>
+                        <strong>${esc(e.envName)}</strong>
+                        <span class="badge bg-secondary ms-2">${esc(e.envName)}</span>
+                    </div>
+                    <code class="small text-muted">${esc(e.variablesJson || '{}')}</code>
+                </div>
+            </div>
+        `).join('') || '<p class="text-muted">No environments configured.</p>';
+    }
+
+    async function addEnvironment() {
+        const name = await msgBox.prompt('Enter environment name:', 'e.g. staging, production');
+        if (!name) return;
+        await msgBox.info('Environment creation via API coming soon. Use POST /api/projects/{id}/environments.');
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // DANGER ZONE
+    // ═══════════════════════════════════════════════════════
+    async function archiveProject() {
+        const ok = await msgBox.confirm('Archive this project? It can be restored later.');
+        if (!ok) return;
+
+        const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}`, { method: 'DELETE' });
+        if (res.ok) {
+            await msgBox.success('Project archived.');
+            window.location.href = '/Projects';
+        } else {
+            await msgBox.error('Failed to archive project.');
+        }
+    }
+
+    async function deleteProject() {
+        await msgBox.warning('Permanent deletion requires admin confirmation — not yet implemented.');
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // SAVE ALL
+    // ═══════════════════════════════════════════════════════
+    async function saveAll() {
+        await saveGeneral();
+    }
+
+    load();
+</script>
+}

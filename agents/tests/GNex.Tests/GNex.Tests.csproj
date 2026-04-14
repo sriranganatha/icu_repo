@@ -29,6 +29,7 @@
     <ProjectReference Include="..\..\src\GNex.Agents\GNex.Agents.csproj" />
     <ProjectReference Include="..\..\src\Database\GNex.Database.csproj" />
     <ProjectReference Include="..\..\src\Services\GNex.Services.csproj" />
+    <ProjectReference Include="..\..\src\GNex.Studio\GNex.Studio.csproj" />
   </ItemGroup>
 
 </Project>

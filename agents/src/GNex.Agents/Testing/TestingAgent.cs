@@ -63,7 +63,7 @@ public sealed class TestingAgent : IAgent
                     await context.ReportProgress(Type, "Generating test project — xUnit, Moq, FluentAssertions, InMemory EF Core");
                 if (context.ReportProgress is not null && !string.IsNullOrWhiteSpace(guidance))
                     await context.ReportProgress(Type, $"Applying architecture/platform guidance: {guidance}");
-                artifacts.Add(GenerateTestCsproj(scopedServices));
+                artifacts.Add(GenerateTestCsproj(scopedServices, context));
             }
 
             // Domain-aware test generation context
@@ -83,6 +83,24 @@ public sealed class TestingAgent : IAgent
                 if (context.ReportProgress is not null)
                     await context.ReportProgress(Type, $"Incorporating {feedback.Count} feedback items — adjusting test generation for flagged issues");
             }
+
+            // Read upstream agent results for cross-agent awareness
+            if (context.AgentResults.TryGetValue(AgentType.CodeQuality, out var cqResult) && cqResult.Success)
+            {
+                _logger.LogInformation("TestingAgent consuming CodeQuality results — generating targeted tests for quality findings");
+                if (context.ReportProgress is not null)
+                    await context.ReportProgress(Type, $"CodeQuality findings available — generating regression tests for flagged code patterns");
+            }
+            if (context.AgentResults.TryGetValue(AgentType.Security, out var secResult) && secResult.Success)
+            {
+                _logger.LogInformation("TestingAgent consuming Security results — generating security-focused tests");
+                if (context.ReportProgress is not null)
+                    await context.ReportProgress(Type, "Security findings available — generating security regression tests");
+            }
+            if (context.AgentResults.TryGetValue(AgentType.Database, out var dbResult) && dbResult.Success)
+                _logger.LogInformation("TestingAgent consuming Database results: {Summary}", dbResult.Summary);
+            if (context.AgentResults.TryGetValue(AgentType.ServiceLayer, out var svcLayerResult) && svcLayerResult.Success)
+                _logger.LogInformation("TestingAgent consuming ServiceLayer results: {Summary}", svcLayerResult.Summary);
 
             // Read historical learnings from previous pipeline runs
             var learnings = context.GetLearningsForAgent(Type);
@@ -150,6 +168,14 @@ public sealed class TestingAgent : IAgent
             foreach (var item in context.CurrentClaimedItems)
                 context.CompleteWorkItem?.Invoke(item);
 
+            // Notify code-gen agents about test coverage gaps & findings
+            if (context.Findings.Any(f => f.Category.Contains("Test", StringComparison.OrdinalIgnoreCase)))
+            {
+                context.WriteFeedback(AgentType.ServiceLayer, Type, "Test generation found untestable service patterns — consider simplifying service method signatures for testability.");
+                context.WriteFeedback(AgentType.Database, Type, "Test generation found repository patterns difficult to test — ensure repositories use interface-based DI for mock injection.");
+            }
+            context.WriteFeedback(AgentType.Build, Type, $"Test project generated with {artifacts.Count} test files — include in build verification.");
+
             await Task.CompletedTask;
             _logger.LogInformation("TestingAgent completed — {Count} test artifacts generated", artifacts.Count);
 
@@ -209,7 +235,7 @@ public sealed class TestingAgent : IAgent
         return guidance.Count == 0 ? string.Empty : string.Join(" | ", guidance);
     }
 
-    private static CodeArtifact GenerateTestCsproj(IEnumerable<MicroserviceDefinition> services)
+    private static CodeArtifact GenerateTestCsproj(IEnumerable<MicroserviceDefinition> services, AgentContext context)
     {
         var projRefs = string.Join("\n    ",
             services.Select(s =>
@@ -225,7 +251,7 @@ public sealed class TestingAgent : IAgent
             Content = $$"""
                 <Project Sdk="Microsoft.NET.Sdk">
                   <PropertyGroup>
-                    <TargetFramework>net8.0</TargetFramework>
+                    <TargetFramework>{{context.TargetFrameworkMoniker()}}</TargetFramework>
                     <Nullable>enable</Nullable>
                     <ImplicitUsings>enable</ImplicitUsings>
                     <IsPackable>false</IsPackable>
@@ -237,7 +263,7 @@ public sealed class TestingAgent : IAgent
                     <PackageReference Include="xunit.runner.visualstudio" Version="2.5.3" />
                     <PackageReference Include="Moq" Version="4.20.70" />
                     <PackageReference Include="FluentAssertions" Version="6.12.0" />
-                    <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" Version="8.0.6" />
+                    <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" Version="{{context.EfCorePackageVersion()}}" />
                   </ItemGroup>
                   <ItemGroup>
                     <ProjectReference Include="..\GNex.SharedKernel\GNex.SharedKernel.csproj" />

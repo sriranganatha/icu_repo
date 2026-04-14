@@ -8,6 +8,7 @@
     <div class="d-flex justify-content-between align-items-center mb-4">
         <h2><i class="bi bi-rocket-takeoff me-2"></i>Delivery Dashboard</h2>
         <div>
+            <button class="btn btn-outline-danger me-1" onclick="resetProject()"><i class="bi bi-arrow-counterclockwise me-1"></i>Reset Project</button>
             <button class="btn btn-outline-info me-1" onclick="exportDelivery()"><i class="bi bi-download me-1"></i>Export</button>
             <button class="btn btn-primary" onclick="triggerPipeline()"><i class="bi bi-play-fill me-1"></i>Run Pipeline</button>
         </div>
@@ -101,6 +102,22 @@
         renderTimeline();
         renderReleaseNotes();
         renderEnvironments();
+
+        // Check if pipeline is active and sync button state
+        try {
+            const sr = await fetch('/api/pipeline/status');
+            const sd = await sr.json();
+            if (sd.status === 'active') {
+                const btn = document.querySelector('button[onclick="triggerPipeline()"]');
+                if (btn) {
+                    btn.disabled = true;
+                    btn.innerHTML = '<i class="bi bi-check-circle me-1"></i>Pipeline Running';
+                    btn.classList.replace('btn-primary', 'btn-success');
+                }
+                pollPipelineStatus();
+            }
+            renderPipelineFromStatus(sd);
+        } catch (_) {}
     }
 
     function renderPipeline() {
@@ -176,9 +193,136 @@
         `).join('') || '<tr><td colspan="5" class="text-center text-muted">No environments configured</td></tr>';
     }
 
-    function triggerPipeline() { alert('Pipeline execution will be triggered via the Orchestrator.'); }
+    async function triggerPipeline() {
+        if (!projectId) { alert('No project selected.'); return; }
+        if (!confirm(`Run the full pipeline for "${project?.name || projectId}"?`)) return;
+
+        // Load saved pipeline config (same format as Index.cshtml persists)
+        let cfg = {};
+        try {
+            const r = await fetch('/api/pipeline/config');
+            if (r.ok) cfg = await r.json();
+        } catch (_) {}
+
+        // Validate required paths — prompt user if config not set
+        const reqsPath = cfg.inputReqsPath || '';
+        const outputPath = cfg.inputOutputPath || '';
+        if (!outputPath) {
+            alert('Pipeline configuration is not set. Please go to the main Dashboard and configure Requirements Path & Output Path first, then save the config.');
+            return;
+        }
+
+        const body = {
+            projectId: projectId,
+            requirementsPath: reqsPath,
+            outputPath: outputPath,
+            solutionNamespace: cfg.inputNamespace || 'GNex',
+            dockerContainerName: cfg.inputContainerName || 'GNex-postgres',
+            dbHost: cfg.inputDbHost || 'localhost',
+            dbPort: parseInt(cfg.inputDbPort) || 5418,
+            dbUser: cfg.inputDbUser || 'gnex_admin',
+            dbName: cfg.inputDbName || 'gnex_db',
+            dbPassword: cfg.inputDbPassword || 'GNex@1234',
+            spinUpDocker: cfg.chkSpinDocker ?? true,
+            executeDdl: cfg.chkExecDdl ?? true,
+            orchestratorInstructions: '',
+            enableAgentCommunicationLogging: cfg.chkCommLog ?? true,
+            resetInMemoryContextBeforeRun: false,
+            clearGeneratedUserRequirementFilesBeforeRun: false
+        };
+
+        const btn = event.target.closest('button');
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Starting...';
+
+        try {
+            const res = await fetch('/api/pipeline/run', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+            const data = await res.json();
+            if (res.ok) {
+                btn.innerHTML = '<i class="bi bi-check-circle me-1"></i>Pipeline Running';
+                btn.classList.replace('btn-primary', 'btn-success');
+                pollPipelineStatus();
+            } else if (res.status === 409) {
+                alert('A pipeline is already running. Stop it first or wait for completion.');
+                btn.disabled = false;
+                btn.innerHTML = '<i class="bi bi-play-fill me-1"></i>Run Pipeline';
+            } else {
+                alert('Failed to start pipeline: ' + (data.error || res.statusText));
+                btn.disabled = false;
+                btn.innerHTML = '<i class="bi bi-play-fill me-1"></i>Run Pipeline';
+            }
+        } catch (e) {
+            alert('Request failed: ' + e.message);
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-play-fill me-1"></i>Run Pipeline';
+        }
+    }
+
+    function pollPipelineStatus() {
+        const iv = setInterval(async () => {
+            try {
+                const r = await fetch('/api/pipeline/status');
+                const d = await r.json();
+                renderPipelineFromStatus(d);
+                if (d.completed || d.status === 'no_run' || d.status === 'restored') {
+                    clearInterval(iv);
+                    const btn = document.querySelector('button[onclick="triggerPipeline()"]');
+                    if (btn) {
+                        btn.disabled = false;
+                        btn.className = 'btn btn-primary';
+                        btn.innerHTML = '<i class="bi bi-play-fill me-1"></i>Run Pipeline';
+                    }
+                }
+            } catch (_) {}
+        }, 3000);
+    }
+
+    function renderPipelineFromStatus(d) {
+        const statuses = d.agentStatuses || {};
+        const msgs = d.agentMessages || {};
+        // Update stage badges based on agent statuses
+        const stageEl = document.getElementById('pipelineStages');
+        if (!stageEl || !stageEl.children.length) return;
+        for (const child of stageEl.children) {
+            const name = child.dataset?.stage;
+            if (!name) continue;
+            const agents = (child.dataset?.agents || '').split(',').filter(Boolean);
+            const allDone = agents.length > 0 && agents.every(a => statuses[a] === 'Completed');
+            const anyRunning = agents.some(a => statuses[a] === 'Running');
+            const anyFailed = agents.some(a => statuses[a] === 'Failed');
+            child.className = child.className.replace(/bg-\w+/g, '');
+            if (allDone) child.classList.add('bg-success');
+            else if (anyFailed) child.classList.add('bg-danger');
+            else if (anyRunning) child.classList.add('bg-primary');
+            else child.classList.add('bg-secondary');
+        }
+    }
     function exportDelivery() { alert('Export will generate a delivery report PDF.'); }
     function generateReleaseNotes() { alert('Release notes generation will be handled by the Documentation Agent.'); }
+
+    async function resetProject() {
+        if (!confirm('Reset this project? This will clear ALL pipeline state, artifacts, findings, and backlog items. This cannot be undone.')) return;
+        try {
+            const res = await fetch('/api/pipeline/reset', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ deleteGeneratedCode: false })
+            });
+            if (res.ok) {
+                alert('Project pipeline state has been reset. You can now start a fresh run.');
+                location.reload();
+            } else {
+                const data = await res.json().catch(() => ({}));
+                alert('Reset failed: ' + (data.error || res.statusText));
+            }
+        } catch (e) {
+            alert('Reset request failed: ' + e.message);
+        }
+    }
     function esc(s) { const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML; }
 
     load();

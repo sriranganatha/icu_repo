@@ -40,7 +40,7 @@ public sealed class GeminiLlmProvider : ILlmProvider, IDisposable
         _available = !string.IsNullOrEmpty(_apiKey);
 
         if (!_available)
-            _logger.LogWarning("Gemini LLM provider not configured (no Llm:ApiKey). Agents will use template fallback.");
+            _logger.LogWarning("Gemini LLM provider not configured (no Llm:GeminiApiKey). LLM calls will fail.");
     }
 
     public async Task<LlmResponse> GenerateAsync(LlmPrompt prompt, CancellationToken ct = default)
@@ -114,14 +114,17 @@ public sealed class GeminiLlmProvider : ILlmProvider, IDisposable
             var promptTokens = result?.UsageMetadata?.PromptTokenCount ?? 0;
             var completionTokens = result?.UsageMetadata?.CandidatesTokenCount ?? 0;
 
-            _logger.LogInformation("Gemini [{Agent}] → {Model} — {PromptTok}+{CompTok} tokens, {Ms}ms",
+            var success = !string.IsNullOrWhiteSpace(content);
+
+            _logger.LogInformation("Gemini [{Agent}] → {Model} — {PromptTok}+{CompTok} tokens, {Ms}ms, success={Success}",
                 prompt.RequestingAgent, _model,
-                promptTokens, completionTokens, sw.ElapsedMilliseconds);
+                promptTokens, completionTokens, sw.ElapsedMilliseconds, success);
 
             return new LlmResponse
             {
-                Success = true,
+                Success = success,
                 Content = content,
+                Error = success ? null : "Gemini returned empty content",
                 Model = _model,
                 PromptTokens = promptTokens,
                 CompletionTokens = completionTokens,

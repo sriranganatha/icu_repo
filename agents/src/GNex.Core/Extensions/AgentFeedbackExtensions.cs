@@ -19,6 +19,20 @@ public static class AgentFeedbackExtensions
     {
         var bag = context.AgentFeedback.GetOrAdd(targetAgent, _ => new ConcurrentBag<string>());
         bag.Add($"[{fromAgent}] {message}");
+
+        if (context.PipelineConfig?.EnableAgentCommunicationLogging == true)
+        {
+            context.CommunicationLog.Add(new AgentCommunicationEntry
+            {
+                RunId = context.RunId,
+                ProjectId = context.ProjectId,
+                CommType = AgentCommType.WriteFeedback,
+                FromAgent = fromAgent,
+                ToAgent = targetAgent,
+                Message = message.Length > 500 ? message[..500] : message,
+                ItemCount = 1
+            });
+        }
     }
 
     /// <summary>
@@ -27,9 +41,25 @@ public static class AgentFeedbackExtensions
     /// </summary>
     public static List<string> ReadFeedback(this AgentContext context, AgentType forAgent)
     {
-        return context.AgentFeedback.TryGetValue(forAgent, out var bag)
+        var items = context.AgentFeedback.TryGetValue(forAgent, out var bag)
             ? bag.ToList()
             : [];
+
+        if (context.PipelineConfig?.EnableAgentCommunicationLogging == true && items.Count > 0)
+        {
+            context.CommunicationLog.Add(new AgentCommunicationEntry
+            {
+                RunId = context.RunId,
+                ProjectId = context.ProjectId,
+                CommType = AgentCommType.ReadFeedback,
+                FromAgent = forAgent,
+                ToAgent = null,
+                Message = $"Read {items.Count} feedback items",
+                ItemCount = items.Count
+            });
+        }
+
+        return items;
     }
 
     /// <summary>
@@ -62,13 +92,29 @@ public static class AgentFeedbackExtensions
     /// </summary>
     public static void DispatchFindingsAsFeedback(this AgentContext context, AgentType fromAgent, IEnumerable<ReviewFinding> findings)
     {
+        var dispatchedCount = 0;
         foreach (var finding in findings.Where(f => f.Severity >= ReviewSeverity.Warning))
         {
             var targets = MapFindingToTargetAgents(finding.Category);
             foreach (var target in targets)
             {
                 context.WriteFeedback(target, fromAgent, $"[{finding.Category}] {finding.Message}");
+                dispatchedCount++;
             }
+        }
+
+        if (context.PipelineConfig?.EnableAgentCommunicationLogging == true && dispatchedCount > 0)
+        {
+            context.CommunicationLog.Add(new AgentCommunicationEntry
+            {
+                RunId = context.RunId,
+                ProjectId = context.ProjectId,
+                CommType = AgentCommType.DispatchFindings,
+                FromAgent = fromAgent,
+                ToAgent = null,
+                Message = $"Dispatched {dispatchedCount} finding-feedback messages",
+                ItemCount = dispatchedCount
+            });
         }
     }
 
@@ -96,7 +142,12 @@ public static class AgentFeedbackExtensions
     {
         var sections = new List<string>();
 
-        // 1. Agent-specific custom system prompt from DomainProfile
+        // 1. Project tech stack
+        var techStackSummary = context.BuildTechStackSummary();
+        if (!string.IsNullOrWhiteSpace(techStackSummary))
+            sections.Add(techStackSummary);
+
+        // 2. Agent-specific custom system prompt from DomainProfile
         var profile = context.DomainProfile;
         if (profile?.AgentPrompts.TryGetValue(forAgent.ToString(), out var agentPrompt) == true
             && !string.IsNullOrWhiteSpace(agentPrompt))
@@ -104,7 +155,7 @@ public static class AgentFeedbackExtensions
             sections.Add($"## Domain-Specific Instructions for {forAgent}\n{agentPrompt}");
         }
 
-        // 2. Domain context
+        // 3. Domain context (cont.)
         if (profile is not null)
         {
             var domainLines = new List<string>();
@@ -135,7 +186,7 @@ public static class AgentFeedbackExtensions
                 sections.Add($"## Domain Profile\n{string.Join("\n", domainLines)}");
         }
 
-        // 3. Feedback from previous iterations
+        // 4. Feedback from previous iterations
         var feedback = context.ReadFeedback(forAgent);
         if (feedback.Count > 0)
         {
@@ -143,7 +194,7 @@ public static class AgentFeedbackExtensions
             sections.Add($"## Feedback from Previous Iterations ({selected.Count}/{feedback.Count} items)\n{string.Join("\n", selected.Select(f => $"- {f}"))}");
         }
 
-        // 4. Quality metrics from previous iterations
+        // 5. Quality metrics from previous iterations
         var metrics = context.QualityMetrics.ToList();
         if (metrics.Count > 0)
         {
@@ -160,7 +211,7 @@ public static class AgentFeedbackExtensions
             sections.Add($"## Quality Metrics\n{metricsBlock}");
         }
 
-        // 5. Relevant agent results (cross-agent awareness)
+        // 6. Relevant agent results (cross-agent awareness)
         var results = context.AgentResults.ToList();
         if (results.Count > 0)
         {

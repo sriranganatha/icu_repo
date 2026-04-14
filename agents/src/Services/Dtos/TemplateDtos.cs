@@ -128,17 +128,17 @@ public sealed record BrdDocumentDto(
     string Id, string ProjectId, string ProjectName, string Title, string Description,
     string BrdType, string BrdTypeDisplay, string Instructions, string Status,
     int SectionCount, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt,
-    DateTimeOffset? ApprovedAt, string? ApprovedBy);
+    DateTimeOffset? ApprovedAt, string? ApprovedBy, string? GroupId);
 
 public sealed record CreateBrdDocumentRequest(
     string ProjectId, string Title, string? Description, List<string> BrdTypes, string? Instructions);
 
 public sealed record UpdateBrdDocumentRequest(
-    string? Title, string? Description, string? Instructions);
+    string? Title, string? Description, string? Instructions, string? ProjectId = null);
 
 public sealed record UpdateSectionRequest(string Content);
 
 public sealed record BrdDocumentCreateResult(
-    string ProjectId, int BrdsCreated, List<BrdDocumentDto> Documents);
+    string ProjectId, int BrdsCreated, string? GroupId, List<BrdDocumentDto> Documents);
 
 public sealed record WorkflowActionRequest(string Reviewer, string? Comment, string? Reason, string? Feedback);

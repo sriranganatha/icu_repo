@@ -2,6 +2,7 @@ using FluentAssertions;
 using GNex.Database;
 using GNex.Database.Entities.Platform.Projects;
 using GNex.Database.Entities.Platform.Technology;
+using GNex.Services.Dtos.Platform;
 using GNex.Services.Platform;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -66,11 +67,11 @@ public class BrdUploadServiceTests : IDisposable
     // ── Single File Upload ──────────────────────────────────
 
     [Fact]
-    public async Task SingleUpload_NoTemplate_ReturnsRawOnly()
+    public async Task SingleUpload_NoTemplate_ReturnsStored()
     {
         var result = await _svc.UploadAndGenerateDraftAsync(_projectId, "req.txt", "some content");
 
-        result.Status.Should().Be("raw_only");
+        result.Status.Should().Be("stored");
         result.SectionsCreated.Should().Be(0);
         result.ProjectId.Should().Be(_projectId);
         result.RawRequirementId.Should().NotBeNullOrEmpty();
@@ -82,28 +83,23 @@ public class BrdUploadServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task SingleUpload_WithDefaultTemplate_CreatesSections()
+    public async Task SingleUpload_WithDefaultTemplate_StoresRawOnly()
     {
         SeedTemplate(sectionCount: 4);
 
         var result = await _svc.UploadAndGenerateDraftAsync(_projectId, "req.txt", "my requirements");
 
-        result.Status.Should().Be("draft");
-        result.SectionsCreated.Should().Be(4);
+        // Legacy upload now only stores raw requirement; sections come from CreateBrdDocumentsAsync
+        result.Status.Should().Be("stored");
+        result.SectionsCreated.Should().Be(0);
+        result.RawRequirementId.Should().NotBeNullOrEmpty();
 
-        var sections = await _db.BrdSectionRecords.Where(s => s.BrdId == _projectId).ToListAsync();
-        sections.Should().HaveCount(4);
-        sections.Should().AllSatisfy(s =>
-        {
-            s.Content.Should().Contain("[DRAFT]");
-            s.Content.Should().Contain("req.txt");
-            s.DiagramsJson.Should().Be("[]");
-        });
-        sections.Select(s => s.Order).Should().BeInAscendingOrder();
+        var rawCount = await _db.RawRequirements.CountAsync();
+        rawCount.Should().Be(1);
     }
 
     [Fact]
-    public async Task SingleUpload_WithSpecificTemplate_UsesIt()
+    public async Task SingleUpload_WithSpecificTemplate_StoresRawOnly()
     {
         var templateId = Guid.NewGuid().ToString("N");
         SeedTemplate(id: templateId, isDefault: false, sectionCount: 2);
@@ -111,25 +107,20 @@ public class BrdUploadServiceTests : IDisposable
         var result = await _svc.UploadAndGenerateDraftAsync(
             _projectId, "spec.md", "spec content", templateId: templateId);
 
-        result.Status.Should().Be("draft");
-        result.SectionsCreated.Should().Be(2);
+        result.Status.Should().Be("stored");
+        result.SectionsCreated.Should().Be(0);
     }
 
     [Fact]
-    public async Task SingleUpload_SecondFile_DoesNotDuplicateSections()
+    public async Task SingleUpload_SecondFile_StoresBothRawRequirements()
     {
         SeedTemplate(sectionCount: 3);
 
         var first = await _svc.UploadAndGenerateDraftAsync(_projectId, "file1.txt", "content 1");
-        first.Status.Should().Be("draft");
-        first.SectionsCreated.Should().Be(3);
+        first.Status.Should().Be("stored");
 
         var second = await _svc.UploadAndGenerateDraftAsync(_projectId, "file2.txt", "content 2");
-        second.Status.Should().Be("appended");
-        second.SectionsCreated.Should().Be(0);
-
-        var sections = await _db.BrdSectionRecords.Where(s => s.BrdId == _projectId).ToListAsync();
-        sections.Should().HaveCount(3, "sections should NOT be duplicated on second upload");
+        second.Status.Should().Be("stored");
 
         var rawCount = await _db.RawRequirements.CountAsync();
         rawCount.Should().Be(2, "both raw requirements should be stored");
@@ -152,14 +143,14 @@ public class BrdUploadServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task SingleUpload_InvalidTemplateId_FallsBackToRawOnly()
+    public async Task SingleUpload_InvalidTemplateId_StoresRawOnly()
     {
         SeedTemplate(); // seeds a default template
 
         var result = await _svc.UploadAndGenerateDraftAsync(
             _projectId, "req.txt", "content", templateId: "nonexistent-id");
 
-        result.Status.Should().Be("raw_only");
+        result.Status.Should().Be("stored");
         result.SectionsCreated.Should().Be(0);
 
         var rawCount = await _db.RawRequirements.CountAsync();
@@ -180,7 +171,7 @@ public class BrdUploadServiceTests : IDisposable
 
         var result = await _svc.UploadBatchAndGenerateDraftAsync(_projectId, files);
 
-        result.Status.Should().Be("raw_only");
+        result.Status.Should().Be("stored");
         result.FilesProcessed.Should().Be(3);
         result.TotalSectionsCreated.Should().Be(0);
         result.FileResults.Should().HaveCount(3);
@@ -190,7 +181,7 @@ public class BrdUploadServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task BatchUpload_WithTemplate_CreatesExactlyOneSectionSet()
+    public async Task BatchUpload_WithTemplate_StoresRawOnly()
     {
         SeedTemplate(sectionCount: 5);
 
@@ -203,17 +194,17 @@ public class BrdUploadServiceTests : IDisposable
 
         var result = await _svc.UploadBatchAndGenerateDraftAsync(_projectId, files);
 
-        result.Status.Should().Be("draft");
+        // Legacy batch upload stores raw requirements only
+        result.Status.Should().Be("stored");
         result.FilesProcessed.Should().Be(3);
-        result.TotalSectionsCreated.Should().Be(5, "exactly one set of template sections");
+        result.TotalSectionsCreated.Should().Be(0);
 
-        var sections = await _db.BrdSectionRecords.Where(s => s.BrdId == _projectId).ToListAsync();
-        sections.Should().HaveCount(5, "must NOT multiply by file count");
-        sections.Select(s => s.SectionType).Should().OnlyHaveUniqueItems();
+        var rawCount = await _db.RawRequirements.CountAsync();
+        rawCount.Should().Be(3);
     }
 
     [Fact]
-    public async Task BatchUpload_SectionContentReferencesAllFiles()
+    public async Task BatchUpload_SectionContentDoesNotCreateSections()
     {
         SeedTemplate(sectionCount: 2);
 
@@ -225,17 +216,13 @@ public class BrdUploadServiceTests : IDisposable
 
         var result = await _svc.UploadBatchAndGenerateDraftAsync(_projectId, files);
 
-        var sections = await _db.BrdSectionRecords.Where(s => s.BrdId == _projectId).ToListAsync();
-        sections.Should().AllSatisfy(s =>
-        {
-            s.Content.Should().Contain("alpha.txt");
-            s.Content.Should().Contain("beta.md");
-            s.Content.Should().Contain("2 file(s)");
-        });
+        // Legacy batch no longer creates sections
+        result.TotalSectionsCreated.Should().Be(0);
+        result.FileResults.Should().HaveCount(2);
     }
 
     [Fact]
-    public async Task BatchUpload_ReplacesExistingSections()
+    public async Task BatchUpload_SecondBatch_StoresAdditionalRawRequirements()
     {
         SeedTemplate(sectionCount: 3);
 
@@ -243,27 +230,18 @@ public class BrdUploadServiceTests : IDisposable
         var files1 = new List<(string, string)> { ("v1.txt", "version 1") };
         await _svc.UploadBatchAndGenerateDraftAsync(_projectId, files1);
 
-        var sectionsBefore = await _db.BrdSectionRecords.Where(s => s.BrdId == _projectId).ToListAsync();
-        sectionsBefore.Should().HaveCount(3);
-        var oldIds = sectionsBefore.Select(s => s.Id).ToHashSet();
-
-        // Second batch — should replace, not append
+        // Second batch
         var files2 = new List<(string, string)>
         {
             ("v2a.txt", "version 2a"),
             ("v2b.txt", "version 2b")
         };
-        await _svc.UploadBatchAndGenerateDraftAsync(_projectId, files2);
+        var result = await _svc.UploadBatchAndGenerateDraftAsync(_projectId, files2);
 
-        var sectionsAfter = await _db.BrdSectionRecords.Where(s => s.BrdId == _projectId).ToListAsync();
-        sectionsAfter.Should().HaveCount(3, "same template section count, not 6");
-        sectionsAfter.Select(s => s.Id).Should().NotIntersectWith(oldIds, "old sections should be removed");
-        sectionsAfter.Should().AllSatisfy(s =>
-        {
-            s.Content.Should().Contain("v2a.txt");
-            s.Content.Should().Contain("v2b.txt");
-            s.Content.Should().NotContain("v1.txt");
-        });
+        result.FilesProcessed.Should().Be(2);
+
+        var rawCount = await _db.RawRequirements.CountAsync();
+        rawCount.Should().Be(3, "all three raw requirements should be stored across batches");
     }
 
     [Fact]
@@ -304,7 +282,7 @@ public class BrdUploadServiceTests : IDisposable
         result.FileResults.Should().AllSatisfy(fr =>
         {
             fr.RawRequirementId.Should().NotBeNullOrEmpty();
-            fr.Status.Should().Be("draft");
+            fr.Status.Should().Be("stored");
         });
         result.FileResults.Select(fr => fr.FileName).Should()
             .BeEquivalentTo(["spec.md", "req.txt"]);
@@ -324,7 +302,7 @@ public class BrdUploadServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task BatchUpload_WithSpecificTemplate_UsesIt()
+    public async Task BatchUpload_WithSpecificTemplate_StoresRawOnly()
     {
         var templateId = Guid.NewGuid().ToString("N");
         SeedTemplate(id: templateId, isDefault: false, sectionCount: 7);
@@ -334,7 +312,9 @@ public class BrdUploadServiceTests : IDisposable
         var result = await _svc.UploadBatchAndGenerateDraftAsync(
             _projectId, files, templateId: templateId);
 
-        result.TotalSectionsCreated.Should().Be(7);
+        // Legacy batch no longer creates sections from template
+        result.TotalSectionsCreated.Should().Be(0);
+        result.FilesProcessed.Should().Be(1);
     }
 
     // ── GetBrdSectionsAsync ─────────────────────────────────
@@ -342,17 +322,19 @@ public class BrdUploadServiceTests : IDisposable
     [Fact]
     public async Task GetSections_ReturnsOrderedActiveSections()
     {
-        SeedTemplate(sectionCount: 4);
-        await _svc.UploadAndGenerateDraftAsync(_projectId, "f.txt", "content");
+        // Use the multi-BRD flow to create a document with sections
+        var createResult = await _svc.CreateBrdDocumentsAsync(new CreateBrdDocumentRequest(
+            _projectId, "Test BRD", null, ["general"], null));
+        var brdId = createResult.Documents.First().Id;
 
-        var sections = await _svc.GetBrdSectionsAsync(_projectId);
+        var sections = await _svc.GetBrdSectionsAsync(brdId);
 
-        sections.Should().HaveCount(4);
+        sections.Should().NotBeEmpty();
         sections.Select(s => s.Order).Should().BeInAscendingOrder();
         sections.Should().AllSatisfy(s =>
         {
             s.Id.Should().NotBeNullOrEmpty();
-            s.SectionType.Should().StartWith("section_");
+            s.SectionType.Should().NotBeNullOrEmpty();
             s.Content.Should().Contain("[DRAFT]");
         });
     }
@@ -360,16 +342,21 @@ public class BrdUploadServiceTests : IDisposable
     [Fact]
     public async Task GetSections_ExcludesInactiveSections()
     {
-        SeedTemplate(sectionCount: 2);
-        await _svc.UploadAndGenerateDraftAsync(_projectId, "f.txt", "content");
+        var createResult = await _svc.CreateBrdDocumentsAsync(new CreateBrdDocumentRequest(
+            _projectId, "Test BRD", null, ["general"], null));
+        var brdId = createResult.Documents.First().Id;
+
+        var allSections = await _svc.GetBrdSectionsAsync(brdId);
+        allSections.Should().NotBeEmpty();
+        var originalCount = allSections.Count;
 
         // Soft-delete one section
-        var first = await _db.BrdSectionRecords.FirstAsync();
+        var first = await _db.BrdSectionRecords.FirstAsync(s => s.BrdId == brdId);
         first.IsActive = false;
         await _db.SaveChangesAsync();
 
-        var sections = await _svc.GetBrdSectionsAsync(_projectId);
-        sections.Should().HaveCount(1);
+        var sections = await _svc.GetBrdSectionsAsync(brdId);
+        sections.Should().HaveCount(originalCount - 1);
     }
 
     [Fact]
@@ -382,8 +369,6 @@ public class BrdUploadServiceTests : IDisposable
     [Fact]
     public async Task GetSections_DifferentProject_ReturnsOnlyMatchingSections()
     {
-        SeedTemplate(sectionCount: 3);
-
         var otherProjectId = Guid.NewGuid().ToString("N");
         _db.Projects.Add(new Project
         {
@@ -394,14 +379,20 @@ public class BrdUploadServiceTests : IDisposable
         });
         await _db.SaveChangesAsync();
 
-        await _svc.UploadAndGenerateDraftAsync(_projectId, "f1.txt", "content1");
-        await _svc.UploadAndGenerateDraftAsync(otherProjectId, "f2.txt", "content2");
+        // Create BRD documents for each project
+        var result1 = await _svc.CreateBrdDocumentsAsync(new CreateBrdDocumentRequest(
+            _projectId, "BRD A", null, ["general"], null));
+        var result2 = await _svc.CreateBrdDocumentsAsync(new CreateBrdDocumentRequest(
+            otherProjectId, "BRD B", null, ["general"], null));
 
-        var sections1 = await _svc.GetBrdSectionsAsync(_projectId);
-        var sections2 = await _svc.GetBrdSectionsAsync(otherProjectId);
+        var brdId1 = result1.Documents.First().Id;
+        var brdId2 = result2.Documents.First().Id;
 
-        sections1.Should().HaveCount(3);
-        sections2.Should().HaveCount(3);
+        var sections1 = await _svc.GetBrdSectionsAsync(brdId1);
+        var sections2 = await _svc.GetBrdSectionsAsync(brdId2);
+
+        sections1.Should().NotBeEmpty();
+        sections2.Should().NotBeEmpty();
         sections1.Select(s => s.Id).Should().NotIntersectWith(sections2.Select(s => s.Id));
     }
 

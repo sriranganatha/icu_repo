@@ -155,6 +155,13 @@ public sealed class RequirementAnalyzerAgent : IAgent
         // Send directive to Backlog to refresh
         if (addedCount > 0)
         {
+            // Persist gap-closing items incrementally
+            if (context.PersistWorkItems is not null)
+            {
+                try { context.PersistWorkItems(context.RunId, newStories); }
+                catch (Exception ex) { _logger.LogWarning(ex, "Incremental persist of gap-closing items failed"); }
+            }
+
             context.DirectiveQueue.Enqueue(new AgentDirective
             {
                 From = Type,

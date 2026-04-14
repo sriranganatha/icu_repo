@@ -129,38 +129,17 @@ public sealed class GapAnalysisAgent : IAgent
             });
         }
 
-        // ── Step 8: Record findings + dispatch as feedback to responsible agents ──
-        var gapFindings = new List<ReviewFinding>();
+        // ── Step 8: Record findings ──
         foreach (var gap in allGaps.Take(100))
         {
-            var finding = new ReviewFinding
+            context.Findings.Add(new ReviewFinding
             {
                 Category = "GapAnalysis",
                 Severity = gap.Severity,
                 Message = $"[{gap.Category}] {gap.Title}",
                 FilePath = gap.AffectedServices.FirstOrDefault() ?? "cross-service",
                 Suggestion = gap.Description
-            };
-            context.Findings.Add(finding);
-            gapFindings.Add(finding);
-        }
-
-        // Dispatch gap findings as targeted feedback to code-gen agents
-        context.DispatchFindingsAsFeedback(Type, gapFindings);
-
-        // Write domain-profile-enriched feedback for specific gap categories
-        if (context.DomainProfile is { } dp)
-        {
-            foreach (var gap in allGaps.Where(g => g.Category == "Integration"))
-            {
-                var patterns = dp.IntegrationPatterns?.Where(p => gap.AffectedServices.Any(s =>
-                    p.Name.Contains(s.Replace("Service", ""), StringComparison.OrdinalIgnoreCase))).ToList() ?? [];
-                if (patterns.Count > 0)
-                    context.WriteFeedback(AgentType.Integration, Type, $"Gap [{gap.Title}] — domain integration patterns: {string.Join(", ", patterns.Select(p => p.Name))}");
-            }
-
-            foreach (var gap in allGaps.Where(g => g.Category == "Entity" || g.Category == "Service"))
-                context.WriteFeedback(AgentType.Database, Type, $"Missing {gap.Category}: {gap.Title}");
+            });
         }
 
         // ── Step 9: Generate gap analysis report artifact ──
@@ -406,19 +385,16 @@ public sealed class GapAnalysisAgent : IAgent
         var services = serviceArtifacts.Keys.Where(s => s != "SharedKernel" && s != "ApiGateway" && s != "Other").ToList();
 
         // Check for missing cross-service event contracts
-        // Dynamically derive expected integrations from the service dependency graph
-        var expectedIntegrations = new List<(string From, string To, string Topic)>();
-        foreach (var svc in ServiceCatalogResolver.GetServices(context))
+        var expectedIntegrations = new[]
         {
-            foreach (var dep in svc.DependsOn)
-            {
-                var target = ServiceCatalogResolver.ByName(context, dep);
-                if (target is not null)
-                {
-                    expectedIntegrations.Add((svc.Name, target.Name, $"{svc.ShortName}.events.{target.ShortName}"));
-                }
-            }
-        }
+            ("PatientService", "EncounterService", "patient.events.registered"),
+            ("EncounterService", "InpatientService", "encounter.events.admitted"),
+            ("EncounterService", "DiagnosticsService", "encounter.events.order-placed"),
+            ("DiagnosticsService", "EncounterService", "diagnostics.events.result-ready"),
+            ("InpatientService", "RevenueService", "inpatient.events.discharged"),
+            ("EmergencyService", "EncounterService", "emergency.events.triage-completed"),
+            ("RevenueService", "AuditService", "revenue.events.claim-submitted"),
+        };
 
         foreach (var (from, to, topic) in expectedIntegrations)
         {
@@ -432,7 +408,7 @@ public sealed class GapAnalysisAgent : IAgent
                 {
                     Category = "Integration",
                     Title = $"Missing event contract: {from} → {to} ({topic})",
-                    Description = $"Expected Kafka event topic '{topic}' from {from} to {to} is not implemented. This cross-service integration is needed for the end-to-end workflow.",
+                    Description = $"Expected Kafka event topic '{topic}' from {from} to {to} is not implemented. This cross-service integration is needed for the end-to-end patient workflow.",
                     Module = "Integration",
                     AffectedServices = [from, to],
                     Severity = ReviewSeverity.Error,

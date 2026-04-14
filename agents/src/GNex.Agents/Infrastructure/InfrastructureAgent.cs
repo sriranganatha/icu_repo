@@ -46,12 +46,12 @@ public sealed class InfrastructureAgent : IAgent
             foreach (var svc in services)
             {
                 ct.ThrowIfCancellationRequested();
-                artifacts.Add(GenerateDockerfile(svc, solutionNs));
+                artifacts.Add(GenerateDockerfile(svc, solutionNs, context));
             }
 
             if (context.ReportProgress is not null)
                 await context.ReportProgress(Type, "Generating docker-compose.yml — all services, PostgreSQL, Kafka, Redis, networking");
-            artifacts.Add(GenerateDockerCompose(services, solutionNs));
+            artifacts.Add(GenerateDockerCompose(services, solutionNs, context));
 
             if (context.ReportProgress is not null)
                 await context.ReportProgress(Type, "AI-generating Kubernetes manifests — Deployment, Service, HPA, PDB, NetworkPolicy");
@@ -95,7 +95,7 @@ public sealed class InfrastructureAgent : IAgent
         }
     }
 
-    private static CodeArtifact GenerateDockerfile(MicroserviceDefinition svc, string solutionNs)
+    private static CodeArtifact GenerateDockerfile(MicroserviceDefinition svc, string solutionNs, AgentContext context)
     {
         var projectDir = $"{solutionNs}.{svc.Name}";
         return new CodeArtifact
@@ -109,7 +109,7 @@ public sealed class InfrastructureAgent : IAgent
             Content = $"""
                 # Multi-stage Dockerfile for {svc.Name}
                 # Stage 1: Build
-                FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+                FROM {context.SdkDockerImage().Replace("-alpine", "")} AS build
                 WORKDIR /src
                 COPY ["{projectDir}/{projectDir}.csproj", "{projectDir}/"]
                 COPY ["{solutionNs}.SharedKernel/{solutionNs}.SharedKernel.csproj", "{solutionNs}.SharedKernel/"]
@@ -123,7 +123,7 @@ public sealed class InfrastructureAgent : IAgent
                 RUN dotnet publish -c Release -o /app/publish /p:UseAppHost=false
 
                 # Stage 3: Runtime
-                FROM mcr.microsoft.com/dotnet/aspnet:8.0-alpine AS runtime
+                FROM {context.AspNetDockerImage()} AS runtime
                 WORKDIR /app
 
                 # Security: non-root user
@@ -143,7 +143,7 @@ public sealed class InfrastructureAgent : IAgent
         };
     }
 
-    private static CodeArtifact GenerateDockerCompose(IReadOnlyList<MicroserviceDefinition> services, string solutionNs)
+    private static CodeArtifact GenerateDockerCompose(IReadOnlyList<MicroserviceDefinition> services, string solutionNs, AgentContext context)
     {
         var nsLower = solutionNs.ToLowerInvariant();
         var serviceEntries = string.Join("\n", services.Select(s =>
@@ -172,7 +172,7 @@ public sealed class InfrastructureAgent : IAgent
             "services:\n" +
             "  # ─── Infrastructure ─────────────────────────────────\n" +
             "  postgres:\n" +
-            "    image: postgres:16-alpine\n" +
+            "    image: " + context.DatabaseDockerImage() + "\n" +
             "    environment:\n" +
             $"      POSTGRES_USER: {nsLower}_admin\n" +
             "      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-gnex_dev_pw}\n" +
@@ -186,7 +186,7 @@ public sealed class InfrastructureAgent : IAgent
             "      timeout: 5s\n" +
             "      retries: 5\n\n" +
             "  kafka:\n" +
-            "    image: bitnami/kafka:3.7\n" +
+            "    image: " + context.MessagingDockerImage() + "\n" +
             "    environment:\n" +
             "      KAFKA_CFG_NODE_ID: 1\n" +
             "      KAFKA_CFG_PROCESS_ROLES: broker,controller\n" +
@@ -202,18 +202,18 @@ public sealed class InfrastructureAgent : IAgent
             "      timeout: 10s\n" +
             "      retries: 5\n\n" +
             "  redis:\n" +
-            "    image: redis:7-alpine\n" +
+            "    image: " + context.CacheDockerImage() + "\n" +
             "    ports: [\"6379:6379\"]\n" +
             "    healthcheck:\n" +
             "      test: [\"CMD\", \"redis-cli\", \"ping\"]\n" +
             "      interval: 10s\n\n" +
             "  prometheus:\n" +
-            "    image: prom/prometheus:v2.51.0\n" +
+            "    image: " + context.PrometheusDockerImage() + "\n" +
             "    volumes:\n" +
             "      - ./infrastructure/prometheus:/etc/prometheus\n" +
             "    ports: [\"9090:9090\"]\n\n" +
             "  grafana:\n" +
-            "    image: grafana/grafana:10.4.0\n" +
+            "    image: " + context.GrafanaDockerImage() + "\n" +
             "    volumes:\n" +
             "      - ./infrastructure/grafana:/etc/grafana/provisioning/dashboards\n" +
             "    ports: [\"3000:3000\"]\n" +

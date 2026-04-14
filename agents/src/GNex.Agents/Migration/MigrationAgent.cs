@@ -76,7 +76,7 @@ public sealed class MigrationAgent : IAgent
                     2. Down() method dropping all tables in reverse order
                     3. Proper use of migrationBuilder
                     
-                    Use .NET 8 / EF Core 8 syntax. Namespace: GNex.{svc}.Migrations
+                    Use {context.FrameworkLabel()} / {context.OrmLabel()} syntax. Namespace: GNex.{svc}.Migrations
                     Class name: InitialCreate
                     """;
 

@@ -85,6 +85,23 @@ public sealed class PerformanceAgent : IAgent
             context.Findings.AddRange(findings);
             context.AgentStatuses[Type] = AgentStatus.Completed;
 
+            // Dispatch performance findings as feedback to responsible code-gen agents
+            if (findings.Count > 0)
+                context.DispatchFindingsAsFeedback(Type, findings);
+
+            // Write targeted feedback to Database/ServiceLayer about specific perf issues
+            var dbFindings = findings.Where(f => f.FilePath?.Contains("Repositor", StringComparison.OrdinalIgnoreCase) == true
+                || f.Message.Contains("N+1", StringComparison.OrdinalIgnoreCase)
+                || f.Message.Contains("AsNoTracking", StringComparison.OrdinalIgnoreCase)).ToList();
+            if (dbFindings.Count > 0)
+                context.WriteFeedback(AgentType.Database, Type, $"Performance: {dbFindings.Count} DB-related issues found — {string.Join("; ", dbFindings.Take(3).Select(f => f.Message))}");
+
+            var svcFindings = findings.Where(f => f.FilePath?.Contains("Service", StringComparison.OrdinalIgnoreCase) == true
+                || f.Message.Contains("async", StringComparison.OrdinalIgnoreCase)
+                || f.Message.Contains("pagination", StringComparison.OrdinalIgnoreCase)).ToList();
+            if (svcFindings.Count > 0)
+                context.WriteFeedback(AgentType.ServiceLayer, Type, $"Performance: {svcFindings.Count} service-related issues — {string.Join("; ", svcFindings.Take(3).Select(f => f.Message))}");
+
             await Task.CompletedTask;
             _logger.LogInformation("PerformanceAgent done — {Optimized} optimizations applied, {Findings} advisory findings",
                 optimizedCount, findings.Count);

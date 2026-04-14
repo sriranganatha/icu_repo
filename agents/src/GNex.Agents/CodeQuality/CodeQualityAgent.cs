@@ -196,6 +196,15 @@ public sealed class CodeQualityAgent : IAgent
             context.Findings.AddRange(findings);
             context.AgentStatuses[Type] = AgentStatus.Completed;
 
+            // Dispatch quality findings as feedback to responsible code-gen agents
+            if (findings.Count > 0)
+                context.DispatchFindingsAsFeedback(Type, findings);
+
+            // Write targeted feedback to code-gen agents about quality issues
+            context.WriteFeedback(AgentType.Refactoring, Type, $"CodeQuality found {findings.Count} issues — {longMethods} long methods, {duplicates.Count} duplicates. Prioritize refactoring these.");
+            if (findings.Any(f => f.Category == "Naming"))
+                context.WriteFeedback(AgentType.BugFix, Type, $"CodeQuality found {namingIssues} naming convention violations — fix naming to match project conventions.");
+
             // Agent completes its own claimed work items
             foreach (var item in context.CurrentClaimedItems)
                 context.CompleteWorkItem?.Invoke(item);

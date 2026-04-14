@@ -171,7 +171,7 @@ public abstract class SelfHealingAgentBase : IAgent
             var diagPrompt = new LlmPrompt
             {
                 SystemPrompt = $"""
-                    You are a senior .NET 8 developer and DevOps engineer specializing in enterprise systems.
+                    You are a {context.SeniorRoleLabel("developer and DevOps engineer")} specializing in enterprise systems.
                     Analyze the error from the {Name} and provide:
                     1. ROOT CAUSE: One-line explanation
                     2. FIX: Specific actionable fix (code change, config change, or command)
@@ -244,11 +244,12 @@ public abstract class SelfHealingAgentBase : IAgent
     }
 
     /// <summary>Helper to call LLM with a simple prompt string.</summary>
-    protected async Task<string> AskLlmAsync(string prompt, CancellationToken ct, double temp = 0.2, int maxTokens = 4096)
+    protected async Task<string> AskLlmAsync(string prompt, CancellationToken ct, double temp = 0.2, int maxTokens = 4096, AgentContext? context = null)
     {
+        var roleLabel = context is not null ? context.ExpertRoleLabel() : "expert .NET/C# developer";
         var response = await Llm.GenerateAsync(new LlmPrompt
         {
-            SystemPrompt = $"You are an expert .NET 8/C# developer for an enterprise application. Agent: {Name}.",
+            SystemPrompt = $"You are an {roleLabel} for an enterprise application. Agent: {Name}.",
             UserPrompt = prompt,
             Temperature = temp,
             MaxTokens = maxTokens,
@@ -259,11 +260,12 @@ public abstract class SelfHealingAgentBase : IAgent
     }
 
     /// <summary>Helper to call LLM, returning empty string instead of throwing on failure.</summary>
-    protected async Task<string> TryAskLlmAsync(string prompt, CancellationToken ct, double temp = 0.2, int maxTokens = 4096)
+    protected async Task<string> TryAskLlmAsync(string prompt, CancellationToken ct, double temp = 0.2, int maxTokens = 4096, AgentContext? context = null)
     {
+        var roleLabel = context is not null ? context.ExpertRoleLabel() : "expert .NET/C# developer";
         var response = await Llm.GenerateAsync(new LlmPrompt
         {
-            SystemPrompt = $"You are an expert .NET 8/C# developer for an enterprise application. Agent: {Name}.",
+            SystemPrompt = $"You are an {roleLabel} for an enterprise application. Agent: {Name}.",
             UserPrompt = prompt,
             Temperature = temp,
             MaxTokens = maxTokens,

@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using GNex.Database.Entities.Platform;
 using GNex.Database.Entities.Platform.Technology;
 using GNex.Database.Entities.Platform.AgentRegistry;
 using GNex.Database.Entities.Platform.Standards;
@@ -109,6 +110,9 @@ public class GNexDbContext : DbContext
     // ── Platform: Agent Learnings → plt_audit ─────────────────
     public DbSet<AgentLearning> AgentLearnings => Set<AgentLearning>();
 
+    // ── Platform: Agent Communication Logs → plt_audit ─────────
+    public DbSet<AgentCommunicationLog> AgentCommunicationLogs => Set<AgentCommunicationLog>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
@@ -202,13 +206,19 @@ public class GNexDbContext : DbContext
         modelBuilder.Entity<TraceabilityRecord>().ToTable("traceability_record", "plt_audit");
         modelBuilder.Entity<ProjectMetric>().ToTable("project_metric", "plt_audit");
         modelBuilder.Entity<AgentLearning>().ToTable("agent_learning", "plt_audit");
+        modelBuilder.Entity<AgentCommunicationLog>().ToTable("agent_communication_log", "plt_audit");
 
-        // Platform tenant-scoped query filters
-        modelBuilder.Entity<Project>().HasQueryFilter(e => e.TenantId == _tenantId);
-        modelBuilder.Entity<AgentTypeDefinition>().HasQueryFilter(e => e.TenantId == _tenantId);
-        modelBuilder.Entity<Language>().HasQueryFilter(e => e.TenantId == _tenantId);
-        modelBuilder.Entity<SdlcWorkflow>().HasQueryFilter(e => e.TenantId == _tenantId);
-        modelBuilder.Entity<LlmProviderConfig>().HasQueryFilter(e => e.TenantId == _tenantId);
+        // Platform tenant-scoped query filters — apply to ALL PlatformEntityBase types
+        foreach (var entityType in modelBuilder.Model.GetEntityTypes())
+        {
+            if (typeof(PlatformEntityBase).IsAssignableFrom(entityType.ClrType))
+            {
+                var method = GetType()
+                    .GetMethod(nameof(ApplyTenantQueryFilter), System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
+                    .MakeGenericMethod(entityType.ClrType);
+                method.Invoke(this, [modelBuilder]);
+            }
+        }
 
         // ── Relationship configurations ───────────────────────
         // TaskDependency: two FKs to TaskItem
@@ -241,6 +251,11 @@ public class GNexDbContext : DbContext
         modelBuilder.Entity<Project>()
             .HasIndex(e => new { e.TenantId, e.Slug }).IsUnique();
 
+    }
+
+    private void ApplyTenantQueryFilter<T>(ModelBuilder modelBuilder) where T : PlatformEntityBase
+    {
+        modelBuilder.Entity<T>().HasQueryFilter(e => e.TenantId == _tenantId);
     }
 
     public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)

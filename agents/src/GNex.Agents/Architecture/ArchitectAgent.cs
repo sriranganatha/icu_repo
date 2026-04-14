@@ -70,17 +70,28 @@ public sealed class ArchitectAgent : IAgent
             }
             else
             {
-                _logger.LogWarning("ArchitectAgent LLM derivation returned no services — pipeline will use fallback catalog");
+                _logger.LogError("ArchitectAgent LLM derivation returned no services — marking agent as FAILED so it can be retried");
                 context.Findings.Add(new ReviewFinding
                 {
                     Id = $"ARCH-FALLBACK-{context.RunId[..8]}",
                     Category = "Architecture",
                     Severity = ReviewSeverity.Critical,
-                    Message = "LLM service derivation failed — falling back to generic catalog. " +
-                              "Generated code may not match project requirements. " +
-                              "Check LLM provider connectivity and retry.",
+                    Message = "LLM service derivation failed — no services derived. " +
+                              "All downstream agents (Database, ServiceLayer, Application) will have nothing to work on. " +
+                              "Check LLM provider connectivity and retry the pipeline.",
                     FilePath = "Architecture/ArchitectureGuidance.md"
                 });
+
+                context.AgentStatuses[Type] = AgentStatus.Failed;
+                return new AgentResult
+                {
+                    Agent = Type,
+                    Success = false,
+                    Summary = "Architecture agent failed — LLM could not derive any microservices from requirements. " +
+                              "Pipeline cannot proceed without service definitions.",
+                    Errors = ["No microservices could be derived from requirements. Check LLM provider availability."],
+                    Duration = sw.Elapsed
+                };
             }
 
             var activeServices = ServiceCatalogResolver.GetServices(context).ToList();

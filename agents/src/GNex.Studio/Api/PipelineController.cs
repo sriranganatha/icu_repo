@@ -107,7 +107,8 @@ public sealed class PipelineController : ControllerBase
             OrchestratorInstructions = request.OrchestratorInstructions ?? string.Empty,
             ServicePorts = request.ServicePorts ?? new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase) { ["Gateway"] = 5100, ["Kafka"] = 9092 },
             ProjectDomain = request.ProjectDomain ?? string.Empty,
-            ProjectDomainDescription = request.ProjectDomainDescription ?? string.Empty
+            ProjectDomainDescription = request.ProjectDomainDescription ?? string.Empty,
+            EnableAgentCommunicationLogging = request.EnableAgentCommunicationLogging
         };
 
         CancellationTokenSource runCts;
@@ -137,15 +138,247 @@ public sealed class PipelineController : ControllerBase
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(lifetimeCt, runCts.Token);
             var appCt = linked.Token;
             var sw = Stopwatch.StartNew();
-            stateStore.Reset(Guid.NewGuid().ToString("N")[..8]);
+
+            // ── Resume logic: if there is an incomplete run and the user did NOT
+            //    explicitly request a reset, preserve the snapshot so the orchestrator
+            //    can skip already-completed agents.
+            HashSet<string>? resumeCompletedAgents = null;
+            string? priorRunId = null;
+            if (stateStore.HasIncompleteRun() && !request.ResetInMemoryContextBeforeRun)
+            {
+                resumeCompletedAgents = stateStore.GetCompletedAgents();
+                priorRunId = stateStore.CurrentSnapshot?.RunId;
+            }
+            else
+            {
+                stateStore.Reset(Guid.NewGuid().ToString("N")[..8]);
+            }
+
+            // ── Resume: reload all completed agent outputs from DB ──
+            List<Requirement>? resumeRequirements = null;
+            List<ExpandedRequirement>? resumeExpanded = null;
+
+            if (resumeCompletedAgents is { Count: > 0 } && priorRunId is { Length: > 0 })
+            {
+                // Requirements (from RequirementsReader)
+                if (resumeCompletedAgents.Contains("RequirementsReader"))
+                {
+                    var rows = db.GetRequirements(priorRunId);
+                    // Fallback: if the prior run itself was a resume that never persisted,
+                    // look for requirements from the most recent run that has any.
+                    if (rows.Count == 0)
+                    {
+                        _logger.LogWarning("[Resume] No requirements found for runId {RunId}, falling back to latest available", priorRunId);
+                        rows = db.GetLatestRequirements();
+                    }
+                    if (rows.Count > 0)
+                    {
+                        resumeRequirements = rows.Select(r => new Requirement
+                        {
+                            Id = r.Id,
+                            SourceFile = r.SourceFile ?? "",
+                            Section = r.Section ?? "",
+                            HeadingLevel = r.HeadingLevel,
+                            Title = r.Title,
+                            Description = r.Description ?? "",
+                            Module = r.Module ?? "",
+                            Tags = r.Tags ?? [],
+                            AcceptanceCriteria = r.AcceptanceCriteria ?? [],
+                            DependsOn = r.DependsOn ?? []
+                        }).ToList();
+                        _logger.LogInformation("[Resume] Loaded {Count} requirements from prior run {RunId}",
+                            resumeRequirements.Count, priorRunId);
+                    }
+                }
+
+                // ExpandedRequirements / backlog items (from RequirementsExpander)
+                if (resumeCompletedAgents.Contains("RequirementsExpander"))
+                {
+                    var rows = db.GetBacklogItems(priorRunId);
+                    if (rows.Count == 0)
+                    {
+                        _logger.LogWarning("[Resume] No backlog items found for runId {RunId}, falling back to latest available", priorRunId);
+                        rows = db.GetLatestBacklogItems();
+                    }
+                    if (rows.Count > 0)
+                    {
+                        resumeExpanded = rows.Select(r => new ExpandedRequirement
+                        {
+                            Id = r.Id, ParentId = r.ParentId ?? "", SourceRequirementId = r.SourceRequirementId ?? "",
+                            ItemType = Enum.TryParse<WorkItemType>(r.ItemType, true, out var it) ? it : WorkItemType.Task,
+                            Status = Enum.TryParse<WorkItemStatus>(r.Status, true, out var ws) ? ws : WorkItemStatus.New,
+                            Title = r.Title, Description = r.Description ?? "", Module = r.Module ?? "",
+                            Priority = r.Priority, Iteration = r.Iteration,
+                            AcceptanceCriteria = r.AcceptanceCriteria ?? [], DependsOn = r.DependsOn ?? [], Tags = r.Tags ?? [],
+                            TechnicalNotes = r.TechnicalNotes ?? "", DefinitionOfDone = r.DefinitionOfDone ?? [],
+                            DetailedSpec = r.DetailedSpec ?? "",
+                            Summary = r.Summary ?? "", BusinessValue = r.BusinessValue ?? "",
+                            SuccessCriteria = r.SuccessCriteria ?? [], Scope = r.Scope ?? "",
+                            StoryPoints = r.StoryPoints, Labels = r.Labels ?? [],
+                            Actor = r.Actor ?? "", Preconditions = r.Preconditions ?? "",
+                            MainFlow = r.MainFlow ?? [], AlternativeFlows = r.AlternativeFlows ?? "",
+                            Postconditions = r.Postconditions ?? "",
+                            Severity = r.Severity ?? "", Environment = r.Environment ?? "",
+                            StepsToReproduce = r.StepsToReproduce ?? [],
+                            ExpectedResult = r.ExpectedResult ?? "", ActualResult = r.ActualResult ?? "",
+                            AffectedServices = r.AffectedServices ?? [], ProducedBy = r.ProducedBy ?? "",
+                            MatchingArtifactPaths = r.MatchingArtifactPaths ?? [], IdentifiedGaps = r.IdentifiedGaps ?? [],
+                            Coverage = Enum.TryParse<CoverageStatus>(r.Coverage, true, out var cs) ? cs : CoverageStatus.NotAssessed,
+                            CreatedAt = r.CreatedAt, StartedAt = r.StartedAt, CompletedAt = r.CompletedAt,
+                            AssignedAgent = r.AssignedAgent
+                        }).ToList();
+                        _logger.LogInformation("[Resume] Loaded {Count} backlog items from prior run {RunId}",
+                            resumeExpanded.Count, priorRunId);
+                    }
+                }
+
+                // DerivedServices (from Architect — state file first, then DB fallback)
+                if (resumeCompletedAgents.Contains("Architect"))
+                {
+                    if (stateStore.CurrentSnapshot?.DerivedServices is { Count: > 0 } savedSvcs)
+                    {
+                        pipelineConfig.ResumeDerivedServices = savedSvcs.Select(s => new MicroserviceDefinition
+                        {
+                            Name = s.Name, ShortName = s.ShortName, Schema = s.Schema,
+                            Description = s.Description, ApiPort = s.ApiPort,
+                            Entities = s.Entities.ToArray(), DependsOn = s.DependsOn.ToArray()
+                        }).ToList();
+                        _logger.LogInformation("[Resume] Loaded {Count} DerivedServices from state file",
+                            pipelineConfig.ResumeDerivedServices.Count);
+                    }
+                    else
+                    {
+                        // DB fallback — state file was empty or missing
+                        var dbServices = db.GetDerivedServices(priorRunId);
+                        if (dbServices.Count == 0) dbServices = db.GetLatestDerivedServices();
+                        if (dbServices.Count > 0)
+                        {
+                            pipelineConfig.ResumeDerivedServices = dbServices;
+                            _logger.LogInformation("[Resume] Loaded {Count} DerivedServices from DB (state file was empty)",
+                                dbServices.Count);
+                        }
+                        else
+                        {
+                            // Architect "completed" but produced 0 services — force re-run
+                            resumeCompletedAgents.Remove("Architect");
+                            _logger.LogWarning("[Resume] Architect was completed but no DerivedServices found anywhere — will re-run Architect");
+                        }
+                    }
+                }
+            }
+
+            // ── Persist resumed data under the current runId so future resumes can find it ──
+            var currentRunId = stateStore.CurrentSnapshot?.RunId ?? priorRunId;
+            if (currentRunId is { Length: > 0 })
+            {
+                if (resumeRequirements is { Count: > 0 })
+                {
+                    db.EnsureRunExists(currentRunId);
+                    db.SaveRequirements(currentRunId, resumeRequirements.Select(r => new RequirementRow
+                    {
+                        Id = r.Id, ProjectId = pipelineConfig.ProjectId, SourceFile = r.SourceFile,
+                        Section = r.Section, HeadingLevel = r.HeadingLevel, Title = r.Title,
+                        Description = r.Description, Module = r.Module,
+                        Tags = r.Tags.ToList(), AcceptanceCriteria = r.AcceptanceCriteria.ToList(),
+                        DependsOn = r.DependsOn.ToList(), CreatedAt = DateTimeOffset.UtcNow
+                    }));
+                    _logger.LogInformation("[Resume] Persisted {Count} requirements under current runId {RunId}",
+                        resumeRequirements.Count, currentRunId);
+                }
+                if (resumeExpanded is { Count: > 0 })
+                {
+                    db.EnsureRunExists(currentRunId);
+                    db.SaveBacklogItems(currentRunId, resumeExpanded.Select(e => new BacklogItemRow
+                    {
+                        Id = e.Id, ProjectId = pipelineConfig.ProjectId, ParentId = e.ParentId,
+                        SourceRequirementId = e.SourceRequirementId,
+                        ItemType = e.ItemType.ToString(), Status = e.Status.ToString(),
+                        Title = e.Title, Description = e.Description, Module = e.Module,
+                        Priority = e.Priority, Iteration = e.Iteration,
+                        AcceptanceCriteria = e.AcceptanceCriteria, DependsOn = e.DependsOn, Tags = e.Tags,
+                        TechnicalNotes = e.TechnicalNotes, DefinitionOfDone = e.DefinitionOfDone,
+                        DetailedSpec = e.DetailedSpec,
+                        Summary = e.Summary, BusinessValue = e.BusinessValue,
+                        SuccessCriteria = e.SuccessCriteria, Scope = e.Scope,
+                        StoryPoints = e.StoryPoints, Labels = e.Labels,
+                        Actor = e.Actor, Preconditions = e.Preconditions,
+                        MainFlow = e.MainFlow, AlternativeFlows = e.AlternativeFlows,
+                        Postconditions = e.Postconditions,
+                        Severity = e.Severity, Environment = e.Environment,
+                        StepsToReproduce = e.StepsToReproduce,
+                        ExpectedResult = e.ExpectedResult, ActualResult = e.ActualResult,
+                        AffectedServices = e.AffectedServices, ProducedBy = e.ProducedBy,
+                        MatchingArtifactPaths = e.MatchingArtifactPaths, IdentifiedGaps = e.IdentifiedGaps,
+                        Coverage = e.Coverage.ToString(),
+                        CreatedAt = e.CreatedAt, StartedAt = e.StartedAt, CompletedAt = e.CompletedAt,
+                        AssignedAgent = e.AssignedAgent
+                    }));
+                    _logger.LogInformation("[Resume] Persisted {Count} backlog items under current runId {RunId}",
+                        resumeExpanded.Count, currentRunId);
+                }
+                if (pipelineConfig.ResumeDerivedServices is { Count: > 0 })
+                {
+                    db.EnsureRunExists(currentRunId);
+                    db.SaveDerivedServices(currentRunId, pipelineConfig.ResumeDerivedServices);
+                    _logger.LogInformation("[Resume] Persisted {Count} DerivedServices under current runId {RunId}",
+                        pipelineConfig.ResumeDerivedServices.Count, currentRunId);
+                }
+            }
+
             AgentContext? context = null;
             try
             {
+                // Wire incremental work-item persistence so enriched data survives crashes
+                pipelineConfig.PersistWorkItems = (runId, projectId, items) =>
+                {
+                    try
+                    {
+                        db.SaveBacklogItems(runId, items.Select(e => new BacklogItemRow
+                        {
+                            Id = e.Id, ProjectId = projectId, ParentId = e.ParentId,
+                            SourceRequirementId = e.SourceRequirementId,
+                            ItemType = e.ItemType.ToString(), Status = e.Status.ToString(),
+                            Title = e.Title, Description = e.Description, Module = e.Module,
+                            Priority = e.Priority, Iteration = e.Iteration,
+                            AcceptanceCriteria = e.AcceptanceCriteria, DependsOn = e.DependsOn, Tags = e.Tags,
+                            TechnicalNotes = e.TechnicalNotes, DefinitionOfDone = e.DefinitionOfDone,
+                            DetailedSpec = e.DetailedSpec,
+                            Summary = e.Summary, BusinessValue = e.BusinessValue,
+                            SuccessCriteria = e.SuccessCriteria, Scope = e.Scope,
+                            StoryPoints = e.StoryPoints, Labels = e.Labels,
+                            Actor = e.Actor, Preconditions = e.Preconditions,
+                            MainFlow = e.MainFlow, AlternativeFlows = e.AlternativeFlows,
+                            Postconditions = e.Postconditions,
+                            Severity = e.Severity, Environment = e.Environment,
+                            StepsToReproduce = e.StepsToReproduce,
+                            ExpectedResult = e.ExpectedResult, ActualResult = e.ActualResult,
+                            AffectedServices = e.AffectedServices, ProducedBy = e.ProducedBy,
+                            MatchingArtifactPaths = e.MatchingArtifactPaths, IdentifiedGaps = e.IdentifiedGaps,
+                            Coverage = e.Coverage.ToString(),
+                            CreatedAt = e.CreatedAt, StartedAt = e.StartedAt, CompletedAt = e.CompletedAt,
+                            AssignedAgent = e.AssignedAgent
+                        }));
+                        _logger.LogInformation("Incremental persist: {Count} work items saved for run {RunId}", items.Count, runId);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Incremental work-item persist failed for run {RunId}", runId);
+                    }
+                };
+
                 // Use project-scoped pipeline when ProjectId is provided to leverage
                 // DB-backed workflow stages, agent resolution, and project isolation.
-                context = !string.IsNullOrWhiteSpace(pipelineConfig.ProjectId)
-                    ? await _orchestrator.RunProjectPipelineAsync(pipelineConfig.ProjectId, pipelineConfig, appCt)
-                    : await _orchestrator.RunPipelineAsync(pipelineConfig, appCt);
+                if (!string.IsNullOrWhiteSpace(pipelineConfig.ProjectId))
+                {
+                    pipelineConfig.ResumeCompletedAgents = resumeCompletedAgents;
+                    pipelineConfig.ResumeRequirements = resumeRequirements;
+                    pipelineConfig.ResumeExpandedRequirements = resumeExpanded;
+                    context = await _orchestrator.RunProjectPipelineAsync(pipelineConfig.ProjectId, pipelineConfig, appCt);
+                }
+                else
+                {
+                    context = await _orchestrator.RunPipelineAsync(pipelineConfig, appCt);
+                }
 
                 // ── Persist to JSON snapshot ──
                 stateStore.TrackCompletion(
@@ -196,6 +429,7 @@ public sealed class PipelineController : ControllerBase
                     ExpectedResult = e.ExpectedResult, ActualResult = e.ActualResult,
                     // Gap-analysis fields
                     AffectedServices = e.AffectedServices, ProducedBy = e.ProducedBy,
+                    MatchingArtifactPaths = e.MatchingArtifactPaths, IdentifiedGaps = e.IdentifiedGaps,
                     Coverage = e.Coverage.ToString(),
                     CreatedAt = e.CreatedAt, StartedAt = e.StartedAt, CompletedAt = e.CompletedAt,
                     AssignedAgent = e.AssignedAgent
@@ -214,6 +448,7 @@ public sealed class PipelineController : ControllerBase
                     Id = a.Id, ProjectId = context.ProjectId, Layer = a.Layer.ToString(), RelativePath = a.RelativePath,
                     FileName = a.FileName, Namespace = a.Namespace,
                     ProducedBy = a.ProducedBy.ToString(), ContentLength = a.Content.Length,
+                    Content = a.Content,
                     TracedReqIds = a.TracedRequirementIds, GeneratedAt = a.GeneratedAt
                 }));
 
@@ -342,11 +577,17 @@ public sealed class PipelineController : ControllerBase
         var ctx = _orchestrator.GetCurrentContext();
         if (ctx is not null)
         {
+            var snapshot = _stateStore.CurrentSnapshot;
             return Ok(new
             {
                 status = "active",
                 runId = ctx.RunId,
                 agentStatuses = ctx.AgentStatuses.ToDictionary(kv => kv.Key.ToString(), kv => kv.Value.ToString()),
+                agentMessages = snapshot?.AgentMessages ?? new Dictionary<string, string>(),
+                agentElapsed = snapshot?.AgentElapsed ?? new Dictionary<string, double>(),
+                agentArtifacts = snapshot?.AgentArtifacts ?? new Dictionary<string, int>(),
+                agentFindings = snapshot?.AgentFindings ?? new Dictionary<string, int>(),
+                agentRetries = snapshot?.AgentRetries ?? new Dictionary<string, int>(),
                 requirements = ctx.Requirements.Count,
                 artifacts = ctx.Artifacts.Count,
                 findings = ctx.Findings.Count,
@@ -382,6 +623,116 @@ public sealed class PipelineController : ControllerBase
         }
 
         return Ok(new { status = "no_run" });
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  Requirements (base + enriched)
+    // ═══════════════════════════════════════════════════════════════
+
+    [HttpGet("requirements")]
+    public IActionResult GetRequirements([FromQuery] string? module = null, [FromQuery] string? search = null)
+    {
+        var ctx = _orchestrator.GetCurrentContext();
+        IEnumerable<object> baseReqs;
+        IEnumerable<object> enriched;
+
+        if (ctx is not null)
+        {
+            var reqs = ctx.Requirements.AsEnumerable();
+            if (!string.IsNullOrWhiteSpace(module))
+                reqs = reqs.Where(r => r.Module.Contains(module, StringComparison.OrdinalIgnoreCase));
+            if (!string.IsNullOrWhiteSpace(search))
+                reqs = reqs.Where(r => r.Title.Contains(search, StringComparison.OrdinalIgnoreCase)
+                                     || r.Description.Contains(search, StringComparison.OrdinalIgnoreCase));
+
+            baseReqs = reqs.Select(r => new
+            {
+                r.Id, r.SourceFile, r.Section, r.HeadingLevel, r.Title, r.Description,
+                r.Module, r.Tags, r.AcceptanceCriteria, r.DependsOn
+            });
+
+            var exp = ctx.ExpandedRequirements.AsEnumerable();
+            if (!string.IsNullOrWhiteSpace(module))
+                exp = exp.Where(e => e.Module.Contains(module, StringComparison.OrdinalIgnoreCase));
+            if (!string.IsNullOrWhiteSpace(search))
+                exp = exp.Where(e => e.Title.Contains(search, StringComparison.OrdinalIgnoreCase)
+                                   || e.Description.Contains(search, StringComparison.OrdinalIgnoreCase));
+
+            enriched = exp.Select(e => new
+            {
+                e.Id, e.ParentId, e.SourceRequirementId,
+                itemType = e.ItemType.ToString(),
+                status = e.Status.ToString(),
+                e.Title, e.Description, e.Module, e.Priority,
+                e.Tags, e.AcceptanceCriteria, e.DependsOn,
+                e.Summary, e.BusinessValue, e.SuccessCriteria, e.Scope,
+                e.StoryPoints, e.Labels,
+                e.Actor, e.Preconditions, e.MainFlow, e.AlternativeFlows, e.Postconditions,
+                e.TechnicalNotes, e.DefinitionOfDone,
+                e.AffectedServices, e.DetailedSpec, e.ProducedBy,
+                coverage = e.Coverage.ToString(),
+                e.IdentifiedGaps, e.MatchingArtifactPaths,
+                createdAt = e.CreatedAt.ToString("o")
+            });
+
+            return Ok(new
+            {
+                source = "active",
+                runId = ctx.RunId,
+                baseCount = ctx.Requirements.Count,
+                enrichedCount = ctx.ExpandedRequirements.Count,
+                modules = ctx.Requirements.Select(r => r.Module).Where(m => !string.IsNullOrEmpty(m)).Distinct().OrderBy(m => m).ToArray(),
+                baseRequirements = baseReqs,
+                enrichedRequirements = enriched
+            });
+        }
+
+        // Fallback: DB
+        var latestRun = _db.GetLatestRun();
+        if (latestRun is null)
+            return Ok(new { source = "none", baseCount = 0, enrichedCount = 0, modules = Array.Empty<string>(), baseRequirements = Array.Empty<object>(), enrichedRequirements = Array.Empty<object>() });
+
+        var dbReqs = _db.GetRequirements(latestRun.RunId);
+        var dbBacklog = _db.GetBacklogItems(latestRun.RunId);
+
+        IEnumerable<BacklogItemRow> filteredBacklog = dbBacklog;
+        if (!string.IsNullOrWhiteSpace(module))
+            filteredBacklog = filteredBacklog.Where(b => (b.Module ?? "").Contains(module, StringComparison.OrdinalIgnoreCase));
+        if (!string.IsNullOrWhiteSpace(search))
+            filteredBacklog = filteredBacklog.Where(b => (b.Title ?? "").Contains(search, StringComparison.OrdinalIgnoreCase)
+                                                      || (b.Description ?? "").Contains(search, StringComparison.OrdinalIgnoreCase));
+
+        var dbModules = dbReqs.Select(r => r.Module).Where(m => !string.IsNullOrEmpty(m)).Distinct().OrderBy(m => m).ToArray();
+
+        return Ok(new
+        {
+            source = "database",
+            runId = latestRun.RunId,
+            baseCount = dbReqs.Count,
+            enrichedCount = dbBacklog.Count,
+            modules = dbModules,
+            baseRequirements = dbReqs.Select(r => new
+            {
+                r.Id, r.SourceFile, r.Section, r.HeadingLevel, r.Title, r.Description,
+                r.Module, r.Tags, r.AcceptanceCriteria, r.DependsOn
+            }),
+            enrichedRequirements = filteredBacklog.Select(b => new
+            {
+                id = b.Id, parentId = b.ParentId, sourceRequirementId = b.SourceRequirementId,
+                itemType = b.ItemType, status = b.Status,
+                title = b.Title, description = b.Description, module = b.Module, priority = b.Priority,
+                tags = b.Tags, acceptanceCriteria = b.AcceptanceCriteria, dependsOn = b.DependsOn,
+                summary = b.Summary, businessValue = b.BusinessValue, successCriteria = b.SuccessCriteria, scope = b.Scope,
+                storyPoints = b.StoryPoints, labels = b.Labels,
+                actor = b.Actor, preconditions = b.Preconditions, mainFlow = b.MainFlow,
+                alternativeFlows = b.AlternativeFlows, postconditions = b.Postconditions,
+                technicalNotes = b.TechnicalNotes, definitionOfDone = b.DefinitionOfDone,
+                affectedServices = b.AffectedServices, detailedSpec = b.DetailedSpec,
+                producedBy = b.ProducedBy, coverage = b.Coverage,
+                identifiedGaps = b.IdentifiedGaps, matchingArtifactPaths = b.MatchingArtifactPaths,
+                createdAt = b.CreatedAt.ToString("o")
+            })
+        });
     }
 
     [HttpGet("artifacts")]
@@ -440,13 +791,52 @@ public sealed class PipelineController : ControllerBase
         }));
     }
 
-    private static readonly string s_configPath = Path.Combine(
-        AppContext.BaseDirectory, "..", "..", "..", "pipeline-config.json");
+    [HttpGet("failures")]
+    public IActionResult GetFailures()
+    {
+        var ctx = _orchestrator.GetCurrentContext();
+        if (ctx is null) return Ok(Array.Empty<object>());
+
+        var failures = ctx.FailureRecords.Select(f => new
+        {
+            f.FailedAgent,
+            f.Attempt,
+            f.Error,
+            f.Summary,
+            f.ExceptionType,
+            f.StackTrace,
+            f.NonRecoverable
+        }).ToList();
+
+        var snapshot = _stateStore.CurrentSnapshot;
+        var failedAgents = ctx.AgentStatuses
+            .Where(kv => kv.Value == AgentStatus.Failed)
+            .Select(kv => new
+            {
+                agent = kv.Key.ToString(),
+                message = ctx.AgentResults.TryGetValue(kv.Key, out var result) ? result.Summary : null,
+                retries = ctx.RetryAttempts.TryGetValue(kv.Key, out var r) ? r : 0,
+                snapshotMessage = snapshot?.AgentMessages?.GetValueOrDefault(kv.Key.ToString())
+            }).ToList();
+
+        return Ok(new { failureRecords = failures, failedAgents });
+    }
+
+    private static readonly string s_configFileName = "pipeline-config.json";
+
+    /// <summary>Resolve pipeline-config.json — check base dir first (published), then ../../.. (dev mode).</summary>
+    private static string ResolveConfigPath()
+    {
+        var direct = Path.Combine(AppContext.BaseDirectory, s_configFileName);
+        if (System.IO.File.Exists(direct)) return direct;
+        var devMode = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", s_configFileName));
+        return devMode;
+    }
 
     [HttpGet("config")]
     public IActionResult GetSavedConfig()
     {
-        var path = Path.GetFullPath(s_configPath);
+        var path = ResolveConfigPath();
         if (!System.IO.File.Exists(path))
             return Ok(new { });
         var json = System.IO.File.ReadAllText(path);
@@ -456,7 +846,7 @@ public sealed class PipelineController : ControllerBase
     [HttpPost("config")]
     public IActionResult SaveConfig([FromBody] System.Text.Json.JsonElement body)
     {
-        var path = Path.GetFullPath(s_configPath);
+        var path = ResolveConfigPath();
         System.IO.File.WriteAllText(path, body.GetRawText());
         return Ok(new { saved = true, path });
     }
@@ -635,6 +1025,11 @@ public sealed class PipelineController : ControllerBase
                     e.TechnicalNotes,
                     e.DefinitionOfDone,
                     e.DetailedSpec,
+                    e.AffectedServices,
+                    e.ProducedBy,
+                    coverage = e.Coverage.ToString(),
+                    e.MatchingArtifactPaths,
+                    e.IdentifiedGaps,
                     e.CreatedAt,
                     e.StartedAt,
                     e.CompletedAt,
@@ -688,6 +1083,11 @@ public sealed class PipelineController : ControllerBase
                         e.TechnicalNotes,
                         e.DefinitionOfDone,
                         e.DetailedSpec,
+                        e.AffectedServices,
+                        e.ProducedBy,
+                        coverage = e.Coverage,
+                        e.MatchingArtifactPaths,
+                        e.IdentifiedGaps,
                         e.CreatedAt,
                         e.StartedAt,
                         e.CompletedAt,
@@ -1357,6 +1757,33 @@ public sealed class PipelineController : ControllerBase
     //  Audit Log Endpoints
     // ═══════════════════════════════════════════════════════════════
 
+    [HttpGet("communication-log")]
+    public IActionResult GetCommunicationLog([FromQuery] string? runId = null, [FromQuery] string? agentType = null)
+    {
+        var ctx = _orchestrator.GetCurrentContext();
+        IEnumerable<GNex.Core.Models.AgentCommunicationEntry> entries = ctx?.CommunicationLog ?? [];
+
+        if (!string.IsNullOrEmpty(runId))
+            entries = entries.Where(e => e.RunId == runId);
+
+        if (!string.IsNullOrEmpty(agentType) && Enum.TryParse<GNex.Core.Enums.AgentType>(agentType, true, out var at))
+            entries = entries.Where(e => e.FromAgent == at || e.ToAgent == at);
+
+        var list = entries.OrderBy(e => e.Timestamp).ToList();
+        return Ok(new
+        {
+            count = list.Count,
+            enabled = ctx?.PipelineConfig?.EnableAgentCommunicationLogging ?? false,
+            entries = list.Select(e => new
+            {
+                e.Id, e.Timestamp, e.RunId, e.CommType,
+                fromAgent = e.FromAgent.ToString(),
+                toAgent = e.ToAgent?.ToString(),
+                e.Message, e.ItemCount, e.Category
+            })
+        });
+    }
+
     [HttpGet("audit")]
     public IActionResult GetAuditLog([FromQuery] string? runId = null, [FromQuery] int? limit = null)
     {
@@ -1407,6 +1834,26 @@ public sealed class PipelineController : ControllerBase
             brokenAtSequence = brokenAt,
             message = isValid ? "Audit chain integrity verified — no tampering detected" : $"Chain broken at sequence {brokenAt}"
         });
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  Pipeline Learnings
+    // ═══════════════════════════════════════════════════════════════
+
+    [HttpGet("learnings")]
+    public IActionResult GetLearnings([FromQuery] string? runId = null, [FromQuery] string? category = null)
+    {
+        var items = _db.GetLearnings(runId, category);
+        return Ok(new { count = items.Count, items });
+    }
+
+    [HttpPost("learnings")]
+    public IActionResult SaveLearning([FromBody] SaveLearningRequest req)
+    {
+        if (string.IsNullOrWhiteSpace(req.Gap)) return BadRequest("Gap is required");
+        var runId = req.RunId ?? _stateStore?.CurrentSnapshot?.RunId ?? "manual";
+        _db.SaveLearning(runId, req.Category ?? "General", req.AgentType, req.Gap, req.Fix, req.Severity ?? "Medium");
+        return Ok(new { saved = true });
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -1854,8 +2301,8 @@ public sealed class PipelineRunRequest
     public string RequirementsPath { get; init; } = string.Empty;
     public string OutputPath { get; init; } = string.Empty;
     public string? ProjectId { get; init; }
-    public bool ResetInMemoryContextBeforeRun { get; init; } = true;
-    public bool ClearGeneratedUserRequirementFilesBeforeRun { get; init; } = true;
+    public bool ResetInMemoryContextBeforeRun { get; init; } = false;
+    public bool ClearGeneratedUserRequirementFilesBeforeRun { get; init; } = false;
     public string? SolutionNamespace { get; init; }
     public string? DockerContainerName { get; init; }
     public string? DbHost { get; init; }
@@ -1871,6 +2318,7 @@ public sealed class PipelineRunRequest
     public Dictionary<string, int>? ServicePorts { get; init; }
     public string? ProjectDomain { get; init; }
     public string? ProjectDomainDescription { get; init; }
+    public bool EnableAgentCommunicationLogging { get; init; } = true;
 }
 
 public sealed class InstructionRequest
@@ -1899,4 +2347,14 @@ public sealed class DeployRequest
     public string? SolutionNamespace { get; init; }
     public bool SpinUpDocker { get; init; } = true;
     public Dictionary<string, int>? ServicePorts { get; init; }
+}
+
+public sealed class SaveLearningRequest
+{
+    public string? RunId { get; init; }
+    public string? Category { get; init; }
+    public string? AgentType { get; init; }
+    public string Gap { get; init; } = "";
+    public string? Fix { get; init; }
+    public string? Severity { get; init; }
 }

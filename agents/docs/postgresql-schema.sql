@@ -64,6 +64,7 @@ CREATE TABLE IF NOT EXISTS Requirements (
 CREATE TABLE IF NOT EXISTS BacklogItems (
     Id                TEXT NOT NULL,
     RunId             TEXT NOT NULL,
+    ProjectId         TEXT,
     ParentId          TEXT,
     SourceRequirementId TEXT,
     ItemType          TEXT NOT NULL,
@@ -79,6 +80,33 @@ CREATE TABLE IF NOT EXISTS BacklogItems (
     TechnicalNotes    TEXT,
     DefinitionOfDone  TEXT,
     DetailedSpec      TEXT,
+    -- Epic fields
+    Summary           TEXT,
+    BusinessValue     TEXT,
+    SuccessCriteria   TEXT,
+    Scope             TEXT,
+    -- Story fields
+    StoryPoints       INTEGER DEFAULT 0,
+    Labels            TEXT,
+    -- Use Case fields
+    Actor             TEXT,
+    Preconditions     TEXT,
+    MainFlow          TEXT,
+    AlternativeFlows  TEXT,
+    Postconditions    TEXT,
+    -- Bug fields
+    Severity          TEXT,
+    Environment       TEXT,
+    StepsToReproduce  TEXT,
+    ExpectedResult    TEXT,
+    ActualResult      TEXT,
+    -- Gap-analysis fields
+    AffectedServices  TEXT,
+    ProducedBy        TEXT DEFAULT '',
+    Coverage          TEXT DEFAULT 'NotAssessed',
+    MatchingArtifactPaths TEXT,
+    IdentifiedGaps    TEXT,
+    -- Timestamps
     CreatedAt         TEXT NOT NULL,
     StartedAt         TEXT,
     CompletedAt       TEXT,

@@ -131,6 +131,13 @@ public sealed class RequirementsExpanderAgent : IAgent
             }
 
             expanded.AddRange(phaseItems);
+
+            // ── Incremental DB persist per module so data survives crashes ──
+            if (context.PersistWorkItems is not null && phaseItems.Count > 0)
+            {
+                try { context.PersistWorkItems(context.RunId, phaseItems); }
+                catch (Exception ex) { _logger.LogWarning(ex, "Incremental persist failed for module '{Module}'", module); }
+            }
         }
 
         // ── Step 3b: Deduplicate expanded items (same ID can appear from overlapping modules/re-runs) ──
@@ -151,6 +158,13 @@ public sealed class RequirementsExpanderAgent : IAgent
                 context.ExpandedRequirements.Add(item);
                 existingIds.Add(item.Id);
             }
+        }
+
+        // ── Step 5b: Final persist with resolved dependency chains ──
+        if (context.PersistWorkItems is not null && expanded.Count > 0)
+        {
+            try { context.PersistWorkItems(context.RunId, expanded); }
+            catch (Exception ex) { _logger.LogWarning(ex, "Final persist of {Count} expanded items failed", expanded.Count); }
         }
 
         // Send directive to Backlog and Analyzer
@@ -1589,7 +1603,7 @@ public sealed class RequirementsExpanderAgent : IAgent
                 Module = resolvedModule, Priority = 2, Iteration = iteration,
                 Tags = ["database"],
                 AffectedServices = [.. services],
-                TechnicalNotes = $"Target schema: {schema}. Entity: {primaryEntity}. Fields: Id (text PK), TenantId (text FK, indexed), CreatedAt (timestamptz), UpdatedAt (timestamptz), IsActive (bool, default true), plus domain-specific fields from requirement. Create indexes on TenantId and primary lookup columns. Use PostgreSQL-friendly types.",
+                TechnicalNotes = $"Target schema: {schema}. Entity: {primaryEntity}. Fields: Id (text PK), TenantId (text FK, indexed), CreatedAt (timestamp with tz), UpdatedAt (timestamp with tz), IsActive (bool, default true), plus domain-specific fields from requirement. Create indexes on TenantId and primary lookup columns. Use {context.DatabaseEngine()}-friendly types.",
                 DefinitionOfDone = [$"Migration creates {primaryEntity} table in {schema}", "Indexes on TenantId and lookup columns verified", "Seed data present for dev/test", "Rollback migration tested"],
                 DetailedSpec = $"Namespace: {svcNamespace}.Entities. Entity class: {primaryEntity} with Id, TenantId, CreatedAt, UpdatedAt, IsActive. DbContext: {primarySvcDef?.DbContextName ?? resolvedModule + "DbContext"} — add DbSet<{primaryEntity}>. Configure entity in OnModelCreating with schema \"{schema}\". Add index on TenantId. {(svcDeps.Length > 0 ? $"FK relationships to: {string.Join(", ", svcDeps)}." : "")}",
                 Status = WorkItemStatus.New,
@@ -1870,7 +1884,7 @@ public sealed class RequirementsExpanderAgent : IAgent
                 case WorkItemType.Bug:
                     if (!item.Description.Contains(svcDef.Name))
                         item.Description = $"[{svcDef.Name} | {schema}] {item.Description}";
-                    item.Environment = $".NET 10, PostgreSQL 16 | Service: {svcDef.Name}, Schema: {schema}, Entities: {entityCsv}";
+                    item.Environment = $"{context.EnvironmentLabel()} | Service: {svcDef.Name}, Schema: {schema}, Entities: {entityCsv}";
                     item.TechnicalNotes = $"Investigate in {ns}. Check {primaryEntity} entity, {schema} schema. Dependencies: {depsCsv}. {note}".Trim();
                     break;
             }
@@ -2011,7 +2025,7 @@ public sealed class RequirementsExpanderAgent : IAgent
                     if (!string.IsNullOrWhiteSpace(item.Environment) && !item.Environment.Contains(svcLabel))
                         item.Environment = $"{item.Environment} | Service: {svcLabel}, Schema: {schema}, Entities: {entityCsv}";
                     else if (string.IsNullOrWhiteSpace(item.Environment))
-                        item.Environment = $".NET 10, PostgreSQL 16 | Service: {svcLabel}, Schema: {schema}, Entities: {entityCsv}";
+                        item.Environment = $"{context.EnvironmentLabel()} | Service: {svcLabel}, Schema: {schema}, Entities: {entityCsv}";
                     if (string.IsNullOrWhiteSpace(item.TechnicalNotes))
                         item.TechnicalNotes = $"Investigate in {ns}. Check {primaryEntity} entity, {schema} schema. Dependencies: {depsCsv}.";
                     break;

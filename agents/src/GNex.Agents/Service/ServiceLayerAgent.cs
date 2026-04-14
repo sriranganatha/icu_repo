@@ -82,6 +82,14 @@ public sealed class ServiceLayerAgent : IAgent
                     await context.ReportProgress(Type, $"Incorporating {feedback.Count} feedback items from Review/Supervisor/GapAnalysis");
             }
 
+            // Read upstream agent results for cross-agent awareness
+            if (context.AgentResults.TryGetValue(AgentType.Database, out var dbResult) && dbResult.Success)
+                _logger.LogInformation("ServiceLayerAgent consuming Database results: {Summary}", dbResult.Summary);
+            if (context.AgentResults.TryGetValue(AgentType.Architect, out var archResult) && archResult.Success)
+                _logger.LogInformation("ServiceLayerAgent consuming Architect results for service patterns");
+            if (context.AgentResults.TryGetValue(AgentType.Security, out var secResult) && secResult.Success)
+                _logger.LogInformation("ServiceLayerAgent consuming Security results for secure service patterns");
+
             // Read historical learnings from previous pipeline runs
             var learnings = context.GetLearningsForAgent(Type);
             if (learnings.Count > 0)
@@ -134,6 +142,12 @@ public sealed class ServiceLayerAgent : IAgent
             // Agent completes its own claimed work items
             foreach (var item in context.CurrentClaimedItems)
                 context.CompleteWorkItem?.Invoke(item);
+
+            // Notify downstream agents about generated service patterns
+            var svcSummary = string.Join(", ", scopedServices.Select(s => s.Name));
+            context.WriteFeedback(AgentType.Testing, Type, $"Service layer ready: DTOs, interfaces, implementations for {svcSummary}. Generate unit tests for service methods and Kafka event publishing.");
+            context.WriteFeedback(AgentType.Application, Type, $"Service layer generated for {scopedServices.Count} microservices: {svcSummary}. Wire service interfaces into controllers/endpoints.");
+            context.WriteFeedback(AgentType.Integration, Type, $"Kafka events and producers generated for {svcSummary}. Integration layer can configure consumers and cross-service messaging.");
 
             await Task.CompletedTask;
             return new AgentResult

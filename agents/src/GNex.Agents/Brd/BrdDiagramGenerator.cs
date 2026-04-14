@@ -12,7 +12,9 @@ public static class BrdDiagramGenerator
     {
         var sb = new StringBuilder();
         sb.AppendLine("graph TB");
-        var systemLabel = requirements.Select(r => r.Module).FirstOrDefault(m => !string.IsNullOrEmpty(m)) ?? "System";
+        // Prefer module name; infer "HMS" from healthcare keywords; fall back to "System"
+        var systemLabel = requirements.Select(r => r.Module).FirstOrDefault(m => !string.IsNullOrEmpty(m))
+            ?? InferSystemName(requirements);
         sb.AppendLine($"    SYS[{systemLabel}]");
 
         var actors = domainProfile?.ActorNames is { Count: > 0 } profileActors
@@ -125,9 +127,15 @@ public static class BrdDiagramGenerator
                 return domainProfile.FallbackErDiagram;
 
             return @"erDiagram
-    ENTITY {
+    PATIENT {
         uuid Id PK
         string Name
+        string Status
+    }
+    ENCOUNTER {
+        uuid Id PK
+        uuid PatientId FK
+        datetime AdmitDate
         string Status
     }
     AUDIT_LOG {
@@ -136,7 +144,9 @@ public static class BrdDiagramGenerator
         datetime Timestamp
         string Action
     }
-    ENTITY ||--o{ AUDIT_LOG : ""tracked by""";
+    PATIENT ||--o{ ENCOUNTER : ""has""
+    ENCOUNTER ||--o{ AUDIT_LOG : ""tracked by""
+    PATIENT ||--o{ AUDIT_LOG : ""tracked by""";
         }
 
         var sb = new StringBuilder();
@@ -184,6 +194,12 @@ public static class BrdDiagramGenerator
         if (text.Contains("manager") || text.Contains("supervisor")) actors.Add("Manager");
         if (text.Contains("operator") || text.Contains("staff")) actors.Add("Operator");
         if (text.Contains("analyst") || text.Contains("report")) actors.Add("Analyst");
+        // Healthcare / HMS domain actors
+        if (text.Contains("patient")) actors.Add("Patient");
+        if (text.Contains("doctor") || text.Contains("physician") || text.Contains("clinician")) actors.Add("Doctor");
+        if (text.Contains("nurse") || text.Contains("triage")) actors.Add("Nurse");
+        if (text.Contains("pharmacist") || text.Contains("pharmacy")) actors.Add("Pharmacist");
+        if (text.Contains("lab") || text.Contains("technician")) actors.Add("Lab Technician");
         if (actors.Count == 0) actors.Add("User");
         return actors;
     }
@@ -197,6 +213,20 @@ public static class BrdDiagramGenerator
         if (text.Contains("email") || text.Contains("smtp")) systems.Add("Email Service");
         if (text.Contains("ldap") || text.Contains("active directory")) systems.Add("Identity Provider");
         if (text.Contains("api") || text.Contains("integration")) systems.Add("External API");
+        // Healthcare / HMS domain systems
+        if (text.Contains("fhir")) systems.Add("FHIR Server");
+        if (text.Contains("hl7")) systems.Add("HL7 Gateway");
+        if (text.Contains("dicom") || text.Contains("pacs")) systems.Add("PACS / Imaging");
+        if (text.Contains("insurance") || text.Contains("claim")) systems.Add("Insurance Gateway");
         return systems;
+    }
+
+    private static string InferSystemName(List<Requirement> requirements)
+    {
+        var text = string.Join(" ", requirements.Select(r => $"{r.Title} {r.Description}")).ToLowerInvariant();
+        if (text.Contains("hospital") || text.Contains("patient") || text.Contains("nurse")
+            || text.Contains("clinic") || text.Contains("encounter") || text.Contains("triage"))
+            return "HMS";
+        return "System";
     }
 }

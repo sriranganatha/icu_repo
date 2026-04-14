@@ -88,7 +88,7 @@ public sealed class SecurityAgent : IAgent
                 var scanPrompt = new LlmPrompt
                 {
                     SystemPrompt = $$"""
-                        You are a senior application security engineer specializing in OWASP Top 10 analysis for .NET 8 applications.
+                        You are a senior application security engineer specializing in OWASP Top 10 analysis for {context.FrameworkLabel()} applications.
                         Analyze the provided code artifacts for security vulnerabilities.
 
                         {{(!string.IsNullOrWhiteSpace(llmContext) ? llmContext : "")}}
@@ -165,10 +165,10 @@ public sealed class SecurityAgent : IAgent
                 var genPrompt = new LlmPrompt
                 {
                     SystemPrompt = $$"""
-                        You are a senior .NET 8 security engineer. Generate production-quality C# code for the described security component.
+                        You are a {context.SeniorRoleLabel("security engineer")}. Generate production-quality {context.LanguageLabel()} code for the described security component.
                         {{(!string.IsNullOrWhiteSpace(llmContext) ? llmContext : "")}}
                         Follow these rules:
-                        - Use .NET 8 APIs and middleware patterns
+                        - Use {context.FrameworkLabel()} APIs and middleware patterns
                         - Include XML documentation comments
                         - Make components configurable via IConfiguration or IOptions
                         - Use proper namespace: GNex.SharedKernel.Security

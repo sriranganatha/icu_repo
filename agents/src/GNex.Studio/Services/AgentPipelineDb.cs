@@ -282,6 +282,38 @@ public sealed class AgentPipelineDb : IDisposable
             ALTER TABLE BacklogItems ADD COLUMN IF NOT EXISTS AffectedServices TEXT;
             ALTER TABLE BacklogItems ADD COLUMN IF NOT EXISTS ProducedBy TEXT DEFAULT '';
             ALTER TABLE BacklogItems ADD COLUMN IF NOT EXISTS Coverage TEXT DEFAULT 'NotAssessed';
+            ALTER TABLE BacklogItems ADD COLUMN IF NOT EXISTS MatchingArtifactPaths TEXT;
+            ALTER TABLE BacklogItems ADD COLUMN IF NOT EXISTS IdentifiedGaps TEXT;
+
+            ALTER TABLE Artifacts ADD COLUMN IF NOT EXISTS Content TEXT;
+
+            CREATE TABLE IF NOT EXISTS DerivedServices (
+                RunId       TEXT NOT NULL,
+                Name        TEXT NOT NULL,
+                ShortName   TEXT NOT NULL,
+                Schema      TEXT NOT NULL,
+                Description TEXT,
+                ApiPort     INTEGER DEFAULT 0,
+                Entities    TEXT,
+                DependsOn   TEXT,
+                PRIMARY KEY (RunId, Name),
+                FOREIGN KEY (RunId) REFERENCES PipelineRuns(RunId)
+            );
+            CREATE INDEX IF NOT EXISTS IX_DerivedServices_RunId ON DerivedServices(RunId);
+
+            CREATE TABLE IF NOT EXISTS PipelineLearnings (
+                Id          SERIAL PRIMARY KEY,
+                RunId       TEXT NOT NULL,
+                Category    TEXT NOT NULL,
+                AgentType   TEXT,
+                Gap         TEXT NOT NULL,
+                Fix         TEXT,
+                Severity    TEXT DEFAULT 'Medium',
+                DiscoveredAt TIMESTAMPTZ DEFAULT NOW(),
+                FOREIGN KEY (RunId) REFERENCES PipelineRuns(RunId)
+            );
+            CREATE INDEX IF NOT EXISTS IX_PipelineLearnings_RunId ON PipelineLearnings(RunId);
+            CREATE INDEX IF NOT EXISTS IX_PipelineLearnings_Category ON PipelineLearnings(Category);
 
             INSERT INTO WorkItemTemplates (TemplateKey, ItemType, TemplateName, Purpose, TemplateFormat, ExampleContent, Version, IsActive, UpdatedAt)
             VALUES
@@ -416,6 +448,25 @@ public sealed class AgentPipelineDb : IDisposable
     // ΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉ
     //  Pipeline Run lifecycle
     // ΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉ
+
+    /// <summary>
+    /// Ensure a pipeline run row exists so FK constraints on requirements/backlog are satisfied.
+    /// No-ops if the run already exists.
+    /// </summary>
+    public void EnsureRunExists(string runId, string? projectId = null)
+    {
+        using var conn = Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            INSERT INTO PipelineRuns (RunId, ProjectId, Status, StartedAt)
+            VALUES (@runId, @projectId, 'Running', @now)
+            ON CONFLICT (RunId) DO NOTHING
+        """;
+        cmd.Parameters.AddWithValue("@runId", runId);
+        cmd.Parameters.AddWithValue("@projectId", (object?)projectId ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@now", DateTimeOffset.UtcNow.ToString("o"));
+        cmd.ExecuteNonQuery();
+    }
 
     public void StartRun(string runId, string? instructions, string? configJson, string? projectId = null)
     {
@@ -599,7 +650,7 @@ public sealed class AgentPipelineDb : IDisposable
                         StoryPoints, Labels,
                         Actor, Preconditions, MainFlow, AlternativeFlows, Postconditions,
                         Severity, Environment, StepsToReproduce, ExpectedResult, ActualResult,
-                        AffectedServices, ProducedBy, Coverage,
+                        AffectedServices, ProducedBy, Coverage, MatchingArtifactPaths, IdentifiedGaps,
                         CreatedAt, StartedAt, CompletedAt, AssignedAgent)
                     VALUES (@id, @runId, @projectId, @parentId, @srcReqId, @type, @status,
                         @title, @desc, @module, @priority, @iteration, @ac, @deps, @tags,
@@ -608,7 +659,7 @@ public sealed class AgentPipelineDb : IDisposable
                         @storyPoints, @labels,
                         @actor, @preconditions, @mainFlow, @alternativeFlows, @postconditions,
                         @severity, @environment, @stepsToReproduce, @expectedResult, @actualResult,
-                        @affectedServices, @producedBy, @coverage,
+                        @affectedServices, @producedBy, @coverage, @matchingArtifactPaths, @identifiedGaps,
                         @created, @started, @completed, @assignedAgent)
                 """;
                 cmd.Parameters.AddWithValue("@id", item.Id);
@@ -653,6 +704,8 @@ public sealed class AgentPipelineDb : IDisposable
                 cmd.Parameters.AddWithValue("@affectedServices", JsonSerializer.Serialize(item.AffectedServices ?? [], s_json));
                 cmd.Parameters.AddWithValue("@producedBy", item.ProducedBy ?? "");
                 cmd.Parameters.AddWithValue("@coverage", item.Coverage ?? "NotAssessed");
+                cmd.Parameters.AddWithValue("@matchingArtifactPaths", JsonSerializer.Serialize(item.MatchingArtifactPaths ?? [], s_json));
+                cmd.Parameters.AddWithValue("@identifiedGaps", JsonSerializer.Serialize(item.IdentifiedGaps ?? [], s_json));
                 // Timestamps
                 cmd.Parameters.AddWithValue("@created", item.CreatedAt.ToString("o"));
                 cmd.Parameters.AddWithValue("@started", (object?)item.StartedAt?.ToString("o") ?? DBNull.Value);
@@ -724,8 +777,8 @@ public sealed class AgentPipelineDb : IDisposable
             {
                 using var cmd = conn.CreateCommand();
                 cmd.CommandText = """
-                    INSERT INTO Artifacts (Id, RunId, ProjectId, Layer, RelativePath, FileName, Namespace, ProducedBy, ContentLength, TracedReqIds, GeneratedAt)
-                    VALUES (@id, @runId, @projectId, @layer, @path, @file, @ns, @by, @len, @reqs, @gen)
+                    INSERT INTO Artifacts (Id, RunId, ProjectId, Layer, RelativePath, FileName, Namespace, ProducedBy, ContentLength, Content, TracedReqIds, GeneratedAt)
+                    VALUES (@id, @runId, @projectId, @layer, @path, @file, @ns, @by, @len, @content, @reqs, @gen)
                 """;
                 cmd.Parameters.AddWithValue("@id", a.Id);
                 cmd.Parameters.AddWithValue("@runId", runId);
@@ -736,6 +789,7 @@ public sealed class AgentPipelineDb : IDisposable
                 cmd.Parameters.AddWithValue("@ns", a.Namespace ?? "");
                 cmd.Parameters.AddWithValue("@by", a.ProducedBy);
                 cmd.Parameters.AddWithValue("@len", a.ContentLength);
+                cmd.Parameters.AddWithValue("@content", a.Content ?? "");
                 cmd.Parameters.AddWithValue("@reqs", JsonSerializer.Serialize(a.TracedReqIds ?? [], s_json));
                 cmd.Parameters.AddWithValue("@gen", a.GeneratedAt.ToString("o"));
                 cmd.ExecuteNonQuery();
@@ -916,7 +970,76 @@ public sealed class AgentPipelineDb : IDisposable
                 AffectedServices = DeserializeList(GetNullableString(r, "AffectedServices")),
                 ProducedBy = GetNullableString(r, "ProducedBy") ?? "",
                 Coverage = GetNullableString(r, "Coverage") ?? "NotAssessed",
+                MatchingArtifactPaths = DeserializeList(GetNullableString(r, "MatchingArtifactPaths")),
+                IdentifiedGaps = DeserializeList(GetNullableString(r, "IdentifiedGaps")),
                 // Timestamps
+                CreatedAt = DateTimeOffset.Parse(r.GetString(r.GetOrdinal("CreatedAt"))),
+                StartedAt = ParseNullableDateTimeOffset(GetNullableString(r, "StartedAt")),
+                CompletedAt = ParseNullableDateTimeOffset(GetNullableString(r, "CompletedAt")),
+                AssignedAgent = GetNullableString(r, "AssignedAgent") ?? ""
+            });
+        }
+        return items;
+    }
+
+    /// <summary>
+    /// Fallback: find backlog items from the most recent run that has any.
+    /// </summary>
+    public List<BacklogItemRow> GetLatestBacklogItems()
+    {
+        using var conn = Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT b.* FROM BacklogItems b
+            INNER JOIN (
+                SELECT RunId FROM BacklogItems GROUP BY RunId ORDER BY MAX(CreatedAt) DESC LIMIT 1
+            ) latest ON b.RunId = latest.RunId
+            ORDER BY b.Priority, b.ItemType
+            """;
+        using var r = cmd.ExecuteReader();
+        var items = new List<BacklogItemRow>();
+        while (r.Read())
+        {
+            items.Add(new BacklogItemRow
+            {
+                Id = r.GetString(r.GetOrdinal("Id")),
+                ProjectId = GetNullableString(r, "ProjectId"),
+                ParentId = GetNullableString(r, "ParentId"),
+                SourceRequirementId = GetNullableString(r, "SourceRequirementId"),
+                ItemType = r.GetString(r.GetOrdinal("ItemType")),
+                Status = r.GetString(r.GetOrdinal("Status")),
+                Title = r.GetString(r.GetOrdinal("Title")),
+                Description = GetNullableString(r, "Description"),
+                Module = GetNullableString(r, "Module"),
+                Priority = r.GetInt32(r.GetOrdinal("Priority")),
+                Iteration = r.GetInt32(r.GetOrdinal("Iteration")),
+                AcceptanceCriteria = DeserializeList(GetNullableString(r, "AcceptanceCriteria")),
+                DependsOn = DeserializeList(GetNullableString(r, "DependsOn")),
+                Tags = DeserializeList(GetNullableString(r, "Tags")),
+                TechnicalNotes = GetNullableString(r, "TechnicalNotes"),
+                DefinitionOfDone = DeserializeList(GetNullableString(r, "DefinitionOfDone")),
+                DetailedSpec = GetNullableString(r, "DetailedSpec"),
+                Summary = GetNullableString(r, "Summary"),
+                BusinessValue = GetNullableString(r, "BusinessValue"),
+                SuccessCriteria = DeserializeList(GetNullableString(r, "SuccessCriteria")),
+                Scope = GetNullableString(r, "Scope"),
+                StoryPoints = GetNullableInt(r, "StoryPoints"),
+                Labels = DeserializeList(GetNullableString(r, "Labels")),
+                Actor = GetNullableString(r, "Actor"),
+                Preconditions = GetNullableString(r, "Preconditions"),
+                MainFlow = DeserializeList(GetNullableString(r, "MainFlow")),
+                AlternativeFlows = GetNullableString(r, "AlternativeFlows"),
+                Postconditions = GetNullableString(r, "Postconditions"),
+                Severity = GetNullableString(r, "Severity"),
+                Environment = GetNullableString(r, "Environment"),
+                StepsToReproduce = DeserializeList(GetNullableString(r, "StepsToReproduce")),
+                ExpectedResult = GetNullableString(r, "ExpectedResult"),
+                ActualResult = GetNullableString(r, "ActualResult"),
+                AffectedServices = DeserializeList(GetNullableString(r, "AffectedServices")),
+                ProducedBy = GetNullableString(r, "ProducedBy") ?? "",
+                Coverage = GetNullableString(r, "Coverage") ?? "NotAssessed",
+                MatchingArtifactPaths = DeserializeList(GetNullableString(r, "MatchingArtifactPaths")),
+                IdentifiedGaps = DeserializeList(GetNullableString(r, "IdentifiedGaps")),
                 CreatedAt = DateTimeOffset.Parse(r.GetString(r.GetOrdinal("CreatedAt"))),
                 StartedAt = ParseNullableDateTimeOffset(GetNullableString(r, "StartedAt")),
                 CompletedAt = ParseNullableDateTimeOffset(GetNullableString(r, "CompletedAt")),
@@ -1058,6 +1181,177 @@ public sealed class AgentPipelineDb : IDisposable
         return items;
     }
 
+    /// <summary>
+    /// Fallback: find requirements from the most recent run that has any, regardless of runId.
+    /// Used when the direct runId lookup returns 0 rows (e.g. resumed runs that never persisted).
+    /// </summary>
+    public List<RequirementRow> GetLatestRequirements()
+    {
+        using var conn = Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT r.* FROM Requirements r
+            INNER JOIN (
+                SELECT RunId FROM Requirements GROUP BY RunId ORDER BY MAX(CreatedAt) DESC LIMIT 1
+            ) latest ON r.RunId = latest.RunId
+            ORDER BY r.HeadingLevel, r.Title
+            """;
+        using var reader = cmd.ExecuteReader();
+        var items = new List<RequirementRow>();
+        while (reader.Read())
+        {
+            items.Add(new RequirementRow
+            {
+                Id = reader.GetString(reader.GetOrdinal("Id")),
+                SourceFile = GetNullableString(reader, "SourceFile"),
+                Section = GetNullableString(reader, "Section"),
+                HeadingLevel = reader.GetInt32(reader.GetOrdinal("HeadingLevel")),
+                Title = reader.GetString(reader.GetOrdinal("Title")),
+                Description = GetNullableString(reader, "Description"),
+                Module = GetNullableString(reader, "Module"),
+                Tags = DeserializeList(GetNullableString(reader, "Tags")),
+                AcceptanceCriteria = DeserializeList(GetNullableString(reader, "AcceptanceCriteria")),
+                DependsOn = DeserializeList(GetNullableString(reader, "DependsOn")),
+                CreatedAt = DateTimeOffset.Parse(reader.GetString(reader.GetOrdinal("CreatedAt")))
+            });
+        }
+        return items;
+    }
+
+    // ─── DerivedServices ──────────────────────────────────────────────
+
+    public void SaveDerivedServices(string runId, IEnumerable<GNex.Core.Models.MicroserviceDefinition> services)
+    {
+        using var conn = Open();
+        using var tx = conn.BeginTransaction();
+        try
+        {
+            // Remove stale rows for this run first
+            using (var del = conn.CreateCommand())
+            {
+                del.Transaction = tx;
+                del.CommandText = "DELETE FROM DerivedServices WHERE RunId = @runId";
+                del.Parameters.AddWithValue("@runId", runId);
+                del.ExecuteNonQuery();
+            }
+
+            foreach (var svc in services)
+            {
+                using var cmd = conn.CreateCommand();
+                cmd.Transaction = tx;
+                cmd.CommandText = """
+                    INSERT INTO DerivedServices (RunId, Name, ShortName, Schema, Description, ApiPort, Entities, DependsOn)
+                    VALUES (@runId, @name, @shortName, @schema, @desc, @port, @entities, @depends)
+                    """;
+                cmd.Parameters.AddWithValue("@runId", runId);
+                cmd.Parameters.AddWithValue("@name", svc.Name);
+                cmd.Parameters.AddWithValue("@shortName", svc.ShortName);
+                cmd.Parameters.AddWithValue("@schema", svc.Schema);
+                cmd.Parameters.AddWithValue("@desc", svc.Description ?? "");
+                cmd.Parameters.AddWithValue("@port", svc.ApiPort);
+                cmd.Parameters.AddWithValue("@entities", System.Text.Json.JsonSerializer.Serialize(svc.Entities));
+                cmd.Parameters.AddWithValue("@depends", System.Text.Json.JsonSerializer.Serialize(svc.DependsOn));
+                cmd.ExecuteNonQuery();
+            }
+
+            tx.Commit();
+        }
+        catch
+        {
+            tx.Rollback();
+            throw;
+        }
+    }
+
+    public List<GNex.Core.Models.MicroserviceDefinition> GetDerivedServices(string runId)
+    {
+        using var conn = Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT * FROM DerivedServices WHERE RunId = @runId";
+        cmd.Parameters.AddWithValue("@runId", runId);
+        return ReadDerivedServices(cmd);
+    }
+
+    public List<GNex.Core.Models.MicroserviceDefinition> GetLatestDerivedServices()
+    {
+        using var conn = Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT ds.* FROM DerivedServices ds
+            INNER JOIN (
+                SELECT RunId FROM DerivedServices GROUP BY RunId ORDER BY RunId DESC LIMIT 1
+            ) latest ON ds.RunId = latest.RunId
+            """;
+        return ReadDerivedServices(cmd);
+    }
+
+    private static List<GNex.Core.Models.MicroserviceDefinition> ReadDerivedServices(Npgsql.NpgsqlCommand cmd)
+    {
+        using var r = cmd.ExecuteReader();
+        var list = new List<GNex.Core.Models.MicroserviceDefinition>();
+        while (r.Read())
+        {
+            list.Add(new GNex.Core.Models.MicroserviceDefinition
+            {
+                Name = r.GetString(r.GetOrdinal("Name")),
+                ShortName = r.GetString(r.GetOrdinal("ShortName")),
+                Schema = r.GetString(r.GetOrdinal("Schema")),
+                Description = GetNullableString(r, "Description") ?? "",
+                ApiPort = r.GetInt32(r.GetOrdinal("ApiPort")),
+                Entities = System.Text.Json.JsonSerializer.Deserialize<string[]>(
+                               r.GetString(r.GetOrdinal("Entities"))) ?? [],
+                DependsOn = System.Text.Json.JsonSerializer.Deserialize<string[]>(
+                               r.GetString(r.GetOrdinal("DependsOn"))) ?? []
+            });
+        }
+        return list;
+    }
+
+    // ─── Pipeline Learnings ─────────────────────────────────────────
+    public void SaveLearning(string runId, string category, string? agentType, string gap, string? fix, string severity = "Medium")
+    {
+        using var conn = Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = @"INSERT INTO PipelineLearnings (RunId, Category, AgentType, Gap, Fix, Severity)
+                            VALUES (@runId, @cat, @agent, @gap, @fix, @sev)";
+        cmd.Parameters.AddWithValue("@runId", runId);
+        cmd.Parameters.AddWithValue("@cat", category);
+        cmd.Parameters.AddWithValue("@agent", (object?)agentType ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@gap", gap);
+        cmd.Parameters.AddWithValue("@fix", (object?)fix ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@sev", severity);
+        cmd.ExecuteNonQuery();
+    }
+
+    public List<PipelineLearningRow> GetLearnings(string? runId = null, string? category = null)
+    {
+        using var conn = Open();
+        using var cmd = conn.CreateCommand();
+        var where = new List<string>();
+        if (runId is not null) { where.Add("RunId = @runId"); cmd.Parameters.AddWithValue("@runId", runId); }
+        if (category is not null) { where.Add("Category = @cat"); cmd.Parameters.AddWithValue("@cat", category); }
+        cmd.CommandText = "SELECT * FROM PipelineLearnings" +
+                          (where.Count > 0 ? " WHERE " + string.Join(" AND ", where) : "") +
+                          " ORDER BY DiscoveredAt DESC";
+        using var r = cmd.ExecuteReader();
+        var list = new List<PipelineLearningRow>();
+        while (r.Read())
+        {
+            list.Add(new PipelineLearningRow
+            {
+                Id = r.GetInt32(r.GetOrdinal("Id")),
+                RunId = r.GetString(r.GetOrdinal("RunId")),
+                Category = r.GetString(r.GetOrdinal("Category")),
+                AgentType = GetNullableString(r, "AgentType"),
+                Gap = r.GetString(r.GetOrdinal("Gap")),
+                Fix = GetNullableString(r, "Fix"),
+                Severity = r.GetString(r.GetOrdinal("Severity")),
+                DiscoveredAt = r.GetDateTime(r.GetOrdinal("DiscoveredAt")).ToString("o")
+            });
+        }
+        return list;
+    }
+
     public List<FindingRow> GetFindings(string runId)
     {
         using var conn = Open();
@@ -1103,6 +1397,7 @@ public sealed class AgentPipelineDb : IDisposable
                 Namespace = GetNullableString(r, "Namespace"),
                 ProducedBy = r.GetString(r.GetOrdinal("ProducedBy")),
                 ContentLength = r.GetInt32(r.GetOrdinal("ContentLength")),
+                Content = GetNullableString(r, "Content") ?? "",
                 TracedReqIds = DeserializeList(GetNullableString(r, "TracedReqIds")),
                 GeneratedAt = DateTimeOffset.Parse(r.GetString(r.GetOrdinal("GeneratedAt")))
             });
@@ -1554,6 +1849,7 @@ public sealed class ArtifactRow
     public string? Namespace { get; set; }
     public string ProducedBy { get; set; } = "";
     public int ContentLength { get; set; }
+    public string Content { get; set; } = "";
     public List<string>? TracedReqIds { get; set; }
     public DateTimeOffset GeneratedAt { get; set; }
 }
@@ -1630,4 +1926,16 @@ public sealed class HumanDecisionRow
     public string RequestedAt { get; set; } = "";
     public string? DecidedAt { get; set; }
     public double TimeoutMinutes { get; set; }
+}
+
+public sealed class PipelineLearningRow
+{
+    public int Id { get; set; }
+    public string RunId { get; set; } = "";
+    public string Category { get; set; } = "";
+    public string? AgentType { get; set; }
+    public string Gap { get; set; } = "";
+    public string? Fix { get; set; }
+    public string Severity { get; set; } = "Medium";
+    public string DiscoveredAt { get; set; } = "";
 }

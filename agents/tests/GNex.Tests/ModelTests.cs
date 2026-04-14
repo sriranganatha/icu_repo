@@ -113,24 +113,35 @@ public class ModelTests
     }
 
     [Fact]
-    public void MicroserviceCatalog_Has8Services()
+    public void MicroserviceCatalog_IsEmptyLegacyFallback()
     {
+        // MicroserviceCatalog.All is now empty — services are dynamically derived
+        // from requirements by ArchitectAgent via ServiceCatalogResolver.
         var services = GNex.Core.Models.MicroserviceCatalog.All;
-        services.Should().HaveCount(8);
-        services.Select(s => s.Name).Should().OnlyHaveUniqueItems();
-        services.Select(s => s.ApiPort).Should().OnlyHaveUniqueItems();
-        services.Select(s => s.Schema).Should().OnlyHaveUniqueItems();
+        services.Should().BeEmpty("services are now dynamically derived, not hardcoded");
     }
 
     [Fact]
-    public void MicroserviceCatalog_AllServicesHaveEntities()
+    public void ServiceCatalogResolver_PrefersContextDerivedServices()
     {
-        foreach (var svc in MicroserviceCatalog.All)
+        var ctx = new AgentContext();
+        ctx.DerivedServices.Add(new MicroserviceDefinition
         {
-            svc.Entities.Should().NotBeEmpty($"{svc.Name} should have entities");
-            svc.Namespace.Should().NotBeNullOrEmpty();
-            svc.ProjectName.Should().NotBeNullOrEmpty();
-            svc.DbContextName.Should().NotBeNullOrEmpty();
-        }
+            Name = "TestService", ShortName = "Test", Schema = "test",
+            Description = "Test service", ApiPort = 5100,
+            Entities = ["Entity1"], DependsOn = []
+        });
+
+        var services = ServiceCatalogResolver.GetServices(ctx);
+        services.Should().HaveCount(1);
+        services[0].Name.Should().Be("TestService");
+    }
+
+    [Fact]
+    public void ServiceCatalogResolver_FallsBackToEmptyCatalog()
+    {
+        var ctx = new AgentContext();
+        var services = ServiceCatalogResolver.GetServices(ctx);
+        services.Should().BeEmpty("empty DerivedServices and empty MicroserviceCatalog");
     }
 }

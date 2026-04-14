@@ -84,6 +84,10 @@
                             <input class="form-check-input" type="checkbox" id="chkExecDdl" checked />
                             <label class="form-check-label" for="chkExecDdl">Execute DDL</label>
                         </div>
+                        <div class="form-check form-switch ms-4">
+                            <input class="form-check-input" type="checkbox" id="chkCommLog" checked />
+                            <label class="form-check-label" for="chkCommLog">Agent Comm Log</label>
+                        </div>
                     </div>
                 </div>
                 <!-- Project Domain -->
@@ -1612,7 +1616,7 @@
             'portGateway', 'portKafka',
             'selectDomain', 'inputDomainDesc'
         ];
-        const CONFIG_CHECKS = ['chkSpinDocker', 'chkExecDdl'];
+        const CONFIG_CHECKS = ['chkSpinDocker', 'chkExecDdl', 'chkCommLog'];
 
         async function saveConfig() {
             const cfg = {};
@@ -1896,7 +1900,8 @@
                 orchestratorInstructions: document.getElementById('inputInstructions').value.trim(),
                 servicePorts: collectDynamicPorts(),
                 projectDomain: document.getElementById('selectDomain').value || null,
-                projectDomainDescription: document.getElementById('inputDomainDesc').value.trim() || null
+                projectDomainDescription: document.getElementById('inputDomainDesc').value.trim() || null,
+                enableAgentCommunicationLogging: document.getElementById('chkCommLog').checked
             };
 
             appendLog('system', `Starting pipeline — reqs: ${body.requirementsPath}, output: ${body.outputPath}`);
@@ -2497,12 +2502,13 @@
                 if (data.findings !== undefined)
                     document.getElementById('statFindings').textContent = data.findings;
 
-                // Update buttons
-                const stillRunning = Object.values(nocState.agentStatuses).some(s => s === 1);
+                // Update buttons — 'restored' means server restarted, pipeline is NOT actually running
+                const isRestored = data.status === 'restored';
+                const stillRunning = !isRestored && Object.values(nocState.agentStatuses).some(s => s === 1);
                 document.getElementById('btnRunPipeline').disabled = stillRunning || data.status === 'active';
                 document.getElementById('btnStopPipeline').disabled = !stillRunning && data.status !== 'active';
 
-                if (data.completed) {
+                if (data.completed || isRestored) {
                     document.getElementById('btnRunPipeline').disabled = false;
                     document.getElementById('btnStopPipeline').disabled = true;
                 }

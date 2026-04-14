@@ -1,0 +1,32 @@
+{
+  "runId": "9dcdbde6b4d840b4a3a57da03248de40",
+  "completed": false,
+  "completedAt": null,
+  "lastUpdated": "2026-04-14T16:46:10.5974987+00:00",
+  "requirementCount": 0,
+  "artifactCount": 0,
+  "findingCount": 0,
+  "testDiagnosticCount": 0,
+  "backlogCount": 0,
+  "durationMs": 0,
+  "agentStatuses": {
+    "Orchestrator": "Running",
+    "RequirementsReader": "Completed",
+    "RequirementsExpander": "Running"
+  },
+  "agentMessages": {
+    "Orchestrator": "Entering stage: Requirements",
+    "RequirementsReader": "Skipped (completed in prior run)",
+    "RequirementsExpander": "Requirements Expander starting..."
+  },
+  "agentElapsed": {
+    "Orchestrator": 0,
+    "RequirementsReader": 0,
+    "RequirementsExpander": 0
+  },
+  "agentArtifacts": {},
+  "agentFindings": {},
+  "agentRetries": {},
+  "backlogItems": [],
+  "derivedServices": []
+}

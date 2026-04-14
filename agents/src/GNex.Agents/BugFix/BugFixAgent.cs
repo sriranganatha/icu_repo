@@ -52,6 +52,14 @@ public sealed class BugFixAgent : IAgent
         if (feedback.Count > 0)
             _logger.LogInformation("BugFixAgent received {Count} feedback items", feedback.Count);
 
+        // Read upstream agent results for prioritization
+        if (context.AgentResults.TryGetValue(AgentType.Testing, out var testResult) && testResult.Success)
+            _logger.LogInformation("BugFixAgent consuming Testing results for test-failure-driven fix prioritization");
+        if (context.AgentResults.TryGetValue(AgentType.Build, out var buildResult) && !buildResult.Success)
+            _logger.LogInformation("BugFixAgent consuming Build results — build failed, prioritizing compilation errors");
+        if (context.AgentResults.TryGetValue(AgentType.Review, out var reviewResult) && reviewResult.Success)
+            _logger.LogInformation("BugFixAgent consuming Review results: {Summary}", reviewResult.Summary);
+
         // Read historical learnings — known fix patterns from prior runs
         var learnings = context.GetLearningsForAgent(Type);
         if (learnings.Count > 0)
@@ -114,6 +122,10 @@ public sealed class BugFixAgent : IAgent
             // Agent completes its own claimed work items
             foreach (var item in context.CurrentClaimedItems)
                 context.CompleteWorkItem?.Invoke(item);
+
+            // Notify Build agent to re-verify after fixes
+            if (fixedCount > 0)
+                context.WriteFeedback(AgentType.Build, Type, $"BugFix resolved {fixedCount} findings — verify build after applied fixes.");
 
             await Task.CompletedTask;
 

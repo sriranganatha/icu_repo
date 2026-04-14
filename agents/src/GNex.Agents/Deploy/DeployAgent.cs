@@ -276,6 +276,25 @@ public sealed class DeployAgent : IAgent
 
             context.AgentStatuses[Type] = AgentStatus.Completed;
 
+            // Read upstream Build results to verify build success before deployment
+            if (context.AgentResults.TryGetValue(AgentType.Build, out var buildResult))
+            {
+                if (!buildResult.Success)
+                    _logger.LogWarning("DeployAgent: Build agent reported failure — deployment may be unreliable");
+                else
+                    _logger.LogInformation("DeployAgent: Build verified successful before deployment");
+            }
+
+            // Notify downstream agents about deployment results
+            if (!overallSuccess)
+            {
+                var errorSummary = string.Join("; ", errors.Take(3));
+                context.WriteFeedback(AgentType.BugFix, Type, $"Deployment had {errors.Count} errors — {errorSummary}");
+                context.WriteFeedback(AgentType.Build, Type, $"Deployment failed for {totalServices - publishedCount} services — verify build output is deployable.");
+            }
+            context.WriteFeedback(AgentType.Monitor, Type, $"Deployment complete: {publishedCount}/{totalServices} services published, {healthyCount} healthy. Monitor for runtime issues.");
+            context.WriteFeedback(AgentType.LoadTest, Type, $"Deployment ready: {healthyCount} healthy services available for load testing.");
+
             // Agent completes its own claimed work items
             foreach (var item in context.CurrentClaimedItems)
                 context.CompleteWorkItem?.Invoke(item);

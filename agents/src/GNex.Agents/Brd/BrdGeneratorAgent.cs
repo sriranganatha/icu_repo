@@ -262,9 +262,9 @@ public sealed class BrdGeneratorAgent : IAgent
         // Assumptions and Constraints
         brd.Assumptions =
         [
-            "PostgreSQL 16+ is the primary data store.",
-            "The system runs on .NET 10 with microservice architecture.",
-            "Kafka is used for async inter-service communication.",
+            $"{context.DatabaseLabel()} is the primary data store.",
+            $"The system runs on {context.FrameworkLabel()} with microservice architecture.",
+            $"{context.MessagingLabel()} is used for async inter-service communication.",
             "Standard integration protocols apply."
         ];
         brd.Constraints =

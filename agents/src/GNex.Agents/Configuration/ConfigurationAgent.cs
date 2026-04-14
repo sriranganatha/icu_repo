@@ -71,14 +71,14 @@ public sealed class ConfigurationAgent : IAgent
                     var configPrompt = new LlmPrompt
                     {
                         SystemPrompt = $$"""
-                            You are a senior .NET 8 DevOps engineer generating per-environment configuration.
+                            You are a {{context.SeniorRoleLabel("DevOps engineer")}} generating per-environment configuration.
                             Generate production-quality appsettings JSON for microservices.
                             Return ONLY valid JSON, no comments or explanations.
 
                             {{(!string.IsNullOrWhiteSpace(llmContext) ? llmContext : "")}}
                             """,
                         UserPrompt = $"""
-                            Generate an appsettings.{env}.json for a .NET 8 microservice "{svc.Name}" (port {svc.ApiPort})
+                            Generate an appsettings.{env}.json for a {context.FrameworkLabel()} microservice "{svc.Name}" (port {svc.ApiPort})
                             in a microservices platform. Service description: {svc.Description}
                             
                             Include:
@@ -122,7 +122,7 @@ public sealed class ConfigurationAgent : IAgent
             var ffPrompt = new LlmPrompt
             {
                 SystemPrompt = $$"""
-                    You are a senior .NET 8 DevOps engineer designing feature flag configurations.
+                    You are a {{context.SeniorRoleLabel("DevOps engineer")}} designing feature flag configurations.
                     Return ONLY valid JSON array of feature flag objects.
 
                     {{(!string.IsNullOrWhiteSpace(llmContext) ? llmContext : "")}}

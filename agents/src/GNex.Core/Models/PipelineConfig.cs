@@ -42,6 +42,32 @@ public sealed class PipelineConfig
     // Orchestrator instructions — user-provided directives to guide the pipeline
     public string OrchestratorInstructions { get; init; } = string.Empty;
 
+    /// <summary>
+    /// When true, all inter-agent communication (WriteFeedback, ReadFeedback, DispatchFindings,
+    /// AgentResults) is logged to CommunicationLog on AgentContext and persisted to DB.
+    /// Agents can read these logs for self-improvement and runtime analysis.
+    /// </summary>
+    public bool EnableAgentCommunicationLogging { get; init; } = true;
+
+    /// <summary>
+    /// When non-null, the pipeline is resuming from a prior interrupted run.
+    /// Agents whose names appear in this set will be skipped (they already completed).
+    /// </summary>
+    public HashSet<string>? ResumeCompletedAgents { get; set; }
+
+    /// <summary>
+    /// Pre-loaded requirements from a prior completed RequirementsReader run.
+    /// When resuming, these are injected into the context so downstream agents
+    /// (RequirementsExpander, etc.) have data to work with.
+    /// </summary>
+    public List<Requirement>? ResumeRequirements { get; set; }
+
+    /// <summary>Pre-loaded expanded requirements (backlog items) from a prior run for resume.</summary>
+    public List<ExpandedRequirement>? ResumeExpandedRequirements { get; set; }
+
+    /// <summary>Pre-loaded DerivedServices from a prior Architect run for resume.</summary>
+    public List<MicroserviceDefinition>? ResumeDerivedServices { get; set; }
+
     // Service port mapping — dynamic, populated from DerivedServices or user overrides
     public Dictionary<string, int> ServicePorts { get; init; } = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -61,4 +87,12 @@ public sealed class PipelineConfig
     public string DomainContext => string.IsNullOrWhiteSpace(ProjectDomainDescription)
         ? (string.IsNullOrWhiteSpace(ProjectDomain) ? "a generic software platform" : $"a {ProjectDomain} software platform")
         : ProjectDomainDescription;
+
+    /// <summary>
+    /// Optional callback for incremental work-item persistence. When set, agents can call this
+    /// to save expanded requirements to the DB mid-execution so data survives crashes.
+    /// Parameters: (runId, projectId, items).
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public Action<string, string?, IReadOnlyList<ExpandedRequirement>>? PersistWorkItems { get; set; }
 }

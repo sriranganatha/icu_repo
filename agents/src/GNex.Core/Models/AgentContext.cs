@@ -61,6 +61,8 @@ public sealed class AgentContext
     public int DevIteration { get; set; }
     /// <summary>Progress callback — agents call this to emit real-time running commentary to the dashboard. Pass (AgentType, message).</summary>
     public Func<AgentType, string, Task>? ReportProgress { get; set; }
+    /// <summary>Incremental persistence callback — agents call this after producing work items so they survive crashes. Pass (runId, items).</summary>
+    public Action<string, IReadOnlyList<ExpandedRequirement>>? PersistWorkItems { get; set; }
     public DateTimeOffset StartedAt { get; init; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? CompletedAt { get; set; }
     /// <summary>Set to true after the first DDL approval in this run — prevents re-prompting on agent re-dispatch.</summary>
@@ -127,6 +129,13 @@ public sealed class AgentContext
     /// and ServiceLayerAgent reads it on requeue).
     /// </summary>
     public ConcurrentDictionary<AgentType, ConcurrentBag<string>> AgentFeedback { get; set; } = new();
+
+    /// <summary>
+    /// In-memory log of all inter-agent communication events during this pipeline run.
+    /// Populated when <see cref="PipelineConfig.EnableAgentCommunicationLogging"/> is true.
+    /// Agents can read this for self-improvement; persisted to DB after pipeline completion.
+    /// </summary>
+    public ConcurrentBag<AgentCommunicationEntry> CommunicationLog { get; set; } = [];
 
     // ── Project-scoping helper ──────────────────────────────────
 

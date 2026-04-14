@@ -45,6 +45,17 @@ public sealed class BuildAgent : IAgent
 
         try
         {
+            // Read feedback from other agents (Refactoring writes to Build)
+            var feedback = context.ReadFeedback(Type);
+            if (feedback.Count > 0)
+                _logger.LogInformation("BuildAgent received {Count} feedback items from Refactoring/other agents", feedback.Count);
+
+            // Read upstream agent results for targeted rebuild awareness
+            if (context.AgentResults.TryGetValue(AgentType.Refactoring, out var refactorResult) && refactorResult.Success)
+                _logger.LogInformation("BuildAgent consuming Refactoring results: {Summary}", refactorResult.Summary);
+            if (context.AgentResults.TryGetValue(AgentType.BugFix, out var bugFixResult) && bugFixResult.Success)
+                _logger.LogInformation("BuildAgent consuming BugFix results: {Summary}", bugFixResult.Summary);
+
             var outputPath = context.OutputBasePath;
             if (string.IsNullOrWhiteSpace(outputPath) || !Directory.Exists(outputPath))
             {
@@ -134,7 +145,7 @@ public sealed class BuildAgent : IAgent
                 report.AppendLine("## AI Fix Suggestions");
                 var errorBlock = string.Join("\n", buildErrors.Select(e => $"{e.File}({e.Line}): error {e.Code}: {e.Message}"));
                 var prompt = $"""
-                    You are an expert .NET 8 developer. Analyze these build errors and suggest precise fixes.
+                    You are an {context.ExpertRoleLabel()}. Analyze these build errors and suggest precise fixes.
                     For each error, provide: 1) Root cause 2) Fix (code snippet if applicable).
                     Keep suggestions concise.
 
@@ -199,6 +210,20 @@ public sealed class BuildAgent : IAgent
             context.Artifacts.AddRange(artifacts);
             context.Findings.AddRange(findings);
             context.AgentStatuses[Type] = buildOk ? AgentStatus.Completed : AgentStatus.Failed;
+
+            // Dispatch build findings as feedback to responsible code-gen agents
+            if (findings.Count > 0)
+                context.DispatchFindingsAsFeedback(Type, findings);
+
+            // Notify code-gen agents about build failures so they can fix on next iteration
+            if (!buildOk)
+            {
+                var errorSummary = string.Join("; ", buildErrors.Take(5).Select(e => $"{Path.GetFileName(e.File)}({e.Line}): {e.Message}"));
+                context.WriteFeedback(AgentType.Database, Type, $"Build failed with {buildErrors.Count} errors. DB-related: {errorSummary}");
+                context.WriteFeedback(AgentType.ServiceLayer, Type, $"Build failed with {buildErrors.Count} errors. Service-related: {errorSummary}");
+                context.WriteFeedback(AgentType.Application, Type, $"Build failed with {buildErrors.Count} errors. App-related: {errorSummary}");
+                context.WriteFeedback(AgentType.BugFix, Type, $"Build failed — {buildErrors.Count} compilation errors need fixing: {errorSummary}");
+            }
 
             // Agent completes its own claimed work items
             foreach (var item in context.CurrentClaimedItems)

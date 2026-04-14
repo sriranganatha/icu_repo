@@ -1,17 +1,29 @@
 {
-  "runId": "reset",
+  "runId": "8955a48f358548bcb24d5ba8c040df53",
   "completed": false,
   "completedAt": null,
-  "lastUpdated": "2026-04-12T18:53:28.1019453+00:00",
+  "lastUpdated": "2026-04-13T15:32:56.1676437+00:00",
   "requirementCount": 0,
   "artifactCount": 0,
   "findingCount": 0,
   "testDiagnosticCount": 0,
   "backlogCount": 0,
   "durationMs": 0,
-  "agentStatuses": {},
-  "agentMessages": {},
-  "agentElapsed": {},
+  "agentStatuses": {
+    "Orchestrator": "Running",
+    "RequirementsReader": "Completed",
+    "RequirementsExpander": "Running"
+  },
+  "agentMessages": {
+    "Orchestrator": "Entering stage: Requirements",
+    "RequirementsReader": "Extracted 470 requirements, built domain model with 0 entities",
+    "RequirementsExpander": "  Phase 1 batch 14/19: converting 5 enriched requirements to Epics..."
+  },
+  "agentElapsed": {
+    "Orchestrator": 0,
+    "RequirementsReader": 33892.9335,
+    "RequirementsExpander": 0
+  },
   "agentArtifacts": {},
   "agentFindings": {},
   "agentRetries": {},

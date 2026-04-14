@@ -123,6 +123,7 @@ public sealed class SignalRPipelineEventSink : IPipelineEventSink
             if (agent is AgentType.Architect && ctx.DerivedServices.Count > 0)
             {
                 _stateStore.TrackDerivedServices(runId, ctx.DerivedServices);
+                _db.SaveDerivedServices(runId, ctx.DerivedServices);
             }
 
             // After Backlog, RequirementsExpander, or any code-gen agent — save backlog items
@@ -157,9 +158,59 @@ public sealed class SignalRPipelineEventSink : IPipelineEventSink
                     ExpectedResult = e.ExpectedResult, ActualResult = e.ActualResult,
                     // Gap-analysis fields
                     AffectedServices = e.AffectedServices, ProducedBy = e.ProducedBy,
+                    MatchingArtifactPaths = e.MatchingArtifactPaths, IdentifiedGaps = e.IdentifiedGaps,
                     Coverage = e.Coverage.ToString(),
                     CreatedAt = e.CreatedAt, StartedAt = e.StartedAt, CompletedAt = e.CompletedAt,
                     AssignedAgent = e.AssignedAgent
+                }));
+            }
+
+            // After any code-gen, testing, or review agent — incrementally save artifacts
+            if (ctx.Artifacts.Count > 0 &&
+                agent is AgentType.Database or AgentType.ServiceLayer or AgentType.Application
+                    or AgentType.Integration or AgentType.Testing or AgentType.Build
+                    or AgentType.Infrastructure or AgentType.PlatformBuilder
+                    or AgentType.Security or AgentType.HipaaCompliance or AgentType.Soc2Compliance
+                    or AgentType.Observability or AgentType.AccessControl or AgentType.Deploy
+                    or AgentType.Migration or AgentType.Configuration or AgentType.UiUx
+                    or AgentType.Refactoring or AgentType.LoadTest or AgentType.Performance
+                    or AgentType.ApiDocumentation or AgentType.BugFix)
+            {
+                _db.SaveArtifacts(runId, ctx.Artifacts.Select(a => new ArtifactRow
+                {
+                    Id = a.Id, ProjectId = ctx.ProjectId, Layer = a.Layer.ToString(),
+                    RelativePath = a.RelativePath, FileName = a.FileName, Namespace = a.Namespace,
+                    ProducedBy = a.ProducedBy.ToString(), ContentLength = a.Content.Length,
+                    Content = a.Content,
+                    TracedReqIds = a.TracedRequirementIds, GeneratedAt = a.GeneratedAt
+                }));
+            }
+
+            // After testing/review agents — incrementally save findings
+            if (ctx.Findings.Count > 0 &&
+                agent is AgentType.Testing or AgentType.Review or AgentType.Security
+                    or AgentType.CodeQuality or AgentType.Performance or AgentType.BugFix
+                    or AgentType.Supervisor or AgentType.HipaaCompliance or AgentType.Soc2Compliance)
+            {
+                _db.SaveFindings(runId, ctx.Findings.Select(f => new FindingRow
+                {
+                    Id = f.Id, ProjectId = ctx.ProjectId, ArtifactId = f.ArtifactId, FilePath = f.FilePath,
+                    LineNumber = f.LineNumber, Severity = f.Severity.ToString(),
+                    Category = f.Category, Message = f.Message,
+                    Suggestion = f.Suggestion, TracedRequirementId = f.TracedRequirementId
+                }));
+            }
+
+            // After testing agents — incrementally save test diagnostics
+            if (ctx.TestDiagnostics.Count > 0 &&
+                agent is AgentType.Testing or AgentType.LoadTest or AgentType.Performance or AgentType.BugFix)
+            {
+                _db.SaveTestDiagnostics(runId, ctx.TestDiagnostics.Select(d => new TestDiagRow
+                {
+                    Id = d.Id, ProjectId = ctx.ProjectId, TestName = d.TestName, AgentUnderTest = d.AgentUnderTest,
+                    Outcome = d.Outcome.ToString(), Diagnostic = d.Diagnostic,
+                    Remediation = d.Remediation, Category = d.Category,
+                    DurationMs = d.DurationMs, AttemptNumber = d.AttemptNumber, Timestamp = d.Timestamp
                 }));
             }
         }

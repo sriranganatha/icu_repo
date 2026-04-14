@@ -112,6 +112,18 @@ public sealed class DodVerificationAgent : IAgent
 
         context.AgentStatuses[Type] = AgentStatus.Completed;
 
+        // Dispatch DOD findings as feedback to responsible agents for remediation
+        var dodFindings = context.Findings.Where(f => f.Category == "DodVerification").ToList();
+        if (dodFindings.Count > 0)
+            context.DispatchFindingsAsFeedback(Type, dodFindings);
+
+        // Notify specific agents about incomplete DOD items
+        if (reopenedCount > 0)
+        {
+            context.WriteFeedback(AgentType.BugFix, Type, $"DOD verification reopened {reopenedCount} items — review and fix incomplete implementations.");
+            context.WriteFeedback(AgentType.Testing, Type, $"DOD verification found {reopenedCount} incomplete items — ensure test coverage for DOD criteria.");
+        }
+
         return new AgentResult
         {
             Agent = Type,
@@ -281,9 +293,39 @@ public sealed class DodVerificationAgent : IAgent
             return true;
         }
 
+        // ── Pattern: content-based check for "tenant" / "audit" in artifact code ──
+        if (dodLower.Contains("tenant"))
+        {
+            var hasTenantId = allRelevant.Any(a =>
+                a.Content.Contains("TenantId", StringComparison.OrdinalIgnoreCase));
+            if (!hasTenantId)
+            {
+                reason = "No artifacts contain TenantId property for multi-tenant support";
+                return false;
+            }
+
+            reason = string.Empty;
+            return true;
+        }
+
+        if (dodLower.Contains("audit"))
+        {
+            var hasAudit = allRelevant.Any(a =>
+                a.Content.Contains("CreatedAt", StringComparison.OrdinalIgnoreCase) &&
+                a.Content.Contains("UpdatedAt", StringComparison.OrdinalIgnoreCase));
+            if (!hasAudit)
+            {
+                reason = "No artifacts contain audit columns (CreatedAt/UpdatedAt)";
+                return false;
+            }
+
+            reason = string.Empty;
+            return true;
+        }
+
         // ── Pattern: "security" / "compliance" / "access control" DOD items ──
         if (dodLower.Contains("security") || dodLower.Contains("compliance") ||
-            dodLower.Contains("rbac") || dodLower.Contains("access control") || dodLower.Contains("audit"))
+            dodLower.Contains("rbac") || dodLower.Contains("access control"))
         {
             var secArtifacts = allRelevant.Where(a =>
                 a.Layer == ArtifactLayer.Security ||
@@ -323,36 +365,6 @@ public sealed class DodVerificationAgent : IAgent
             if (obsArtifacts.Count == 0)
             {
                 reason = "No observability artifacts found for this item";
-                return false;
-            }
-
-            reason = string.Empty;
-            return true;
-        }
-
-        // ── Pattern: content-based check for "tenant" / "audit" in artifact code ──
-        if (dodLower.Contains("tenant"))
-        {
-            var hasTenantId = allRelevant.Any(a =>
-                a.Content.Contains("TenantId", StringComparison.OrdinalIgnoreCase));
-            if (!hasTenantId)
-            {
-                reason = "No artifacts contain TenantId property for multi-tenant support";
-                return false;
-            }
-
-            reason = string.Empty;
-            return true;
-        }
-
-        if (dodLower.Contains("audit"))
-        {
-            var hasAudit = allRelevant.Any(a =>
-                a.Content.Contains("CreatedAt", StringComparison.OrdinalIgnoreCase) &&
-                a.Content.Contains("UpdatedAt", StringComparison.OrdinalIgnoreCase));
-            if (!hasAudit)
-            {
-                reason = "No artifacts contain audit columns (CreatedAt/UpdatedAt)";
                 return false;
             }
 

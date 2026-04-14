@@ -61,6 +61,14 @@ public sealed class ApplicationAgent : IAgent
                     await context.ReportProgress(Type, $"Incorporating {feedback.Count} feedback items from Review/Monitor/Supervisor");
             }
 
+            // Read upstream agent results for cross-agent awareness
+            if (context.AgentResults.TryGetValue(AgentType.Database, out var dbResult) && dbResult.Success)
+                _logger.LogInformation("ApplicationAgent consuming Database results: {Summary}", dbResult.Summary);
+            if (context.AgentResults.TryGetValue(AgentType.ServiceLayer, out var svcResult) && svcResult.Success)
+                _logger.LogInformation("ApplicationAgent consuming ServiceLayer results: {Summary}", svcResult.Summary);
+            if (context.AgentResults.TryGetValue(AgentType.Architect, out var archResult) && archResult.Success)
+                _logger.LogInformation("ApplicationAgent consuming Architect results for API design patterns");
+
             // Read historical learnings from previous pipeline runs
             var learnings = context.GetLearningsForAgent(Type);
             if (learnings.Count > 0)
@@ -79,8 +87,8 @@ public sealed class ApplicationAgent : IAgent
                     await context.ReportProgress(Type, $"Applying architecture/platform guidance: {guidance}");
                 artifacts.Add(GenerateGatewayProgram());
                 artifacts.Add(GenerateGatewayAppSettingsRoutes(scopedServices));
-                artifacts.Add(GenerateGatewayDockerfile());
-                artifacts.Add(GenerateGatewayCsproj());
+                artifacts.Add(GenerateGatewayDockerfile(context));
+                artifacts.Add(GenerateGatewayCsproj(context));
             }
 
             // Per-microservice API — only new services
@@ -91,8 +99,8 @@ public sealed class ApplicationAgent : IAgent
                 if (context.ReportProgress is not null)
                     await context.ReportProgress(Type, $"Generating minimal API for {svc.Name} (port {svc.ApiPort}) — {svc.Entities.Length} entity endpoints, health check, Dockerfile");
                 artifacts.Add(GenerateServiceProgram(svc));
-                artifacts.Add(GenerateServiceCsproj(svc));
-                artifacts.Add(GenerateServiceDockerfile(svc));
+                artifacts.Add(GenerateServiceCsproj(svc, context));
+                artifacts.Add(GenerateServiceDockerfile(svc, context));
                 artifacts.Add(GenerateServiceAppSettings(svc));
                 artifacts.Add(GenerateHealthCheck(svc));
 
@@ -119,6 +127,11 @@ public sealed class ApplicationAgent : IAgent
             // Agent completes its own claimed work items
             foreach (var item in context.CurrentClaimedItems)
                 context.CompleteWorkItem?.Invoke(item);
+
+            // Notify downstream agents about API endpoints generated
+            var svcNames = string.Join(", ", scopedServices.Select(s => s.Name));
+            context.WriteFeedback(AgentType.Testing, Type, $"Application layer ready: API Gateway + {scopedServices.Count} minimal API services ({svcNames}). Generate API endpoint integration tests.");
+            context.WriteFeedback(AgentType.Deploy, Type, $"Application layer ready: {scopedServices.Count + 1} Dockerfiles generated (Gateway + {svcNames}). Configure deployment manifests.");
 
             await Task.CompletedTask;
             return new AgentResult
@@ -252,17 +265,17 @@ public sealed class ApplicationAgent : IAgent
         };
     }
 
-    private static CodeArtifact GenerateGatewayCsproj() => new()
+    private static CodeArtifact GenerateGatewayCsproj(AgentContext context) => new()
     {
         Layer = ArtifactLayer.Configuration,
         RelativePath = "GNex.ApiGateway/GNex.ApiGateway.csproj",
         FileName = "GNex.ApiGateway.csproj",
         Namespace = "GNex.ApiGateway",
         ProducedBy = AgentType.Application,
-        Content = """
+        Content = $"""
             <Project Sdk="Microsoft.NET.Sdk.Web">
               <PropertyGroup>
-                <TargetFramework>net8.0</TargetFramework>
+                <TargetFramework>{context.TargetFrameworkMoniker()}</TargetFramework>
                 <Nullable>enable</Nullable>
                 <ImplicitUsings>enable</ImplicitUsings>
               </PropertyGroup>
@@ -273,19 +286,19 @@ public sealed class ApplicationAgent : IAgent
             """
     };
 
-    private static CodeArtifact GenerateGatewayDockerfile() => new()
+    private static CodeArtifact GenerateGatewayDockerfile(AgentContext context) => new()
     {
         Layer = ArtifactLayer.Configuration,
         RelativePath = "GNex.ApiGateway/Dockerfile",
         FileName = "Dockerfile",
         Namespace = "GNex.ApiGateway",
         ProducedBy = AgentType.Application,
-        Content = """
-            FROM mcr.microsoft.com/dotnet/aspnet:8.0-alpine AS base
+        Content = $"""
+            FROM {context.AspNetDockerImage()} AS base
             WORKDIR /app
             EXPOSE 8080
 
-            FROM mcr.microsoft.com/dotnet/sdk:8.0-alpine AS build
+            FROM {context.SdkDockerImage()} AS build
             WORKDIR /src
             COPY GNex.ApiGateway/ GNex.ApiGateway/
             RUN dotnet publish GNex.ApiGateway/GNex.ApiGateway.csproj -c Release -o /app/publish
@@ -377,30 +390,30 @@ public sealed class ApplicationAgent : IAgent
         };
     }
 
-    private static CodeArtifact GenerateServiceCsproj(MicroserviceDefinition svc) => new()
+    private static CodeArtifact GenerateServiceCsproj(MicroserviceDefinition svc, AgentContext context) => new()
     {
         Layer = ArtifactLayer.Configuration,
         RelativePath = $"{svc.ProjectName}/{svc.ProjectName}.csproj",
         FileName = $"{svc.ProjectName}.csproj",
         Namespace = svc.Namespace,
         ProducedBy = AgentType.Application,
-        Content = """
+        Content = $"""
             <Project Sdk="Microsoft.NET.Sdk.Web">
               <PropertyGroup>
-                <TargetFramework>net8.0</TargetFramework>
+                <TargetFramework>{context.TargetFrameworkMoniker()}</TargetFramework>
                 <Nullable>enable</Nullable>
                 <ImplicitUsings>enable</ImplicitUsings>
               </PropertyGroup>
               <ItemGroup>
-                <PackageReference Include="Microsoft.EntityFrameworkCore" Version="8.0.6" />
-                <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="8.0.4" />
-                <PackageReference Include="Confluent.Kafka" Version="2.4.0" />
+                <PackageReference Include="Microsoft.EntityFrameworkCore" Version="{context.EfCorePackageVersion()}" />
+                <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="{context.NpgsqlPackageVersion()}" />
+                <PackageReference Include="Confluent.Kafka" Version="{context.KafkaClientPackageVersion()}" />
               </ItemGroup>
             </Project>
             """
     };
 
-    private static CodeArtifact GenerateServiceDockerfile(MicroserviceDefinition svc) => new()
+    private static CodeArtifact GenerateServiceDockerfile(MicroserviceDefinition svc, AgentContext context) => new()
     {
         Layer = ArtifactLayer.Configuration,
         RelativePath = $"{svc.ProjectName}/Dockerfile",
@@ -408,11 +421,11 @@ public sealed class ApplicationAgent : IAgent
         Namespace = svc.Namespace,
         ProducedBy = AgentType.Application,
         Content = $"""
-            FROM mcr.microsoft.com/dotnet/aspnet:8.0-alpine AS base
+            FROM {context.AspNetDockerImage()} AS base
             WORKDIR /app
             EXPOSE 8080
 
-            FROM mcr.microsoft.com/dotnet/sdk:8.0-alpine AS build
+            FROM {context.SdkDockerImage()} AS build
             WORKDIR /src
             COPY {svc.ProjectName}/ {svc.ProjectName}/
             RUN dotnet publish {svc.ProjectName}/{svc.ProjectName}.csproj -c Release -o /app/publish

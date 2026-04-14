@@ -334,7 +334,7 @@ public sealed class PlanningAgent : IAgent
             new()
             {
                 Name = "Multi-Tenant Isolation",
-                Description = "Every entity must include TenantId. DbContext must apply query filters. RLS policies required in PostgreSQL.",
+                Description = $"Every entity must include TenantId. DbContext must apply query filters. RLS policies required in {context.DatabaseLabel()}.",
                 AffectsLayers = ["Database", "Service", "Testing"],
                 EnforcedBy = [AgentType.Database, AgentType.Review, AgentType.Security],
                 Priority = 1
@@ -358,7 +358,7 @@ public sealed class PlanningAgent : IAgent
             new()
             {
                 Name = "Event-Driven Integration",
-                Description = "Inter-service communication via Kafka with transactional outbox. Events use schema: {EntityName}Created, {EntityName}Updated.",
+                Description = $"Inter-service communication via {context.MessagingLabel()} with transactional outbox. Events use schema: {{EntityName}}Created, {{EntityName}}Updated.",
                 AffectsLayers = ["Service", "Integration"],
                 EnforcedBy = [AgentType.Integration, AgentType.Review],
                 Priority = 2
@@ -374,7 +374,7 @@ public sealed class PlanningAgent : IAgent
             new()
             {
                 Name = "Error Handling & Resilience",
-                Description = "Global exception middleware, retry policies for Kafka/HTTP, circuit breakers for inter-service calls, dead-letter queues.",
+                Description = $"Global exception middleware, retry policies for {context.MessagingLabel()}/HTTP, circuit breakers for inter-service calls, dead-letter queues.",
                 AffectsLayers = ["Application", "Integration", "Service"],
                 EnforcedBy = [AgentType.Performance, AgentType.Review],
                 Priority = 2
@@ -406,9 +406,9 @@ public sealed class PlanningAgent : IAgent
         var serviceList = string.Join(", ", services.Select(s => s.ServiceName));
 
         instructions[AgentType.Database] = FormatDbInstructions(services, plan);
-        instructions[AgentType.ServiceLayer] = FormatServiceInstructions(services, plan);
+        instructions[AgentType.ServiceLayer] = FormatServiceInstructions(services, plan, context);
         instructions[AgentType.Application] = FormatAppInstructions(services, plan);
-        instructions[AgentType.Integration] = FormatIntegrationInstructions(services, plan);
+        instructions[AgentType.Integration] = FormatIntegrationInstructions(services, plan, context);
         instructions[AgentType.Testing] = FormatTestInstructions(services, plan);
         instructions[AgentType.Security] = $"Scan all generated code for: OWASP Top 10, sensitive data exposure, missing auth, hardcoded secrets. Services: {serviceList}";
         instructions[AgentType.Review] = $"Full review pass: requirement traceability, code coverage, compliance checks, naming conventions. Focus on: {serviceList}";
@@ -433,7 +433,7 @@ public sealed class PlanningAgent : IAgent
         return sb.ToString();
     }
 
-    private static string FormatServiceInstructions(List<ServicePlan> services, ImplementationPlan plan)
+    private static string FormatServiceInstructions(List<ServicePlan> services, ImplementationPlan plan, AgentContext context)
     {
         var sb = new StringBuilder();
         sb.AppendLine("SERVICE LAYER IMPLEMENTATION PLAN:");
@@ -441,7 +441,7 @@ public sealed class PlanningAgent : IAgent
         {
             sb.AppendLine($"  Service: {svc.ServiceName}");
             sb.AppendLine($"  Generate per entity: DTOs (Create/Update/Response), I{{Entity}}Service interface, {{Entity}}Service implementation");
-            sb.AppendLine($"  Kafka events: publish {{Entity}}Created/Updated events via outbox pattern");
+            sb.AppendLine($"  {context.MessagingLabel()} events: publish {{Entity}}Created/Updated events via outbox pattern");
             if (svc.ApiContracts.Count > 0)
                 sb.AppendLine($"  Existing API contracts: {svc.ApiContracts.Count} endpoints — ensure backward compatibility");
             sb.AppendLine();
@@ -464,7 +464,7 @@ public sealed class PlanningAgent : IAgent
         return sb.ToString();
     }
 
-    private static string FormatIntegrationInstructions(List<ServicePlan> services, ImplementationPlan plan)
+    private static string FormatIntegrationInstructions(List<ServicePlan> services, ImplementationPlan plan, AgentContext context)
     {
         var sb = new StringBuilder();
         sb.AppendLine("INTEGRATION LAYER IMPLEMENTATION PLAN:");
@@ -473,7 +473,7 @@ public sealed class PlanningAgent : IAgent
             sb.AppendLine($"  Service: {svc.ServiceName}");
             sb.AppendLine($"  Publishes: {string.Join(", ", svc.PublishedEvents)}");
             sb.AppendLine($"  Consumes: {string.Join(", ", svc.ConsumedEvents)} (from: {string.Join(", ", svc.DependsOn)})");
-            sb.AppendLine($"  Pattern: Transactional outbox + consume with manual Kafka commit");
+            sb.AppendLine($"  Pattern: Transactional outbox + consume with manual {context.MessagingLabel()} commit");
             sb.AppendLine();
         }
         return sb.ToString();
@@ -503,10 +503,10 @@ public sealed class PlanningAgent : IAgent
             "OWASP Top 10 2025 — Injection, Broken Access, Cryptographic Failures, SSRF",
             "Clean Architecture — Domain → Application → Infrastructure → WebAPI",
             "Multi-Tenant — Schema-per-service, TenantId column, EF query filters, RLS",
-            "Event-Driven — Kafka with transactional outbox, idempotent consumers",
+            $"Event-Driven — {context.MessagingLabel()} with transactional outbox, idempotent consumers",
             "REST API — Minimal APIs, consistent error responses, pagination, HATEOAS links",
             "Observability — OpenTelemetry, Prometheus, structured logging, correlation IDs",
-            "Testing — xUnit + Moq, arrange-act-assert, test coverage > 80%",
+            $"Testing — {context.TestStackLabel()}, arrange-act-assert, test coverage > 80%",
             "Data Protection — Encryption at rest, audit logging, role-based access"
         ];
     }

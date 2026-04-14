@@ -261,6 +261,18 @@ public class AgentBacklogExecutionTests
         foreach (var item in claimedItems)
             context.ExpandedRequirements.Add(item);
 
+        // Agents need at least one DerivedService to generate artifacts
+        context.DerivedServices.Add(new MicroserviceDefinition
+        {
+            Name = "PatientService",
+            ShortName = "Patient",
+            Schema = "patient",
+            Description = "Manages patient profiles, contacts, and demographics",
+            ApiPort = 5100,
+            Entities = ["PatientProfile", "PatientAddress", "PatientContact", "Encounter"],
+            DependsOn = []
+        });
+
         return (context, completed);
     }
 
